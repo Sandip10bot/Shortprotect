@@ -1,11 +1,10 @@
 {
   "functions": {
-    "api/**/*.py": {
+    "api/index.py": {
       "runtime": "@vercel/python@3.9"
     }
   },
   "routes": [
-    { "src": "/shortlink/(.*)", "dest": "/api/shortener.py" },
-    { "src": "/token/(.*)", "dest": "/api/shortener.py" }
+    { "src": "/token/(.*)", "dest": "/api/index.py" }
   ]
 }
