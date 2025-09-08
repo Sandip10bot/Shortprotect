@@ -13,7 +13,7 @@ def generate_link(link_id: str):
     token = secrets.token_urlsafe(16)
     original_link = f"https://softurl.in/{link_id}"
     valid_tokens[token] = original_link
-    return {"protected": f"https://yourapp.vercel.app/go/{token}"}
+    return {"protected": f"https://mythobot.vercel.app/go/{token}"}
 
 @app.get("/go/{token}")
 def go(token: str):
