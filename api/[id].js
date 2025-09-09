@@ -1,6 +1,8 @@
 import express from "express";
 import { fetchFinalUrl } from "../utils/fetchFinalUrl.js";
 import { validateRequest } from "../utils/validate.js";
+const fetch = require("node-fetch");  // node-fetch@2 syntax
+
 
 const app = express();
 
