@@ -1,12 +1,13 @@
 {
   "name": "softurl-protector",
   "version": "1.0.0",
-  "description": "Protect SoftURL links from bypass bots and only allow legit step-by-step users.",
-  "main": "api/redirect.js",
+  "description": "SoftURL protector with step validation and final URL tracking",
+  "main": "api/[id].js",
   "scripts": {
-    "start": "node api/redirect.js"
+    "start": "node api/[id].js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "node-fetch": "^3.4.0"
   }
 }
