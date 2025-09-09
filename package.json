@@ -1,11 +1,7 @@
 {
   "name": "softurl-protector",
   "version": "1.0.0",
-  "description": "SoftURL protector with step validation and final URL tracking",
-  "main": "api/[id].js",
-  "scripts": {
-    "start": "node api/[id].js"
-  },
+  "type": "module",
   "dependencies": {
     "express": "^4.19.2",
     "node-fetch": "^3.4.0"
