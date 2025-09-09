@@ -1,9 +1,12 @@
 {
   "name": "softurl-protector",
   "version": "1.0.0",
-  "type": "module",
+  "main": "api/[id].js",
+  "scripts": {
+    "start": "node api/[id].js"
+  },
   "dependencies": {
     "express": "^4.19.2",
-    "node-fetch": "^3.4.0"
+    "node-fetch": "^2.6.9"
   }
 }
