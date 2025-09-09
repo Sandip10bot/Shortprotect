@@ -3,11 +3,18 @@ import { validateRequest } from "../utils/validate.js";
 
 const app = express();
 
-// Sample route to protect links
+// Root route
+app.get("/", (req, res) => {
+  res.send(`
+    <h1>🔒 SoftURL Protector Active</h1>
+    <p>Use a valid short link like <code>/abc123</code> to test.</p>
+  `);
+});
+
+// Dynamic short link route
 app.get("/:id", (req, res) => {
   const { id } = req.params;
 
-  // Step validation
   if (!validateRequest(req)) {
     return res.status(403).send(`
       <h2>🚫 Bypass Detected!</h2>
@@ -15,8 +22,7 @@ app.get("/:id", (req, res) => {
     `);
   }
 
-  // Normally you would fetch the actual URL from your DB
-  // For demo, let's pretend each ID maps to google.com
+  // Replace with your actual final URL logic
   const realUrl = "https://google.com";
 
   res.redirect(realUrl);
