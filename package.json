@@ -1,9 +1,12 @@
 {
-  "name": "shortprotect",
+  "name": "softurl-protector",
   "version": "1.0.0",
-  "main": "index.js",
-  "license": "MIT",
+  "description": "Protect SoftURL links from bypass bots and only allow legit step-by-step users.",
+  "main": "api/redirect.js",
+  "scripts": {
+    "start": "node api/redirect.js"
+  },
   "dependencies": {
-    "mongodb": "^6.8.0"
+    "express": "^4.19.2"
   }
 }
