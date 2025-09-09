@@ -1,6 +1,9 @@
 {
-  "rewrites": [
-    { "source": "/go", "destination": "/api/go" },
-    { "source": "/set", "destination": "/api/set" }
+  "version": 2,
+  "builds": [
+    { "src": "api/redirect.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "api/redirect.js" }
   ]
 }
