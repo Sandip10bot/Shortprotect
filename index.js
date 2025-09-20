@@ -58,11 +58,7 @@ app.get("/double/:userId/:token", async (req, res) => {
     return res.status(403).send("🚫 Bypass detected! Please open via Softurl link.");
   }
 
-  // Look up token in DB
-  const record = await doubleCollection.findOne({ user_id: userId, token, used: false });
-  if (!record) {
-    return res.status(400).send("❌ Invalid or expired token.");
-  }
+  
 
   // Mark token as used
   await doubleCollection.updateOne(
