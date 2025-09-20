@@ -1,60 +1,58 @@
 import express from "express";
+import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
-import { v4 as uuidv4 } from "uuid";
-import fetch from "node-fetch";
 
 dotenv.config();
+
 const app = express();
-const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const ALLOWED_REFERRER = process.env.ALLOWED_REFERRER || "softurl.in";
+const port = process.env.PORT || 3000;
 
-// Temporary token store
-const tokens = new Map();
+// ---------------- MongoDB Setup ----------------
+const client = new MongoClient(process.env.DATABASE_URI);
+let db, doubleCollection;
 
-// Fetch Softurl final URL dynamically
-async function getFinalUrl(slug) {
-    try {
-        const res = await fetch(`https://softurl.in/${slug}`, { redirect: "manual" });
-        const finalUrl = res.headers.get("location"); // Softurl Location header
-        return finalUrl;
-    } catch (e) {
-        console.log("Error fetching final URL:", e);
-        return null;
-    }
+async function connectDB() {
+    await client.connect();
+    db = client.db(process.env.DATABASE_NAME);
+    doubleCollection = db.collection("double_points");
 }
+connectDB().catch(console.error);
 
-// Step 1: Generate protected token link
-app.get("/token/:slug", (req, res) => {
-    const { slug } = req.params;
-    const token = uuidv4();
-    tokens.set(token, { slug, expire: Date.now() + 2 * 60 * 1000 }); // 2 minutes
-    res.send(`${BASE_URL}/redirect/${slug}?t=${token}`);
-});
-
-// Step 2: Redirect with token & referrer check
-app.get("/redirect/:slug", async (req, res) => {
-    const { slug } = req.params;
+// ---------------- Redirect Endpoint ----------------
+// Example URL: https://yourapp.koyeb.app/redirect/717YU?t=<token>
+app.get("/redirect/:shortid", async (req, res) => {
+    const shortid = req.params.shortid;
     const token = req.query.t;
-    const ref = req.get("Referer") || "";
 
-    // Referrer must include Softurl.in
-    if (!ref.includes(ALLOWED_REFERRER)) return res.send("🚫 Bypass Detected: Opened directly");
-
-    // Token validation
-    if (!token || !tokens.has(token)) return res.send("🚫 Bypass Detected: Invalid or missing token");
-    const tokenData = tokens.get(token);
-    if (Date.now() > tokenData.expire) {
-        tokens.delete(token);
-        return res.send("🚫 Token Expired");
+    if (!token) {
+        return res.status(403).send("❌ Bypass detected! No token provided.");
     }
 
-    tokens.delete(token);
+    // Fetch record from MongoDB
+    const record = await doubleCollection.findOne({ token });
 
-    const finalUrl = await getFinalUrl(slug);
-    if (!finalUrl) return res.send("❌ Cannot fetch target URL");
+    if (!record || record.used) {
+        return res.status(403).send("❌ Bypass detected or invalid/used token!");
+    }
 
-    res.redirect(finalUrl);
+    // Optional: Referrer check
+    const referer = req.get("referer") || "";
+    if (!referer.includes("softurl.in")) {
+        return res.status(403).send("❌ Bypass detected! Must click via Softurl.");
+    }
+
+    // Mark token as used
+    await doubleCollection.updateOne(
+        { token },
+        { $set: { used: true } }
+    );
+
+    // Redirect to Telegram start link
+    const finalTelegramLink = `https://t.me/${process.env.BOT_USERNAME}?start=double_${record.user_id}_${token}`;
+    res.redirect(finalTelegramLink);
 });
 
-app.listen(PORT, () => console.log(`Protect server running on port ${PORT}`));
+// ---------------- Health Check ----------------
+app.get("/", (req, res) => res.send("✅ Server is running"));
+
+app.listen(port, () => console.log(`Server running on port ${port}`));
