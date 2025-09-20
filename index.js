@@ -101,7 +101,7 @@ app.get("/double/:userId/:token", async (req, res) => {
     await doubleCollection.updateOne({ token }, { $set: { used: true, used_at: new Date() } });
 
     // Build bot start link (the bot will parse start param)
-    const botUsername = process.env.BOT_USERNAME || "YourBotUsername";
+    const botUsername = process.env.BOT_USERNAME || "MythoserialBot";
     const finalLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
 
     console.log(`Redirecting to bot start for user=${userId}`);
