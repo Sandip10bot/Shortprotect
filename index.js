@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MongoDB setup (use your Koyeb secret or .env variable)
-const MONGO_URI = process.env.MONGODB_URI;  // set this in Koyeb secrets
+const MONGO_URI = process.env.DATABASE_URI;  // set this in Koyeb secrets
 if (!MONGO_URI) {
   console.error("❌ Missing MONGODB_URI in environment variables");
   process.exit(1);
