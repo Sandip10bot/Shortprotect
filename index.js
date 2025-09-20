@@ -69,14 +69,14 @@ app.get("/double/:userId/:token", async (req, res) => {
   console.log("x-forwarded-for:", req.get("x-forwarded-for"));
   console.log("query:", req.query);
 
-  if (!token) return res.status(403).send("❌ Bypass detected! No token provided.");
+  if (!token) return res.status(403).send("❌ Bypass Detected!");
 
   try {
     const record = await doubleCollection.findOne({ token });
 
     if (!record) {
       console.warn("Token not found in DB:", token);
-      return res.status(403).send("❌ Bypass detected or invalid token!");
+      return res.status(403).send("❌ Bypass Detected");
     }
 
     if (record.used) {
@@ -94,7 +94,7 @@ app.get("/double/:userId/:token", async (req, res) => {
 
     if (!check.ok) {
       // If you want to see the headers while developing, keep these logs, otherwise comment them out.
-      return res.status(403).send(`🚫 Bypass detected! Reason: ${check.reason}`);
+      return res.status(403).send(`🚫 Bypass Detected! Reason: ${check.reason}`);
     }
 
     // Token ok and request looks legit — mark used and redirect
