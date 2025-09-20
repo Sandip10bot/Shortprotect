@@ -1,17 +1,22 @@
 {
-  "name": "my-shortener",
+  "name": "shortprotect",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
-    "next": "13.5.6",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
+    "next": "^13.5.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "mongodb": "^5.11.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0",
+    "eslint-config-next": "^13.5.6"
   },
   "engines": {
     "node": "20.x"
