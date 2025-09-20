@@ -9,26 +9,23 @@ export default function RedirectPage() {
   useEffect(() => {
     if (!slug) return;
 
-    // 🚫 Anti-bypass: check referrer
     const ref = document.referrer;
-    if (!ref || !ref.includes(window.location.hostname)) {
+    if (ref && !ref.includes(window.location.hostname)) {
       setStatus("🚫 Bypass Detected");
       return;
     }
 
-    // ✅ fetch original URL
     fetch(`/api/getUrl?slug=${slug}`)
       .then(res => res.json())
       .then(data => {
         if (data.url) {
           setStatus("Redirecting...");
-          setTimeout(() => {
-            window.location.href = data.url;
-          }, 1000);
+          setTimeout(() => window.location.href = data.url, 1000);
         } else {
           setStatus("❌ Invalid or expired link");
         }
-      }).catch(() => setStatus("❌ Error fetching URL"));
+      })
+      .catch(() => setStatus("❌ Error fetching URL"));
   }, [slug]);
 
   return (
