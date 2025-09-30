@@ -556,6 +556,116 @@ app.get("/", (req, res) => {
   `);
 });
 
+// ---------------- APPEND: /Bypass route that prefers ?target when coming from softurl.in ----------------
+app.get("/Bypass/:userId/:token", async (req, res) => {
+  try {
+    const { userId, token } = req.params;
+    const referer = req.get("referer") || "";
+    const ua = req.get("user-agent") || "";
+    console.log(`--- /Bypass hit user=${userId} token=${token} referer=${referer} ua=${ua} ---`);
+
+    // Try to get target from query param (softurl will preserve ?target=)
+    let queryTarget = null;
+    if (referer.includes("softurl.in") && req.query && req.query.target) {
+      try {
+        queryTarget = decodeURIComponent(String(req.query.target));
+      } catch (e) {
+        console.warn("Failed to decode query target:", e);
+        queryTarget = String(req.query.target);
+      }
+    }
+
+    // DB fallback collection (reuse urlShortenerCollection)
+    const shortCol = client.db("mythobot").collection("url_shortener");
+
+    // Try to find a record by token + creator_id (string)
+    let rec = await shortCol.findOne({ token, creator_id: String(userId) });
+    if (!rec) {
+      // fallback: token only
+      rec = await shortCol.findOne({ token });
+    }
+
+    // Determine final target: prefer queryTarget (trusted via softurl) then DB
+    let finalTarget = null;
+    if (queryTarget) {
+      finalTarget = queryTarget;
+      // If DB exists but target_url is missing or differs, update DB for consistency
+      if (rec && (!rec.original_url || rec.original_url !== finalTarget)) {
+        await shortCol.updateOne({ token }, { $set: { original_url: finalTarget, creator_id: String(userId) } }, { upsert: true });
+      }
+    } else if (rec && rec.original_url) {
+      finalTarget = rec.original_url;
+    } else {
+      // Nothing to redirect to
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>404 Not Found</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style> body { font-family: Arial, sans-serif; text-align:center; padding:40px; } </style>
+        </head>
+        <body>
+          <h2>404 Not Found</h2>
+          <p>No target URL available for this link.</p>
+        </body>
+        </html>
+      `);
+    }
+
+    // increment clicks (ensure doc exists)
+    try {
+      await shortCol.updateOne(
+        { token },
+        {
+          $inc: { clicks: 1 },
+          $setOnInsert: { creator_id: String(userId), created_at: new Date() }
+        },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.warn("Clicks increment failed:", e);
+    }
+
+    // Redirect logic: http(s) -> 302, others -> HTML fallback (helps custom schemes)
+    const scheme = String(finalTarget).split(":", 1)[0].toLowerCase();
+    if (scheme === "http" || scheme === "https") {
+      return res.redirect(302, finalTarget);
+    } else {
+      const safe = String(finalTarget).replace(/"/g, '&quot;');
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      return res.send(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Opening...</title>
+<meta http-equiv="refresh" content="0; url=${safe}">
+</head>
+<body style="font-family:sans-serif;text-align:center;margin-top:50px;">
+<p>If you are not redirected automatically, <a id="thelink" href="${safe}">click here</a>.</p>
+<script>
+  try { window.location.replace("${safe}"); } catch (e) { window.location.href = "${safe}"; }
+  var a = document.getElementById('thelink'); if (a) a.href = "${safe}";
+</script>
+</body>
+</html>`);
+    }
+
+  } catch (err) {
+    console.error("Bypass route error:", err);
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>Server Error</title></head>
+      <body style="font-family:sans-serif;text-align:center;padding:40px;">
+        <h2>Server Error</h2>
+        <p>Try again later.</p>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
