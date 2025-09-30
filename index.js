@@ -139,8 +139,8 @@ app.get("/double/:userId/:token", async (req, res) => {
 });
 
 // 🔹 Bypass protection for URL shortener with roast messages
-app.get("/bypass/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.get("/bypass/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
   
   console.log(`--- incoming /bypass request for user=${userId} ---`);
   console.log("referer:", req.get("referer"));
