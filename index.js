@@ -539,16 +539,7 @@ app.get("/", (req, res) => {
     <body>
       <h1>✅ MythoBot Server is Running</h1>
       
-      <div class="endpoints">
-        <h3>🛣️ Available Endpoints:</h3>
-        <ul>
-          <li><strong>/double/:userId/:token</strong> - Double points verification</li>
-          <li><strong>/bypass/:userId</strong> - URL bypass protection with roast messages 🤡</li>
-          <li><strong>/shorten?url=...&userId=...</strong> - Generate bypass URLs</li>
-          <li><strong>/stats/:userId</strong> - Access statistics</li>
-          <li><strong>/generate/:userId</strong> - Token generation</li>
-        </ul>
-      </div>
+      
 
       <div class="feature">
         <h3>🎯 New Bypass Protection Features:</h3>
