@@ -2,12 +2,11 @@
   "name": "softurl-protect",
   "version": "1.0.0",
   "type": "module",
-  "scripts": {
-    "start": "node index.js"
-  },
   "dependencies": {
     "express": "^4.18.2",
-    "mongodb": "^6.10.0",
-    "dotenv": "^16.3.1"
+    "mongodb": "^6.3.0"
+  },
+  "scripts": {
+    "start": "node index.js"
   }
 }
