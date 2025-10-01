@@ -26,16 +26,6 @@ async function connectDB() {
 }
 connectDB();
 
-// Helper function to encode URL in base64 using Buffer
-function encodeUrl(url) {
-  return Buffer.from(url).toString('base64url');
-}
-
-// Helper function to decode base64 URL using Buffer
-function decodeUrl(encodedUrl) {
-  return Buffer.from(encodedUrl, 'base64url').toString();
-}
-
 // 🔹 Generate a token and return protected link
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
@@ -156,7 +146,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   console.log(`--- incoming /Bypass request for user=${userId} ---`);
   console.log("referer:", req.get("referer"));
   console.log("user-agent:", req.get("user-agent"));
-  console.log("target URL:", target ? "ENCODED (HIDDEN)" : "NOT PROVIDED");
+  console.log("target URL:", target);
   
   // Check if this is a direct bypass attempt (no referer or not from softurl)
   const referer = req.get("referer") || "";
@@ -200,68 +190,12 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
     `);
   }
   
-  // Decode the target URL from base64
+  // Decode the target URL
   let decodedTarget;
   try {
-    decodedTarget = decodeUrl(target);
-    console.log(`✅ Decoded target URL for user ${userId}`);
+    decodedTarget = decodeURIComponent(target);
   } catch (error) {
-    console.log(`❌ Failed to decode target URL for user ${userId}:`, error.message);
-    
-    // Try to find the original URL from database using token
-    try {
-      const record = await urlShortenerCollection.findOne({ 
-        token: token, 
-        user_id: parseInt(userId) 
-      });
-      
-      if (record && record.target_url) {
-        decodedTarget = record.target_url;
-        console.log(`✅ Retrieved target URL from database for user ${userId}`);
-      } else {
-        return res.status(400).send(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>Invalid URL</title>
-            <style>
-              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-              .error { background: #f8d7da; padding: 15px; border-radius: 8px; }
-            </style>
-          </head>
-          <body>
-            <div class="error">
-              <h2>❌ Invalid URL Encoding</h2>
-              <p>The provided URL encoding is invalid and no backup found in database.</p>
-              <p>Error: ${error.message}</p>
-            </div>
-            <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-          </body>
-          </html>
-        `);
-      }
-    } catch (dbError) {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Invalid URL</title>
-          <style>
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-            .error { background: #f8d7da; padding: 15px; border-radius: 8px; }
-          </style>
-        </head>
-        <body>
-          <div class="error">
-            <h2>❌ Invalid URL</h2>
-            <p>Failed to decode URL and database lookup failed.</p>
-            <p>Error: ${error.message}</p>
-          </div>
-          <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-        </body>
-        </html>
-      `);
-    }
+    return res.status(400).send("Invalid URL encoding");
   }
 
   // Fun roast messages for bypass attempts
@@ -403,7 +337,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         <div class="user-info">
           <h3>📊 Bypass Attempt Details:</h3>
           <p><strong>User ID:</strong> ${userId}</p>
-          <p><strong>Target URL:</strong> [HIDDEN FOR SECURITY]</p>
+          <p><strong>Target URL:</strong> ${decodedTarget}</p>
           <p><strong>IP Address:</strong> ${req.ip}</p>
           <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
           <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
@@ -437,7 +371,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
       status: "SUCCESS - Redirected to target"
     });
     
-    console.log(`✅ Legitimate access from SoftURL - Redirecting user ${userId} to target URL`);
+    console.log(`✅ Legitimate access from SoftURL - Redirecting user ${userId} to: ${decodedTarget}`);
     
     // REDIRECT to the target URL for legitimate SoftURL accesses
     res.redirect(decodedTarget);
@@ -498,21 +432,8 @@ app.get("/shorten", async (req, res) => {
     // Generate token for the URL
     const token = crypto.randomBytes(8).toString("hex");
     
-    // Encode the target URL in base64 to hide it
-    const encodedUrl = encodeUrl(url);
-    
-    // Generate bypass URL WITHOUT showing the original URL
-    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?target=${encodedUrl}`;
-    
-    // Store in database for backup
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      target_url: url,
-      encoded_url: encodedUrl,
-      created_at: new Date(),
-      clicks: 0
-    });
+    // Generate bypass URL
+    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?target=${encodeURIComponent(url)}`;
     
     res.json({
       success: true,
@@ -521,58 +442,6 @@ app.get("/shorten", async (req, res) => {
       token: token,
       user_id: userId,
       timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      error: "Invalid URL format"
-    });
-  }
-});
-
-// 🔹 New endpoint for bot to generate hidden URLs
-app.get("/generate-hidden/:userId", async (req, res) => {
-  const { userId } = req.params;
-  const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({
-      success: false,
-      error: "Missing url parameter"
-    });
-  }
-  
-  try {
-    // Validate URL
-    new URL(url);
-    
-    // Generate token for the URL
-    const token = crypto.randomBytes(8).toString("hex");
-    
-    // Encode the target URL in base64 to hide it
-    const encodedUrl = encodeUrl(url);
-    
-    // Generate clean bypass URL (no visible target parameter)
-    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}`;
-    
-    // Store in database
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      target_url: url,
-      encoded_url: encodedUrl,
-      created_at: new Date(),
-      clicks: 0,
-      status: "ACTIVE"
-    });
-    
-    res.json({
-      success: true,
-      internal_url: bypassUrl,
-      token: token,
-      user_id: userId,
-      note: "URL is hidden in database, not visible in parameters"
     });
     
   } catch (error) {
@@ -620,24 +489,14 @@ app.get("/", (req, res) => {
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
         .endpoints { background: #f8f9fa; padding: 15px; border-radius: 8px; }
         .feature { background: #e7f3ff; padding: 10px; margin: 10px 0; border-radius: 8px; }
-        .security { background: #d4edda; padding: 10px; margin: 10px 0; border-radius: 8px; }
       </style>
     </head>
     <body>
       <h1>✅ MythoBot Server is Running</h1>
       
-      <div class="security">
-        <h3>🔒 ENHANCED SECURITY FEATURES:</h3>
-        <p>• <strong>URL HIDING:</strong> Original URLs are now base64 encoded</p>
-        <p>• <strong>DATABASE BACKUP:</strong> URLs stored securely in MongoDB</p>
-        <p>• <strong>CLEAN URLs:</strong> No visible target parameters</p>
-        <p>• <strong>FALLBACK SYSTEM:</strong> Database lookup if decoding fails</p>
-      </div>
-      
       <div class="endpoints">
         <h3>🛣️ Available Endpoints:</h3>
-        <p><strong>GET</strong> <code>/Bypass/:userId/:token</code> - URL redirection with hidden URLs</p>
-        <p><strong>GET</strong> <code>/generate-hidden/:userId?url=URL</code> - Generate hidden URLs</p>
+        <p><strong>GET</strong> <code>/Bypass/:userId/:token?target=URL</code> - URL redirection with bypass protection</p>
         <p><strong>GET</strong> <code>/double/:userId/:token</code> - Double points verification</p>
         <p><strong>GET</strong> <code>/shorten?url=URL&userId=ID</code> - Generate short URLs</p>
         <p><strong>GET</strong> <code>/stats/:userId</code> - Access statistics</p>
@@ -647,8 +506,8 @@ app.get("/", (req, res) => {
         <h3>🎯 Bypass Protection Features:</h3>
         <p>• 30+ Random Roast Messages for bypassers</p>
         <p>• Automatic redirect for legitimate SoftURL accesses</p>
-        <p>• Hidden URL parameters using base64 encoding</p>
-        <p>• Database backup for URL recovery</p>
+        <p>• Detailed access logging</p>
+        <p>• Mobile-responsive design</p>
       </div>
       
       <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
@@ -660,8 +519,7 @@ app.get("/", (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Enhanced bypass protection activated!`);
-  console.log(`🔒 URL hiding with base64 encoding enabled`);
+  console.log(`🎯 Bypass protection with roast messages activated!`);
   console.log(`✅ Legitimate SoftURL accesses will redirect to target URLs`);
   console.log(`🤡 Bypass attempts will get roasted!`);
 });
