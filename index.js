@@ -2,7 +2,6 @@
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
-import base64 from "base64-js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,12 +26,12 @@ async function connectDB() {
 }
 connectDB();
 
-// Helper function to encode URL in base64
+// Helper function to encode URL in base64 using Buffer
 function encodeUrl(url) {
   return Buffer.from(url).toString('base64url');
 }
 
-// Helper function to decode base64 URL
+// Helper function to decode base64 URL using Buffer
 function decodeUrl(encodedUrl) {
   return Buffer.from(encodedUrl, 'base64url').toString();
 }
