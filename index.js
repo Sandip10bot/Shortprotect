@@ -337,7 +337,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         <div class="user-info">
           <h3>📊 Bypass Attempt Details:</h3>
           <p><strong>User ID:</strong> ${userId}</p>
-          <p><strong>Target URL:</strong> ${decodedTarget}</p>
+        
           <p><strong>IP Address:</strong> ${req.ip}</p>
           <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
           <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
@@ -494,14 +494,7 @@ app.get("/", (req, res) => {
     <body>
       <h1>✅ MythoBot Server is Running</h1>
       
-      <div class="endpoints">
-        <h3>🛣️ Available Endpoints:</h3>
-        <p><strong>GET</strong> <code>/Bypass/:userId/:token?target=URL</code> - URL redirection with bypass protection</p>
-        <p><strong>GET</strong> <code>/double/:userId/:token</code> - Double points verification</p>
-        <p><strong>GET</strong> <code>/shorten?url=URL&userId=ID</code> - Generate short URLs</p>
-        <p><strong>GET</strong> <code>/stats/:userId</code> - Access statistics</p>
-      </div>
-
+      
       <div class="feature">
         <h3>🎯 Bypass Protection Features:</h3>
         <p>• 30+ Random Roast Messages for bypassers</p>
