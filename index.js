@@ -769,36 +769,7 @@ app.get("/payment/api", (req, res) => {
     message: "MythoBot Premium Access Payment"
   });
 });
-// Health check
-app.get("/", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>MythoBot Server</title>
-      <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .endpoints { background: #f8f9fa; padding: 15px; border-radius: 8px; }
-        .feature { background: #e7f3ff; padding: 10px; margin: 10px 0; border-radius: 8px; }
-      </style>
-    </head>
-    <body>
-      <h1>✅ MythoBot Server is Running</h1>
-      
-      
-      <div class="feature">
-        <h3>🎯 Bypass Protection Features:</h3>
-        <p>• 30+ Random Roast Messages for bypassers</p>
-        <p>• Automatic redirect for legitimate SoftURL accesses</p>
-        <p>• Detailed access logging</p>
-        <p>• Mobile-responsive design</p>
-      </div>
-      
-      <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-    </body>
-    </html>
-  `);
-})
+
 // 🔹 Premium Subscription Payment Endpoint
 app.get("/premium-payment", async (req, res) => {
   const { user_id, plan, duration, amount, upi, admin } = req.query;
