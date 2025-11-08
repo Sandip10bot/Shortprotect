@@ -508,6 +508,179 @@ app.get("/", (req, res) => {
     </html>
   `);
 });
+// 🔹 Payment Page Endpoint
+app.get("/payment", (req, res) => {
+  const { amount, upi, channel, admin } = req.query;
+  
+  // Default values if not provided
+  const baseAmount = amount || 20;
+  const upiId = upi || "Sandip10@fam";
+  const channelName = channel || "MythoserialBot";
+  const adminUsername = admin || "sandip10x";
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Telegram Subscription</title>
+        <!-- Tailwind CSS CDN -->
+        <script src="https://cdn.tailwindcss.com"></script>
+        <!-- Font Awesome CDN -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+        <link rel="icon" type="image/png" href="https://i.postimg.cc/Y0MsZM32/favicon.jpg">
+        <style>
+            .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #4f46e5; width: 40px; height: 40px; animation: spin 1.5s linear infinite; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            /* Custom Font */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -ms-user-select: none; user-select: none; }
+        </style>
+    </head>
+    <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
+
+        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+            
+            <!-- Header Section -->
+            <div class="p-8 text-center border-b bg-slate-50">
+                <div class="flex justify-center mb-4">
+                    <i class="fa-solid fa-shield-halved fa-3x text-indigo-600"></i>
+                </div>
+                <h1 class="text-2xl font-bold text-slate-800">Join Our Premium Channel</h1>
+                <p class="text-slate-500 mt-2">Get Instant & Secure Access</p>
+            </div>
+
+            <!-- Payment Details Section -->
+            <div class="p-6 sm:p-8 text-center">
+                <p class="text-sm font-medium text-slate-600">You only have to pay</p>
+                <p class="text-5xl font-extrabold text-indigo-600 my-2" id="payment-amount">₹${baseAmount}</p>
+                <p class="text-xs text-slate-500 mb-6">(This amount is unique for your transaction)</p>
+                
+                <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2">
+                    <div id="loader" class="loader"></div>
+                </div>
+                <p class="text-sm text-slate-600 mt-4 font-semibold">Scan QR to pay via any UPI App</p>
+
+                <!-- Supported Apps Icons -->
+                <div class="flex justify-center items-center gap-6 mt-4 text-slate-400">
+                    <i class="fa-brands fa-google-pay fa-2x"></i>
+                    <i class="fa-solid fa-mobile-screen-button fa-2x"></i>
+                    <i class="fa-solid fa-credit-card fa-2x"></i>
+                </div>
+
+                <div class="flex items-center my-6">
+                    <hr class="w-full border-slate-200"><span class="px-2 text-xs font-medium text-slate-400">OR</span><hr class="w-full border-slate-200">
+                </div>
+
+                <p class="text-sm text-slate-600 font-semibold mb-2">Copy UPI ID</p>
+                <div class="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200">
+                    <span class="font-mono text-slate-700 text-lg break-all" id="upi-id-text">${upiId}</span>
+                    <button id="copy-button" class="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-indigo-700 transition-all flex-shrink-0 w-28">
+                        <span class="copy-text-span"><i class="fa-regular fa-copy mr-2"></i>Copy</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Instructions Section -->
+            <div class="bg-slate-50 p-6 sm:p-8">
+                <h3 class="text-lg font-bold text-slate-800 text-center">What's Next?</h3>
+                <p class="text-slate-600 text-center mt-2 text-sm">After payment, send Payment Screenshot to our Admin on Telegram to get your Subscription Link.</p>
+                <a href="https://t.me/${adminUsername}" class="mt-6 w-full flex items-center justify-center gap-3 bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition-transform hover:scale-105 shadow-lg shadow-sky-500/30">
+                    <i class="fa-brands fa-telegram fa-lg"></i>
+                    <span>Send Payment Screenshot</span>
+                </a>
+            </div>
+        </main>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+                const amountElement = document.getElementById('payment-amount');
+                const loader = document.getElementById('loader');
+                const qrContainer = document.getElementById('qr-code-container');
+                const upiIdElement = document.getElementById('upi-id-text');
+                const copyButton = document.getElementById('copy-button');
+                const copySpan = copyButton.querySelector('.copy-text-span');
+                const originalCopyHTML = copySpan.innerHTML;
+
+                const variation = Math.floor(Math.random() * 3) - 1;
+                const finalAmount = ${baseAmount} + variation;
+                amountElement.textContent = \`₹\${finalAmount}\`;
+                
+                const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
+                const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
+                const qrImage = new Image();
+                qrImage.src = qrApiUrl;
+                qrImage.alt = 'Scan to Pay';
+                qrImage.className = 'rounded-lg';
+                qrImage.onload = () => { 
+                    loader.style.display = 'none';
+                    qrContainer.appendChild(qrImage);
+                };
+
+                copyButton.addEventListener('click', () => {
+                    navigator.clipboard.writeText(upiIdElement.textContent).then(() => {
+                        copySpan.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Copied!';
+                        copyButton.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                        copyButton.classList.add('bg-green-600');
+                        setTimeout(() => {
+                            copySpan.innerHTML = originalCopyHTML;
+                            copyButton.classList.remove('bg-green-600');
+                            copyButton.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+                        }, 2000);
+                    });
+                });
+            });
+        </script>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                // 1. Disable Right-Click Context Menu
+                document.addEventListener('contextmenu', function(e) {
+                    e.preventDefault();
+                });
+
+                // 2. Disable Keyboard Shortcuts (Ctrl+C, Ctrl+U, F12)
+                document.addEventListener('keydown', function(e) {
+                    // Disable Ctrl+C (Copy)
+                    if (e.ctrlKey && e.key === 'c') {
+                        e.preventDefault();
+                    }
+                    // Disable Ctrl+U (View Source)
+                    if (e.ctrlKey && e.key === 'u') {
+                        e.preventDefault();
+                    }
+                    // Disable F12 (Developer Tools)
+                    if (e.key === 'F12') {
+                        e.preventDefault();
+                    }
+                });
+
+                // 3. Disable Dragging of elements
+                document.addEventListener('dragstart', function(e) {
+                    e.preventDefault();
+                });
+            });
+        </script>
+    </body>
+    </html>
+  `);
+});
+
+// 🔹 Payment API endpoint (for programmatic access)
+app.get("/payment/api", (req, res) => {
+  const { amount, upi, channel, admin } = req.query;
+  
+  res.json({
+    success: true,
+    payment_page: `https://${req.hostname}/payment?amount=${amount || 20}&upi=${upi || "demo@ybl"}&channel=${channel || "Premium Channel"}&admin=${admin || "subscribe_my_tg_bot"}`,
+    config: {
+      amount: amount || 149,
+      upi_id: upi || "Sandip10x@fam",
+      channel_name: channel || "MythoserialBot",
+      admin_username: admin || "sandip10x"
+    }
+  });
+});
 
 // Start server
 app.listen(PORT, () => {
