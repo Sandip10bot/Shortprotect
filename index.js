@@ -817,7 +817,7 @@ app.get("/premium-payment", async (req, res) => {
   const selectedPlan = plans[plan] || plans['silver'];
   const finalAmount = amount || selectedPlan.default_amount;
   const finalDuration = duration || selectedPlan.default_duration;
-  const upiId = upi || "mythobot@ybl";
+  const upiId = upi || "sandip10x@fam";
   const adminUsername = admin || "MythoSerialBot";
   const planName = selectedPlan.name;
 
