@@ -477,38 +477,7 @@ app.get("/stats/:userId", async (req, res) => {
     });
   }
 });
-
-// Health check
-app.get("/", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>MythoBot Server</title>
-      <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .endpoints { background: #f8f9fa; padding: 15px; border-radius: 8px; }
-        .feature { background: #e7f3ff; padding: 10px; margin: 10px 0; border-radius: 8px; }
-      </style>
-    </head>
-    <body>
-      <h1>✅ MythoBot Server is Running</h1>
-      
-      
-      <div class="feature">
-        <h3>🎯 Bypass Protection Features:</h3>
-        <p>• 30+ Random Roast Messages for bypassers</p>
-        <p>• Automatic redirect for legitimate SoftURL accesses</p>
-        <p>• Detailed access logging</p>
-        <p>• Mobile-responsive design</p>
-      </div>
-      
-      <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-    </body>
-    </html>
-  `);
-});
-// 🔹 Payment Page Endpoint for MythoBot
+// 🔹 Payment Page Endpoint for MythoBot with UPI Apps Redirect
 app.get("/payment", (req, res) => {
   const { amount, upi, channel, admin } = req.query;
   
@@ -534,6 +503,8 @@ app.get("/payment", (req, res) => {
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
             body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -ms-user-select: none; user-select: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
             .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+            .upi-app { transition: all 0.3s ease; }
+            .upi-app:hover { transform: scale(1.05); }
         </style>
     </head>
     <body class="flex items-center justify-center min-h-screen p-4">
@@ -559,11 +530,12 @@ app.get("/payment", (req, res) => {
                 </div>
                 <p class="text-sm text-slate-600 mt-4 font-semibold">Scan QR to pay via any UPI App</p>
 
-                <!-- Supported Apps Icons -->
-                <div class="flex justify-center items-center gap-6 mt-4 text-slate-400">
-                    <i class="fa-brands fa-google-pay fa-2x"></i>
-                    <i class="fa-solid fa-mobile-screen-button fa-2x"></i>
-                    <i class="fa-solid fa-credit-card fa-2x"></i>
+                <!-- UPI Apps Direct Links -->
+                <div class="mt-6">
+                    <p class="text-sm font-semibold text-slate-600 mb-3">Or open directly in:</p>
+                    <div class="grid grid-cols-4 gap-3 mb-4" id="upi-apps-container">
+                        <!-- UPI apps will be dynamically added here -->
+                    </div>
                 </div>
 
                 <div class="flex items-center my-6">
@@ -607,6 +579,7 @@ app.get("/payment", (req, res) => {
                 const copyButton = document.getElementById('copy-button');
                 const copySpan = copyButton.querySelector('.copy-text-span');
                 const originalCopyHTML = copySpan.innerHTML;
+                const upiAppsContainer = document.getElementById('upi-apps-container');
 
                 // Add small random variation to amount
                 const variation = Math.floor(Math.random() * 5) - 2;
@@ -614,10 +587,11 @@ app.get("/payment", (req, res) => {
                 const displayAmount = finalAmount > 0 ? finalAmount : ${baseAmount};
                 amountElement.textContent = \`₹\${displayAmount}\`;
                 
-                // Generate UPI link and QR code
+                // Generate UPI link
                 const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR\`;
                 const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
                 
+                // Load QR Code
                 const qrImage = new Image();
                 qrImage.src = qrApiUrl;
                 qrImage.alt = 'Scan to Pay';
@@ -629,9 +603,93 @@ app.get("/payment", (req, res) => {
 
                 qrImage.onerror = () => {
                     if (loader) loader.style.display = 'none';
-                    qrContainer.innerHTML = '<p class="text-red-500">QR Code failed to load</p>';
+                    qrContainer.innerHTML = '<p class="text-red-500 text-sm">QR Code failed to load</p>';
                 };
 
+                // UPI Apps Configuration
+                const upiApps = [
+                    {
+                        name: "GPay",
+                        package: "com.google.android.apps.nbu.paisa.user",
+                        icon: "fa-brands fa-google-pay",
+                        color: "bg-gradient-to-r from-blue-500 to-purple-600"
+                    },
+                    {
+                        name: "Paytm",
+                        package: "net.one97.paytm",
+                        icon: "fa-solid fa-mobile-screen-button",
+                        color: "bg-gradient-to-r from-blue-600 to-blue-800"
+                    },
+                    {
+                        name: "PhonePe",
+                        package: "com.phonepe.app",
+                        icon: "fa-solid fa-phone",
+                        color: "bg-gradient-to-r from-purple-600 to-purple-800"
+                    },
+                    {
+                        name: "BHIM",
+                        package: "in.org.npci.upiapp",
+                        icon: "fa-solid fa-indian-rupee-sign",
+                        color: "bg-gradient-to-r from-green-600 to-green-800"
+                    },
+                    {
+                        name: "Amazon Pay",
+                        package: "in.amazon.mShop.android.shopping",
+                        icon: "fa-brands fa-amazon",
+                        color: "bg-gradient-to-r from-yellow-500 to-orange-500"
+                    },
+                    {
+                        name: "WhatsApp",
+                        package: "com.whatsapp",
+                        icon: "fa-brands fa-whatsapp",
+                        color: "bg-gradient-to-r from-green-500 to-green-600"
+                    },
+                    {
+                        name: "Cred",
+                        package: "com.dreamplug.androidapp",
+                        icon: "fa-solid fa-gem",
+                        color: "bg-gradient-to-r from-purple-700 to-purple-900"
+                    },
+                    {
+                        name: "Any UPI",
+                        package: "",
+                        icon: "fa-solid fa-wallet",
+                        color: "bg-gradient-to-r from-gray-600 to-gray-800"
+                    }
+                ];
+
+                // Create UPI App buttons
+                upiApps.forEach(app => {
+                    const appButton = document.createElement('button');
+                    appButton.className = \`upi-app \${app.color} text-white rounded-lg p-3 flex flex-col items-center justify-center\`;
+                    appButton.innerHTML = \`
+                        <i class="\${app.icon} text-xl mb-1"></i>
+                        <span class="text-xs font-medium">\${app.name}</span>
+                    \`;
+                    
+                    appButton.onclick = () => {
+                        if (app.package) {
+                            // Try to open in app first, then fallback to UPI link
+                            const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
+                            const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR\`;
+                            
+                            // Try app intent first
+                            window.location.href = intentUrl;
+                            
+                            // Fallback after delay
+                            setTimeout(() => {
+                                window.location.href = upiUrl;
+                            }, 500);
+                        } else {
+                            // Direct UPI link for "Any UPI"
+                            window.location.href = upiLink;
+                        }
+                    };
+                    
+                    upiAppsContainer.appendChild(appButton);
+                });
+
+                // Copy UPI ID functionality
                 copyButton.addEventListener('click', () => {
                     navigator.clipboard.writeText(upiIdElement.textContent).then(() => {
                         copySpan.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Copied!';
@@ -681,13 +739,27 @@ app.get("/payment", (req, res) => {
   `);
 });
 
-// 🔹 Simple Payment API endpoint
+// 🔹 UPI Deep Link API
+app.get("/upi-redirect", (req, res) => {
+  const { upi, amount, name } = req.query;
+  
+  const upiId = upi || "mythobot@ybl";
+  const paymentAmount = amount || 49;
+  const receiverName = name || "MythoBot Premium";
+  
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
+  
+  res.redirect(upiLink);
+});
+
+// 🔹 Payment API endpoint
 app.get("/payment/api", (req, res) => {
   const { amount, upi, channel, admin } = req.query;
   
   res.json({
     success: true,
     payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "mythobot@ybl"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
+    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "mythobot@ybl"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
     config: {
       amount: amount || 49,
       upi_id: upi || "mythobot@ybl",
@@ -696,7 +768,37 @@ app.get("/payment/api", (req, res) => {
     },
     message: "MythoBot Premium Access Payment"
   });
-});        
+});
+// Health check
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>MythoBot Server</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .endpoints { background: #f8f9fa; padding: 15px; border-radius: 8px; }
+        .feature { background: #e7f3ff; padding: 10px; margin: 10px 0; border-radius: 8px; }
+      </style>
+    </head>
+    <body>
+      <h1>✅ MythoBot Server is Running</h1>
+      
+      
+      <div class="feature">
+        <h3>🎯 Bypass Protection Features:</h3>
+        <p>• 30+ Random Roast Messages for bypassers</p>
+        <p>• Automatic redirect for legitimate SoftURL accesses</p>
+        <p>• Detailed access logging</p>
+        <p>• Mobile-responsive design</p>
+      </div>
+      
+      <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+    </body>
+    </html>
+  `);
+})
 
 // Start server
 app.listen(PORT, () => {
