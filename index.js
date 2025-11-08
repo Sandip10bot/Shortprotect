@@ -1021,8 +1021,8 @@ app.get("/", (req, res) => {
 
       <!-- Header -->
       <div class="text-center mb-10 animate-fadeIn">
-        <img src="https://i.postimg.cc/Y0MsZM32/favicon.jpg" alt="MythoBot" class="w-24 h-24 rounded-full mx-auto mb-4 shadow-lg border-4 border-white/20 pulse">
-        <h1 class="text-5xl font-extrabold tracking-wide">✨ MythoBot Portal ✨</h1>
+        <img src="https://envs.sh/XwB.jpg" alt="MythoserialBot" class="w-24 h-24 rounded-full mx-auto mb-4 shadow-lg border-4 border-white/20 pulse">
+        <h1 class="text-5xl font-extrabold tracking-wide">✨ MythoserialBot Portal ✨</h1>
         <p class="text-purple-200 mt-3 text-sm">Your One-stop Hub for Mythological Serials, Games & Premium Access</p>
       </div>
 
