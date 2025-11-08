@@ -1067,6 +1067,98 @@ async function activatePremiumSubscription(userId, duration) {
   
   console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
 }
+
+// 🔹 Radhe Radhe Game Page
+app.get("/radhe", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Radhe Radhe Jap 🙏</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <style>
+        body {
+          font-family: 'Poppins', sans-serif;
+          background: linear-gradient(135deg,#ffb6c1,#ffc8dd,#ffb6b9);
+          text-align:center;
+          height:100vh;
+          display:flex;
+          flex-direction:column;
+          align-items:center;
+          justify-content:center;
+          overflow:hidden;
+        }
+        #count {
+          font-size:2.5rem;
+          font-weight:700;
+          color:#9d174d;
+          text-shadow:0 0 10px rgba(255,255,255,0.7);
+          margin-top:1rem;
+        }
+        #tapBtn {
+          background:linear-gradient(45deg,#ec4899,#db2777);
+          color:white;
+          border:none;
+          border-radius:9999px;
+          padding:1.2rem 2.5rem;
+          font-size:1.5rem;
+          font-weight:bold;
+          cursor:pointer;
+          transition:transform 0.1s;
+          box-shadow:0 0 15px rgba(236,72,153,0.6);
+        }
+        #tapBtn:active {
+          transform:scale(0.9);
+        }
+        .chant {
+          animation:pulse 1.2s infinite;
+        }
+        @keyframes pulse {
+          0%,100% {opacity:1; transform:scale(1);}
+          50% {opacity:0.7; transform:scale(1.05);}
+        }
+        audio { display:none; }
+      </style>
+    </head>
+    <body>
+      <h1 class="text-3xl font-bold text-pink-700 chant">💖 Radhe Radhe 💖</h1>
+      <button id="tapBtn">Radhe Radhe</button>
+      <div id="count">0 Japs</div>
+      <audio id="chantAudio" src="https://cdn.pixabay.com/download/audio/2022/03/14/audio_9a4ed9a26e.mp3?filename=indian-mantra-loop-108-13823.mp3" loop></audio>
+
+      <script>
+        const btn = document.getElementById('tapBtn');
+        const countEl = document.getElementById('count');
+        const audio = document.getElementById('chantAudio');
+        let count = 0;
+        btn.addEventListener('click', () => {
+          count++;
+          countEl.textContent = count + " Japs";
+          if (audio.paused) audio.play();
+          // small heart burst
+          const heart = document.createElement('div');
+          heart.textContent = "💖";
+          heart.style.position = 'absolute';
+          heart.style.left = (Math.random()*90+5) + "%";
+          heart.style.top = (Math.random()*80+10) + "%";
+          heart.style.opacity = '0.9';
+          heart.style.fontSize = (Math.random()*30+20) + 'px';
+          heart.style.transition = '1.5s';
+          document.body.appendChild(heart);
+          setTimeout(()=>heart.style.transform='translateY(-80px)',50);
+          setTimeout(()=>heart.remove(),1500);
+        });
+      </script>
+
+      <p class="text-pink-800 mt-4 text-sm">Tap continuously and chant with ❤️ Premanand Maharaj Ki Jai!</p>
+      <a href="/" class="text-sm text-purple-900 underline mt-3 block">🏠 Back to Home</a>
+    </body>
+    </html>
+  `);
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
