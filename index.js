@@ -799,7 +799,274 @@ app.get("/", (req, res) => {
     </html>
   `);
 })
+// 🔹 Premium Subscription Payment Endpoint
+app.get("/premium-payment", async (req, res) => {
+  const { user_id, plan, duration, amount, upi, admin } = req.query;
+  
+  // Validate required parameters
+  if (!user_id || !plan) {
+    return res.status(400).send("Missing user_id or plan parameters");
+  }
 
+  // Plan configurations
+  const plans = {
+    'silver': { default_amount: 79, default_duration: 28, name: 'Silver Plan' },
+    'gold': { default_amount: 149, default_duration: 30, name: 'Gold Plan' }
+  };
+
+  const selectedPlan = plans[plan] || plans['silver'];
+  const finalAmount = amount || selectedPlan.default_amount;
+  const finalDuration = duration || selectedPlan.default_duration;
+  const upiId = upi || "mythobot@ybl";
+  const adminUsername = admin || "MythoSerialBot";
+  const planName = selectedPlan.name;
+
+  // Generate payment token
+  const paymentToken = crypto.randomBytes(16).toString('hex');
+  
+  // Store payment session in database
+  const paymentCollection = client.db("mythobot").collection("payment_sessions");
+  await paymentCollection.insertOne({
+    payment_token: paymentToken,
+    user_id: parseInt(user_id),
+    plan: plan,
+    amount: parseInt(finalAmount),
+    duration: parseInt(finalDuration),
+    status: 'pending',
+    created_at: new Date(),
+    expires_at: new Date(Date.now() + 30 * 60 * 1000) // 30 minutes expiry
+  });
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MythoBot ${planName} Payment</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+        <style>
+            .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #8b5cf6; width: 40px; height: 40px; animation: spin 1.5s linear infinite; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            body { font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+            .upi-app { transition: all 0.3s ease; }
+            .upi-app:hover { transform: scale(1.05); }
+            .status-check { background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px; margin: 10px 0; }
+        </style>
+    </head>
+    <body class="flex items-center justify-center min-h-screen p-4">
+        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow">
+            
+            <!-- Header Section -->
+            <div class="p-6 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
+                <h1 class="text-2xl font-bold">${planName}</h1>
+                <p class="text-purple-200 mt-2">Automatic Activation • ${finalDuration} Days</p>
+            </div>
+
+            <!-- Payment Details -->
+            <div class="p-6 text-center">
+                <p class="text-5xl font-extrabold text-purple-600 my-2">₹${finalAmount}</p>
+                <p class="text-sm text-slate-600">User ID: <code>${user_id}</code></p>
+                
+                <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200 my-4">
+                    <div id="loader" class="loader"></div>
+                </div>
+
+                <!-- UPI Apps -->
+                <div class="grid grid-cols-4 gap-2 mb-4" id="upi-apps-container"></div>
+
+                <!-- UPI ID -->
+                <div class="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200 mt-4">
+                    <span class="font-mono text-slate-700 text-sm break-all" id="upi-id-text">${upiId}</span>
+                    <button id="copy-button" class="bg-purple-600 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-purple-700 transition-all">
+                        <span class="copy-text-span"><i class="fa-regular fa-copy mr-1"></i>Copy</span>
+                    </button>
+                </div>
+
+                <!-- Payment Status -->
+                <div id="status-container" class="status-check mt-4">
+                    <p class="text-sm font-semibold">Payment Status: <span id="status-text">Waiting for payment...</span></p>
+                    <div id="status-loader" class="loader mx-auto my-2" style="width: 20px; height: 20px;"></div>
+                    <p class="text-xs text-slate-600" id="status-message">After payment, your plan will be activated automatically within 2 minutes</p>
+                </div>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="bg-purple-50 p-6">
+                <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+                    <p class="text-xs text-green-700 text-center">
+                        <i class="fa-solid fa-bolt mr-1"></i>
+                        <strong>Automatic Activation:</strong> No need to send screenshot
+                    </p>
+                </div>
+                <a href="https://t.me/${adminUsername}" class="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-2 px-4 rounded-lg text-sm">
+                    <i class="fa-brands fa-telegram"></i>
+                    <span>Contact @${adminUsername}</span>
+                </a>
+            </div>
+        </main>
+
+        <script>
+            const paymentToken = "${paymentToken}";
+            const userId = "${user_id}";
+            let statusCheckInterval;
+
+            // Generate QR Code
+            const upiLink = \`upi://pay?pa=${upiId}&pn=\${encodeURIComponent("MythoBot " + "${planName}")}&am=${finalAmount}.00&cu=INR&tn=Payment for ${planName} (User: ${user_id})\`;
+            const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}\`;
+            
+            const qrImage = new Image();
+            qrImage.src = qrApiUrl;
+            qrImage.className = 'rounded-lg';
+            qrImage.onload = () => { 
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('qr-code-container').appendChild(qrImage);
+            };
+
+            // UPI Apps
+            const upiApps = [
+                { name: "GPay", package: "com.google.android.apps.nbu.paisa.user", icon: "fa-brands fa-google-pay", color: "bg-blue-500" },
+                { name: "Paytm", package: "net.one97.paytm", icon: "fa-solid fa-mobile", color: "bg-blue-600" },
+                { name: "PhonePe", package: "com.phonepe.app", icon: "fa-solid fa-phone", color: "bg-purple-600" },
+                { name: "Any UPI", package: "", icon: "fa-solid fa-wallet", color: "bg-gray-600" }
+            ];
+
+            upiApps.forEach(app => {
+                const appButton = document.createElement('button');
+                appButton.className = \`upi-app \${app.color} text-white rounded p-2 flex flex-col items-center justify-center\`;
+                appButton.innerHTML = \`<i class="\${app.icon} text-sm mb-1"></i><span class="text-xs">\${app.name}</span>\`;
+                appButton.onclick = () => {
+                    if (app.package) {
+                        const intentUrl = \`intent://pay?pa=${upiId}&pn=\${encodeURIComponent("MythoBot " + "${planName}")}&am=${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
+                        window.location.href = intentUrl;
+                        setTimeout(() => { window.location.href = upiLink; }, 500);
+                    } else {
+                        window.location.href = upiLink;
+                    }
+                };
+                document.getElementById('upi-apps-container').appendChild(appButton);
+            });
+
+            // Copy UPI ID
+            document.getElementById('copy-button').addEventListener('click', () => {
+                navigator.clipboard.writeText("${upiId}").then(() => {
+                    const span = document.querySelector('.copy-text-span');
+                    span.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied!';
+                    setTimeout(() => { span.innerHTML = '<i class="fa-regular fa-copy mr-1"></i>Copy'; }, 2000);
+                });
+            });
+
+            // Payment Status Check
+            async function checkPaymentStatus() {
+                try {
+                    const response = await fetch(\`/payment-status/\${paymentToken}\`);
+                    const data = await response.json();
+                    
+                    if (data.status === 'completed') {
+                        document.getElementById('status-text').innerHTML = '<span class="text-green-600">✅ Payment Verified!</span>';
+                        document.getElementById('status-loader').style.display = 'none';
+                        document.getElementById('status-message').innerHTML = 'Your premium plan has been activated! Return to Telegram bot.';
+                        clearInterval(statusCheckInterval);
+                        
+                        // Redirect to bot after delay
+                        setTimeout(() => {
+                            window.location.href = \`https://t.me/MythoSerialBot?start=payment_success_\${userId}\`;
+                        }, 3000);
+                    } else if (data.status === 'failed') {
+                        document.getElementById('status-text').innerHTML = '<span class="text-red-600">❌ Payment Failed</span>';
+                        document.getElementById('status-loader').style.display = 'none';
+                        document.getElementById('status-message').textContent = data.message || 'Payment verification failed. Please try again.';
+                        clearInterval(statusCheckInterval);
+                    }
+                    // If still pending, continue checking
+                } catch (error) {
+                    console.error('Status check error:', error);
+                }
+            }
+
+            // Start status checking
+            statusCheckInterval = setInterval(checkPaymentStatus, 5000); // Check every 5 seconds
+        </script>
+    </body>
+    </html>
+  `);
+});
+
+// 🔹 Payment Status Check Endpoint
+app.get("/payment-status/:token", async (req, res) => {
+  const { token } = req.params;
+  
+  const paymentCollection = client.db("mythobot").collection("payment_sessions");
+  const paymentSession = await paymentCollection.findOne({ payment_token: token });
+  
+  if (!paymentSession) {
+    return res.json({ status: 'failed', message: 'Payment session not found' });
+  }
+  
+  if (paymentSession.status === 'completed') {
+    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
+  }
+  
+  if (paymentSession.status === 'failed') {
+    return res.json({ status: 'failed', message: 'Payment verification failed' });
+  }
+  
+  // Check if payment is completed (you'll need to implement actual UPI verification)
+  // This is a placeholder - you'll need to integrate with a UPI verification service
+  const isPaymentVerified = await verifyUPIPayment(paymentSession);
+  
+  if (isPaymentVerified) {
+    await paymentCollection.updateOne(
+      { payment_token: token },
+      { $set: { status: 'completed', verified_at: new Date() } }
+    );
+    
+    // Activate premium for user
+    await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
+    
+    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
+  }
+  
+  res.json({ status: 'pending' });
+});
+
+// 🔹 UPI Payment Verification (Placeholder - Implement based on your payment gateway)
+async function verifyUPIPayment(paymentSession) {
+  // Implement actual UPI payment verification here
+  // This could involve:
+  // 1. Checking with your payment gateway API
+  // 2. Webhook verification
+  // 3. Manual verification through admin panel
+  // 4. Bank statement parsing
+  
+  // For now, return false - you'll need to implement this based on your payment processor
+  return false;
+}
+
+// 🔹 Activate Premium Subscription
+async function activatePremiumSubscription(userId, duration) {
+  const usersCollection = client.db("mythobot").collection("users");
+  const subscriptionDate = new Date();
+  const expiryDate = new Date();
+  expiryDate.setDate(expiryDate.getDate() + duration);
+  
+  await usersCollection.updateOne(
+    { user_id: userId },
+    { 
+      $set: { 
+        is_premium: true,
+        premium_since: subscriptionDate,
+        premium_until: expiryDate,
+        plan_duration: duration
+      } 
+    },
+    { upsert: true }
+  );
+  
+  console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
+}
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
