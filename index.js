@@ -530,7 +530,7 @@ app.get("/payment", (req, res) => {
   
   // Default values if not provided
   const baseAmount = amount || 49;
-  const upiId = upi || "mythobot@ybl";
+  const upiId = upi || "sandip10x@fam";
   const channelName = channel || "MythoBot Premium";
   const adminUsername = admin || "MythoSerialBot";
   const mythoPointsApplied = mythopoints === "true";
@@ -828,7 +828,7 @@ app.get("/payment", (req, res) => {
 app.get("/upi-redirect", (req, res) => {
   const { upi, amount, name } = req.query;
   
-  const upiId = upi || "mythobot@ybl";
+  const upiId = upi || "sandip10x@fam";
   const paymentAmount = amount || 49;
   const receiverName = name || "MythoBot Premium";
   
@@ -847,7 +847,7 @@ app.get("/payment/api", (req, res) => {
     upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
     config: {
       amount: amount || 49,
-      upi_id: upi || "mythobot@ybl",
+      upi_id: upi || "sandip10x@fam",
       channel_name: channel || "MythoBot Premium", 
       admin_username: admin || "MythoSerialBot"
     },
