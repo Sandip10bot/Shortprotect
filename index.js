@@ -824,38 +824,7 @@ app.get("/payment", (req, res) => {
   `);
 });
 
-// 🔹 UPI Deep Link API
-app.get("/upi-redirect", (req, res) => {
-  const { upi, amount, name } = req.query;
-  
-  const upiId = upi || "sandip10x@fam";
-  const paymentAmount = amount || 49;
-  const receiverName = name || "MythoBot Premium";
-  
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
-  
-  res.redirect(upiLink);
-});
-
-// 🔹 Payment API endpoint
-app.get("/payment/api", (req, res) => {
-  const { amount, upi, channel, admin } = req.query;
-  
-  res.json({
-    success: true,
-    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "sandip10x@fam"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
-    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
-    config: {
-      amount: amount || 49,
-      upi_id: upi || "sandip10x@fam",
-      channel_name: channel || "MythoBot Premium", 
-      admin_username: admin || "MythoSerialBot"
-    },
-    message: "MythoBot Premium Access Payment"
-  });
-});
-
-// 🔹 Enhanced Premium Payment with MythoPoints
+// 🔹 Enhanced Premium Payment with MythoPoints Discount Button
 app.get("/premium-payment", async (req, res) => {
   const { user_id, plan, duration, amount, upi, admin, mythopoints } = req.query;
   
@@ -920,10 +889,11 @@ app.get("/premium-payment", async (req, res) => {
             .upi-app:hover { transform: scale(1.05); }
             .status-check { background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px; margin: 10px 0; }
             .discount-badge { background: linear-gradient(135deg, #10b981, #059669); }
+            .mythopoints-active { border: 3px solid #f59e0b; box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
         </style>
     </head>
     <body class="flex items-center justify-center min-h-screen p-4">
-        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow">
+        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
             
             <!-- Header Section -->
             <div class="p-6 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
@@ -954,6 +924,22 @@ app.get("/premium-payment", async (req, res) => {
                 `}
                 
                 <p class="text-sm text-slate-600">User ID: <code>${user_id}</code></p>
+                
+                <!-- MythoPoints Discount Button -->
+                ${!mythoPointsApplied ? `
+                <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div class="flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-coins text-amber-600"></i>
+                        <span class="text-sm text-amber-800 font-semibold">
+                            Have MythoPoints? Get 30% discount!
+                        </span>
+                    </div>
+                    <a href="/premium-payment?user_id=${user_id}&plan=${plan}&amount=${originalAmount}&duration=${finalDuration}&upi=${upiId}&admin=${adminUsername}&mythopoints=true" 
+                       class="inline-block mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
+                       Apply 30% MythoPoints Discount
+                    </a>
+                </div>
+                ` : ''}
                 
                 <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200 my-4">
                     <div id="loader" class="loader"></div>
@@ -1078,6 +1064,39 @@ app.get("/premium-payment", async (req, res) => {
     </html>
   `);
 });
+
+// 🔹 UPI Deep Link API
+app.get("/upi-redirect", (req, res) => {
+  const { upi, amount, name } = req.query;
+  
+  const upiId = upi || "sandip10x@fam";
+  const paymentAmount = amount || 49;
+  const receiverName = name || "MythoBot Premium";
+  
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
+  
+  res.redirect(upiLink);
+});
+
+// 🔹 Payment API endpoint
+app.get("/payment/api", (req, res) => {
+  const { amount, upi, channel, admin } = req.query;
+  
+  res.json({
+    success: true,
+    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "sandip10x@fam"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
+    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
+    config: {
+      amount: amount || 49,
+      upi_id: upi || "sandip10x@fam",
+      channel_name: channel || "MythoBot Premium", 
+      admin_username: admin || "MythoSerialBot"
+    },
+    message: "MythoBot Premium Access Payment"
+  });
+});
+
+                
 
 // 🔹 Enhanced Payment Status Check with Telegram Notifications
 app.get("/payment-status/:token", async (req, res) => {
