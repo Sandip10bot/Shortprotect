@@ -29,7 +29,23 @@ async function connectDB() {
   console.log("✅ MongoDB connected");
 }
 connectDB();
+// 🔹 Test Telegram Notification
+app.get("/test-notification", async (req, res) => {
+  const testMessage = `
+🔔 <b>TEST NOTIFICATION</b>
 
+👤 <b>User ID:</b> <code>5189870730</code>
+📦 <b>Plan:</b> silver
+💵 <b>Amount:</b> ₹55
+🎯 <b>MythoPoints Discount:</b> ₹24 (30% off)
+⏰ <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+✅ <b>Status:</b> Test Successful!
+  `;
+  
+  await sendTelegramNotification(testMessage);
+  res.send('✅ Test notification sent! Check your Telegram.');
+});
 // 🔹 Send Telegram Notification
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
