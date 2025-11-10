@@ -1270,7 +1270,7 @@ app.get("/", (req, res) => {
           <i class="fa-solid fa-wallet text-blue-400 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Payment Portal</h2>
           <p class="text-purple-100 text-sm mt-2">Pay via secure UPI for premium access or channel plans.</p>
-          <a href="/payment?amount=49&upi=mythobot@ybl&channel=MythoBot%20Premium&admin=MythoSerialBot" class="btn inline-block mt-4 bg-blue-500 text-white font-semibold px-5 py-2 rounded-full">Open Payment</a>
+          <a href="/payment?amount=49&upi=sandip10x@fam&channel=MythoBot%20Premium&admin=MythoSerialBot" class="btn inline-block mt-4 bg-blue-500 text-white font-semibold px-5 py-2 rounded-full">Open Payment</a>
         </div>
 
         <!-- MythoPoints Discount -->
