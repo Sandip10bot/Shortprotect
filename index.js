@@ -13,6 +13,10 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
+// Telegram Bot Configuration
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Set in Koyeb secrets
+const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID; // Your personal chat ID
+
 const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
@@ -25,6 +29,48 @@ async function connectDB() {
   console.log("✅ MongoDB connected");
 }
 connectDB();
+
+// 🔹 Send Telegram Notification
+async function sendTelegramNotification(message) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
+    console.log("🔔 Telegram notification (simulated):", message);
+    return;
+  }
+
+  try {
+    const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    
+    const response = await fetch(telegramUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_ADMIN_CHAT_ID,
+        text: message,
+        parse_mode: 'HTML'
+      })
+    });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('❌ Telegram notification failed:', result);
+    } else {
+      console.log('✅ Telegram notification sent');
+    }
+  } catch (error) {
+    console.error('❌ Telegram notification error:', error);
+  }
+}
+
+// 🔹 Calculate discounted price with MythoPoints
+function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
+  if (mythoPointsApplied) {
+    const discount = originalPrice * 0.3; // 30% discount
+    return Math.max(1, Math.round(originalPrice - discount)); // Minimum ₹1
+  }
+  return originalPrice;
+}
 
 // 🔹 Generate a token and return protected link
 app.get("/generate/:userId", async (req, res) => {
@@ -477,15 +523,22 @@ app.get("/stats/:userId", async (req, res) => {
     });
   }
 });
-// 🔹 Payment Page Endpoint for MythoBot with UPI Apps Redirect
+
+// 🔹 Enhanced Payment Page with MythoPoints Discount
 app.get("/payment", (req, res) => {
-  const { amount, upi, channel, admin } = req.query;
+  const { amount, upi, channel, admin, mythopoints } = req.query;
   
   // Default values if not provided
   const baseAmount = amount || 49;
   const upiId = upi || "mythobot@ybl";
   const channelName = channel || "MythoBot Premium";
   const adminUsername = admin || "MythoSerialBot";
+  const mythoPointsApplied = mythopoints === "true";
+
+  // Calculate discounted price
+  const finalAmount = calculateDiscountedPrice(parseInt(baseAmount), mythoPointsApplied);
+  const originalAmount = parseInt(baseAmount);
+  const discountAmount = originalAmount - finalAmount;
 
   res.send(`
     <!DOCTYPE html>
@@ -505,10 +558,12 @@ app.get("/payment", (req, res) => {
             .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
             .upi-app { transition: all 0.3s ease; }
             .upi-app:hover { transform: scale(1.05); }
+            .discount-badge { background: linear-gradient(135deg, #10b981, #059669); }
+            .mythopoints-active { border: 3px solid #f59e0b; box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
         </style>
     </head>
     <body class="flex items-center justify-center min-h-screen p-4">
-        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow">
+        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
             
             <!-- Header Section -->
             <div class="p-8 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
@@ -517,18 +572,52 @@ app.get("/payment", (req, res) => {
                 </div>
                 <h1 class="text-2xl font-bold">MythoBot Premium Access</h1>
                 <p class="text-purple-200 mt-2">Unlock Exclusive Features & Double Points</p>
+                
+                ${mythoPointsApplied ? `
+                <div class="discount-badge inline-flex items-center px-4 py-2 rounded-full text-white font-bold mt-3">
+                    <i class="fa-solid fa-star mr-2"></i>
+                    30% MythoPoints Discount Applied!
+                </div>
+                ` : ''}
             </div>
 
             <!-- Payment Details Section -->
             <div class="p-6 sm:p-8 text-center">
-                <p class="text-sm font-medium text-slate-600">One-time payment only</p>
-                <p class="text-5xl font-extrabold text-purple-600 my-2" id="payment-amount">₹${baseAmount}</p>
+                ${mythoPointsApplied ? `
+                <div class="flex justify-center items-center gap-4 mb-4">
+                    <span class="text-2xl text-slate-400 line-through">₹${originalAmount}</span>
+                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
+                    <span class="text-5xl font-extrabold text-green-600">₹${finalAmount}</span>
+                </div>
+                <p class="text-sm text-green-600 font-bold mb-2">
+                    🎉 You saved ₹${discountAmount} with MythoPoints!
+                </p>
+                ` : `
+                <p class="text-5xl font-extrabold text-purple-600 my-2">₹${finalAmount}</p>
+                `}
+                
                 <p class="text-xs text-slate-500 mb-6">Unique amount for your transaction</p>
                 
                 <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200">
                     <div id="loader" class="loader"></div>
                 </div>
                 <p class="text-sm text-slate-600 mt-4 font-semibold">Scan QR to pay via any UPI App</p>
+
+                <!-- MythoPoints Info -->
+                ${!mythoPointsApplied ? `
+                <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div class="flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-coins text-amber-600"></i>
+                        <span class="text-sm text-amber-800 font-semibold">
+                            Have MythoPoints? Get 30% discount!
+                        </span>
+                    </div>
+                    <a href="/payment?amount=${baseAmount}&upi=${upiId}&channel=${encodeURIComponent(channelName)}&admin=${adminUsername}&mythopoints=true" 
+                       class="inline-block mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
+                       Apply 30% MythoPoints Discount
+                    </a>
+                </div>
+                ` : ''}
 
                 <!-- UPI Apps Direct Links -->
                 <div class="mt-6">
@@ -572,7 +661,6 @@ app.get("/payment", (req, res) => {
 
         <script>
             document.addEventListener('DOMContentLoaded', () => {
-                const amountElement = document.getElementById('payment-amount');
                 const loader = document.getElementById('loader');
                 const qrContainer = document.getElementById('qr-code-container');
                 const upiIdElement = document.getElementById('upi-id-text');
@@ -581,14 +669,11 @@ app.get("/payment", (req, res) => {
                 const originalCopyHTML = copySpan.innerHTML;
                 const upiAppsContainer = document.getElementById('upi-apps-container');
 
-                // Add small random variation to amount
-                const variation = Math.floor(Math.random() * 5) - 2;
-                const finalAmount = ${baseAmount} + variation;
-                const displayAmount = finalAmount > 0 ? finalAmount : ${baseAmount};
-                amountElement.textContent = \`₹\${displayAmount}\`;
+                // Use the final amount from server calculation
+                const finalAmount = ${finalAmount};
                 
                 // Generate UPI link
-                const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR\`;
+                const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
                 const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
                 
                 // Load QR Code
@@ -670,8 +755,8 @@ app.get("/payment", (req, res) => {
                     appButton.onclick = () => {
                         if (app.package) {
                             // Try to open in app first, then fallback to UPI link
-                            const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
-                            const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${displayAmount}.00&cu=INR\`;
+                            const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
+                            const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
                             
                             // Try app intent first
                             window.location.href = intentUrl;
@@ -758,8 +843,8 @@ app.get("/payment/api", (req, res) => {
   
   res.json({
     success: true,
-    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "mythobot@ybl"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
-    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "mythobot@ybl"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
+    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "sandip10x@fam"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
+    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
     config: {
       amount: amount || 49,
       upi_id: upi || "mythobot@ybl",
@@ -770,9 +855,9 @@ app.get("/payment/api", (req, res) => {
   });
 });
 
-// 🔹 Premium Subscription Payment Endpoint
+// 🔹 Enhanced Premium Payment with MythoPoints
 app.get("/premium-payment", async (req, res) => {
-  const { user_id, plan, duration, amount, upi, admin } = req.query;
+  const { user_id, plan, duration, amount, upi, admin, mythopoints } = req.query;
   
   // Validate required parameters
   if (!user_id || !plan) {
@@ -786,7 +871,13 @@ app.get("/premium-payment", async (req, res) => {
   };
 
   const selectedPlan = plans[plan] || plans['silver'];
-  const finalAmount = amount || selectedPlan.default_amount;
+  const originalAmount = amount || selectedPlan.default_amount;
+  const mythoPointsApplied = mythopoints === "true";
+  
+  // Apply 30% discount if MythoPoints are used
+  const finalAmount = calculateDiscountedPrice(parseInt(originalAmount), mythoPointsApplied);
+  const discountAmount = originalAmount - finalAmount;
+  
   const finalDuration = duration || selectedPlan.default_duration;
   const upiId = upi || "sandip10x@fam";
   const adminUsername = admin || "MythoSerialBot";
@@ -801,7 +892,10 @@ app.get("/premium-payment", async (req, res) => {
     payment_token: paymentToken,
     user_id: parseInt(user_id),
     plan: plan,
-    amount: parseInt(finalAmount),
+    original_amount: parseInt(originalAmount),
+    final_amount: finalAmount,
+    mythopoints_applied: mythoPointsApplied,
+    discount_amount: discountAmount,
     duration: parseInt(finalDuration),
     status: 'pending',
     created_at: new Date(),
@@ -825,6 +919,7 @@ app.get("/premium-payment", async (req, res) => {
             .upi-app { transition: all 0.3s ease; }
             .upi-app:hover { transform: scale(1.05); }
             .status-check { background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px; margin: 10px 0; }
+            .discount-badge { background: linear-gradient(135deg, #10b981, #059669); }
         </style>
     </head>
     <body class="flex items-center justify-center min-h-screen p-4">
@@ -834,11 +929,30 @@ app.get("/premium-payment", async (req, res) => {
             <div class="p-6 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
                 <h1 class="text-2xl font-bold">${planName}</h1>
                 <p class="text-purple-200 mt-2">Automatic Activation • ${finalDuration} Days</p>
+                
+                ${mythoPointsApplied ? `
+                <div class="discount-badge inline-flex items-center px-4 py-2 rounded-full text-white font-bold mt-3">
+                    <i class="fa-solid fa-star mr-2"></i>
+                    30% MythoPoints Discount Applied!
+                </div>
+                ` : ''}
             </div>
 
             <!-- Payment Details -->
             <div class="p-6 text-center">
+                ${mythoPointsApplied ? `
+                <div class="flex justify-center items-center gap-4 mb-4">
+                    <span class="text-2xl text-slate-400 line-through">₹${originalAmount}</span>
+                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
+                    <span class="text-5xl font-extrabold text-green-600">₹${finalAmount}</span>
+                </div>
+                <p class="text-sm text-green-600 font-bold mb-2">
+                    🎉 You saved ₹${discountAmount} with MythoPoints!
+                </p>
+                ` : `
                 <p class="text-5xl font-extrabold text-purple-600 my-2">₹${finalAmount}</p>
+                `}
+                
                 <p class="text-sm text-slate-600">User ID: <code>${user_id}</code></p>
                 
                 <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200 my-4">
@@ -964,6 +1078,104 @@ app.get("/premium-payment", async (req, res) => {
     </html>
   `);
 });
+
+// 🔹 Enhanced Payment Status Check with Telegram Notifications
+app.get("/payment-status/:token", async (req, res) => {
+  const { token } = req.params;
+  
+  const paymentCollection = client.db("mythobot").collection("payment_sessions");
+  const paymentSession = await paymentCollection.findOne({ payment_token: token });
+  
+  if (!paymentSession) {
+    return res.json({ status: 'failed', message: 'Payment session not found' });
+  }
+  
+  if (paymentSession.status === 'completed') {
+    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
+  }
+  
+  if (paymentSession.status === 'failed') {
+    return res.json({ status: 'failed', message: 'Payment verification failed' });
+  }
+  
+  // Check if payment is completed
+  const isPaymentVerified = await verifyUPIPayment(paymentSession);
+  
+  if (isPaymentVerified) {
+    // Update payment status
+    await paymentCollection.updateOne(
+      { payment_token: token },
+      { 
+        $set: { 
+          status: 'completed', 
+          verified_at: new Date(),
+          notified: true
+        } 
+      }
+    );
+    
+    // Activate premium for user
+    await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
+    
+    // Send Telegram notification for successful payment
+    const notificationMessage = `
+💳 <b>NEW PAYMENT RECEIVED! 💰</b>
+
+👤 <b>User ID:</b> <code>${paymentSession.user_id}</code>
+📦 <b>Plan:</b> ${paymentSession.plan}
+💵 <b>Amount:</b> ₹${paymentSession.final_amount}
+${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${paymentSession.discount_amount} (30% off)\n💸 <b>Original Amount:</b> ₹${paymentSession.original_amount}` : ''}
+⏰ <b>Duration:</b> ${paymentSession.duration} days
+🕒 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+🔗 <b>Payment Token:</b> <code>${token}</code>
+
+✅ <b>Status:</b> Payment Verified & Premium Activated
+    `;
+    
+    await sendTelegramNotification(notificationMessage);
+    
+    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
+  }
+  
+  res.json({ status: 'pending' });
+});
+
+// 🔹 UPI Payment Verification (Placeholder - Implement based on your payment gateway)
+async function verifyUPIPayment(paymentSession) {
+  // Implement actual UPI payment verification here
+  // This could involve:
+  // 1. Checking with your payment gateway API
+  // 2. Webhook verification
+  // 3. Manual verification through admin panel
+  // 4. Bank statement parsing
+  
+  // For now, return false - you'll need to implement this based on your payment processor
+  return false;
+}
+
+// 🔹 Activate Premium Subscription
+async function activatePremiumSubscription(userId, duration) {
+  const usersCollection = client.db("mythobot").collection("users");
+  const subscriptionDate = new Date();
+  const expiryDate = new Date();
+  expiryDate.setDate(expiryDate.getDate() + duration);
+  
+  await usersCollection.updateOne(
+    { user_id: userId },
+    { 
+      $set: { 
+        is_premium: true,
+        premium_since: subscriptionDate,
+        premium_until: expiryDate,
+        plan_duration: duration
+      } 
+    },
+    { upsert: true }
+  );
+  
+  console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
+}
+
 // 🏠 MythoBot Animated Home Page
 app.get("/", (req, res) => {
   res.send(`
@@ -1060,6 +1272,22 @@ app.get("/", (req, res) => {
           <p class="text-purple-100 text-sm mt-2">Pay via secure UPI for premium access or channel plans.</p>
           <a href="/payment?amount=49&upi=mythobot@ybl&channel=MythoBot%20Premium&admin=MythoSerialBot" class="btn inline-block mt-4 bg-blue-500 text-white font-semibold px-5 py-2 rounded-full">Open Payment</a>
         </div>
+
+        <!-- MythoPoints Discount -->
+        <div class="glass text-center p-6 delay-500">
+          <i class="fa-solid fa-coins text-yellow-500 text-3xl mb-3"></i>
+          <h2 class="text-xl font-bold">MythoPoints</h2>
+          <p class="text-purple-100 text-sm mt-2">Use your earned points to get 30% discount on payments!</p>
+          <a href="/payment?amount=49&mythopoints=true" class="btn inline-block mt-4 bg-yellow-500 text-black font-semibold px-5 py-2 rounded-full">Use Points</a>
+        </div>
+
+        <!-- Admin Notifications -->
+        <div class="glass text-center p-6 delay-600">
+          <i class="fa-solid fa-bell text-red-400 text-3xl mb-3"></i>
+          <h2 class="text-xl font-bold">Live Alerts</h2>
+          <p class="text-purple-100 text-sm mt-2">Instant Telegram notifications for all payments & activities.</p>
+          <a href="https://t.me/MythoSerialBot" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Get Alerts</a>
+        </div>
       </div>
 
       <!-- Footer -->
@@ -1085,80 +1313,6 @@ app.get("/", (req, res) => {
     </html>
   `);
 });
-
-// 🔹 Payment Status Check Endpoint
-app.get("/payment-status/:token", async (req, res) => {
-  const { token } = req.params;
-  
-  const paymentCollection = client.db("mythobot").collection("payment_sessions");
-  const paymentSession = await paymentCollection.findOne({ payment_token: token });
-  
-  if (!paymentSession) {
-    return res.json({ status: 'failed', message: 'Payment session not found' });
-  }
-  
-  if (paymentSession.status === 'completed') {
-    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
-  }
-  
-  if (paymentSession.status === 'failed') {
-    return res.json({ status: 'failed', message: 'Payment verification failed' });
-  }
-  
-  // Check if payment is completed (you'll need to implement actual UPI verification)
-  // This is a placeholder - you'll need to integrate with a UPI verification service
-  const isPaymentVerified = await verifyUPIPayment(paymentSession);
-  
-  if (isPaymentVerified) {
-    await paymentCollection.updateOne(
-      { payment_token: token },
-      { $set: { status: 'completed', verified_at: new Date() } }
-    );
-    
-    // Activate premium for user
-    await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
-    
-    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
-  }
-  
-  res.json({ status: 'pending' });
-});
-
-// 🔹 UPI Payment Verification (Placeholder - Implement based on your payment gateway)
-async function verifyUPIPayment(paymentSession) {
-  // Implement actual UPI payment verification here
-  // This could involve:
-  // 1. Checking with your payment gateway API
-  // 2. Webhook verification
-  // 3. Manual verification through admin panel
-  // 4. Bank statement parsing
-  
-  // For now, return false - you'll need to implement this based on your payment processor
-  return false;
-}
-
-// 🔹 Activate Premium Subscription
-async function activatePremiumSubscription(userId, duration) {
-  const usersCollection = client.db("mythobot").collection("users");
-  const subscriptionDate = new Date();
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + duration);
-  
-  await usersCollection.updateOne(
-    { user_id: userId },
-    { 
-      $set: { 
-        is_premium: true,
-        premium_since: subscriptionDate,
-        premium_until: expiryDate,
-        plan_duration: duration
-      } 
-    },
-    { upsert: true }
-  );
-  
-  console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
-}
 
 // 🔹 Radhe Radhe Game Page
 app.get("/radhe", (req, res) => {
@@ -1257,4 +1411,6 @@ app.listen(PORT, () => {
   console.log(`🎯 Bypass protection with roast messages activated!`);
   console.log(`✅ Legitimate SoftURL accesses will redirect to target URLs`);
   console.log(`🤡 Bypass attempts will get roasted!`);
+  console.log(`🔔 Telegram notifications: ${TELEGRAM_BOT_TOKEN ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`💰 30% MythoPoints discount system: ACTIVE`);
 });
