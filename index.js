@@ -1513,20 +1513,32 @@ app.get("/yt/dl", async (req, res) => {
   const videoUrl = req.query.url;
   if (!videoUrl) return res.json({ success: false });
 
-  try {
-    const info = await ytdlp(videoUrl, { dumpSingleJson: true });
+  let output = "";
+  const ytdlp = spawn("yt-dlp", ["-j", videoUrl]);
 
-    res.json({
-      success: true,
-      title: info.title,
-      video: "/yt/download?url=" + encodeURIComponent(videoUrl) + "&type=mp4",
-      audio: "/yt/download?url=" + encodeURIComponent(videoUrl) + "&type=mp3"
-    });
+  ytdlp.stdout.on("data", (data) => output += data.toString());
+  ytdlp.stderr.on("data", () => {}); // ignore warnings
 
-  } catch (error) {
-    res.json({ success: false, error: error.message });
-  }
+  ytdlp.on("close", () => {
+    try {
+      // Split output by lines and find the last valid JSON
+      const lines = output.split("\n").filter(line => line.trim().startsWith("{"));
+      if (!lines.length) return res.json({ success: false });
+
+      const info = JSON.parse(lines[lines.length - 1]);
+
+      res.json({
+        success: true,
+        title: info.title || "Unknown Title",
+        video: `/yt/download?url=${encodeURIComponent(videoUrl)}&type=mp4`,
+        audio: `/yt/download?url=${encodeURIComponent(videoUrl)}&type=mp3`
+      });
+    } catch {
+      res.json({ success: false });
+    }
+  });
 });
+
 // 🔹 Stream Download (MP4 / MP3)
 app.get("/yt/download", async (req, res) => {
   const { url, type } = req.query;
