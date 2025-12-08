@@ -1,12 +1,18 @@
 {
   "name": "softurl-protect",
   "version": "1.0.0",
+  "description": "MythoBot Server with YouTube Downloader",
+  "main": "index.js",
   "type": "module",
-  "dependencies": {
-    "express": "^4.18.2",
-    "mongodb": "^6.3.0"
-  },
   "scripts": {
     "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongodb": "^6.3.0",
+    "yt-dlp-exec": "^2.0.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
