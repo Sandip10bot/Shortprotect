@@ -1,23 +1,28 @@
-# Use official Node.js image
+# Use official Node.js 20 image
 FROM node:20
+
+# Install yt-dlp (best method)
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip ffmpeg && \
+    pip3 install yt-dlp
 
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json first
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
+# Install node dependencies
 RUN npm install
 
 # Copy all project files
 COPY . .
 
-# Build your project (if needed)
+# Build your project (ignore if no build script)
 RUN npm run build || echo "no build step"
 
-# Expose port (if using Express/HTTP)
+# Expose Express port
 EXPOSE 3000
 
-# Start command
+# Start server
 CMD ["npm", "start"]
