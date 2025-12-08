@@ -2,6 +2,7 @@
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
+import ytdlp from "yt-dlp-exec";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1439,6 +1440,107 @@ app.get("/radhe", (req, res) => {
     </html>
   `);
 });
+
+// 🔹 YouTube Downloader HTML Page
+app.get("/yt", (req, res) => {
+  res.send(`
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+
+  <body class="bg-gray-900 min-h-screen flex justify-center items-center p-6">
+
+    <div class="bg-gray-800 p-6 rounded-xl w-full max-w-lg text-white">
+
+      <h1 class="text-3xl font-bold text-center mb-4">📥 YouTube Downloader</h1>
+
+      <input id="url" class="w-full p-3 rounded text-black" placeholder="Paste YouTube Video Link">
+
+      <button onclick="startDownload()" 
+        class="w-full mt-4 bg-yellow-400 text-black font-bold py-3 rounded">
+        Get Download Links
+      </button>
+
+      <div id="result" class="mt-5 text-center"></div>
+
+      <a href="/" class="block text-center mt-5 underline opacity-70">Back to Home</a>
+    </div>
+
+    <script>
+      function startDownload() {
+        const url = document.getElementById("url").value.trim();
+        if (!url) return alert("Paste a valid YouTube link");
+
+        document.getElementById("result").innerHTML = "⏳ Processing…";
+
+        fetch("/yt/dl?url=" + encodeURIComponent(url))
+          .then(res => res.json())
+          .then(data => {
+            if (!data.success) {
+              document.getElementById("result").innerHTML = "❌ Error fetching video.";
+              return;
+            }
+
+            document.getElementById("result").innerHTML = \`
+            <div class='bg-white text-black p-4 rounded'>
+              <h3 class='font-bold mb-2'>\${data.title}</h3>
+
+              <a class="block bg-blue-600 text-white p-2 rounded mt-2"
+                 href="\${data.video}" target="_blank">🎬 Download Video (MP4)</a>
+
+              <a class="block bg-green-600 text-white p-2 rounded mt-2"
+                 href="\${data.audio}" target="_blank">🎵 Download Audio (MP3)</a>
+            </div>
+            \`;
+          });
+      }
+    </script>
+
+  </body>
+  </html>
+  `);
+});
+
+// 🔹 Fetch Title + Prepare Download URLs
+app.get("/yt/dl", async (req, res) => {
+  const videoUrl = req.query.url;
+  if (!videoUrl) return res.json({ success: false });
+
+  try {
+    const info = await ytdlp(videoUrl, { dumpSingleJson: true });
+
+    res.json({
+      success: true,
+      title: info.title,
+      video: "/yt/download?url=" + encodeURIComponent(videoUrl) + "&type=mp4",
+      audio: "/yt/download?url=" + encodeURIComponent(videoUrl) + "&type=mp3"
+    });
+
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+// 🔹 Stream Download (MP4 / MP3)
+app.get("/yt/download", async (req, res) => {
+  const { url, type } = req.query;
+
+  if (!url) return res.send("Invalid URL");
+
+  const format = type === "mp3" ? "bestaudio" : "best";
+
+  res.setHeader("Content-Disposition", "attachment");
+
+  ytdlp(url, {
+    format,
+    output: "-",
+  }).stdout.pipe(res);
+});
+
 
 // Start server
 app.listen(PORT, () => {
