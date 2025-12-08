@@ -6,10 +6,6 @@ import yt_dlp from 'yt-dlp-exec';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
-import crypto from 'crypto';
-
-const unlinkAsync = promisify(fs.unlink);
-const existsAsync = promisify(fs.exists);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +33,20 @@ async function connectDB() {
   console.log("✅ MongoDB connected");
 }
 connectDB();
+
+// YouTube downloader setup
+const unlinkAsync = promisify(fs.unlink);
+const existsAsync = promisify(fs.exists);
+
+// Create downloads directory if it doesn't exist
+const DOWNLOAD_DIR = path.join(process.cwd(), 'downloads');
+if (!fs.existsSync(DOWNLOAD_DIR)) {
+  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+}
+
+// Active downloads tracking
+const activeDownloads = new Map();
+
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
   const testMessage = `
@@ -54,6 +64,7 @@ app.get("/test-notification", async (req, res) => {
   await sendTelegramNotification(testMessage);
   res.send('✅ Test notification sent! Check your Telegram.');
 });
+
 // 🔹 Send Telegram Notification
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
@@ -95,6 +106,433 @@ function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
   }
   return originalPrice;
 }
+
+// 🔹 YouTube Downloader API endpoint
+app.get("/youtube-download", async (req, res) => {
+  const { url, quality, format, user_id } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing YouTube URL"
+    });
+  }
+
+  // Validate YouTube URL
+  if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid YouTube URL"
+    });
+  }
+
+  try {
+    // Generate unique download ID
+    const downloadId = crypto.randomBytes(8).toString('hex');
+    
+    // Start download in background
+    startDownload(downloadId, url, quality, format, user_id);
+    
+    res.json({
+      success: true,
+      download_id: downloadId,
+      status_url: `https://${req.hostname}/download-status/${downloadId}`,
+      message: "Download started in background"
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 🔹 Download status endpoint
+app.get("/download-status/:id", (req, res) => {
+  const { id } = req.params;
+  const downloadInfo = activeDownloads.get(id);
+  
+  if (!downloadInfo) {
+    return res.status(404).json({
+      success: false,
+      error: "Download not found"
+    });
+  }
+  
+  res.json({
+    success: true,
+    download_id: id,
+    status: downloadInfo.status,
+    progress: downloadInfo.progress,
+    filename: downloadInfo.filename,
+    download_url: downloadInfo.download_url,
+    error: downloadInfo.error
+  });
+});
+
+// 🔹 Download file endpoint
+app.get("/download-file/:id", (req, res) => {
+  const { id } = req.params;
+  const downloadInfo = activeDownloads.get(id);
+  
+  if (!downloadInfo || !downloadInfo.filename || !downloadInfo.download_url) {
+    return res.status(404).send("File not found");
+  }
+  
+  const filePath = path.join(DOWNLOAD_DIR, downloadInfo.filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("File not found");
+  }
+  
+  res.download(filePath, downloadInfo.filename);
+});
+
+// 🔹 YouTube download page (UI)
+app.get("/youtube-dl", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>YouTube Downloader - MythoBot</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+      <style>
+        body {
+          font-family: 'Inter', sans-serif;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .progress-bar {
+          width: 100%;
+          height: 20px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
+          overflow: hidden;
+        }
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #4ade80, #22c55e);
+          transition: width 0.3s ease;
+        }
+      </style>
+    </head>
+    <body class="min-h-screen flex items-center justify-center p-4">
+      <main class="glass rounded-2xl shadow-xl max-w-2xl w-full p-8 text-white">
+        <div class="text-center mb-8">
+          <h1 class="text-3xl font-bold mb-2">🎬 YouTube Downloader</h1>
+          <p class="text-gray-200">Download videos and audio from YouTube</p>
+        </div>
+        
+        <div class="mb-6">
+          <label class="block text-sm font-medium mb-2">YouTube URL</label>
+          <input type="text" id="youtubeUrl" 
+                 placeholder="https://www.youtube.com/watch?v=..." 
+                 class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500">
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4 mb-6">
+          <div>
+            <label class="block text-sm font-medium mb-2">Quality</label>
+            <select id="quality" class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none">
+              <option value="best">Best Quality</option>
+              <option value="1080">1080p</option>
+              <option value="720">720p</option>
+              <option value="480">480p</option>
+              <option value="360">360p</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">Format</label>
+            <select id="format" class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none">
+              <option value="video">Video (MP4)</option>
+              <option value="audio">Audio Only (MP3)</option>
+            </select>
+          </div>
+        </div>
+        
+        <button onclick="startDownload()" 
+                id="downloadBtn"
+                class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-all">
+          <i class="fas fa-download mr-2"></i>Download Now
+        </button>
+        
+        <div id="progressContainer" class="mt-6 hidden">
+          <div class="flex justify-between text-sm mb-2">
+            <span id="statusText">Starting download...</span>
+            <span id="progressText">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+          </div>
+          <div id="downloadLink" class="mt-4 text-center hidden">
+            <a id="fileLink" class="inline-block bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-all">
+              <i class="fas fa-file-download mr-2"></i>Download File
+            </a>
+          </div>
+          <div id="errorContainer" class="mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-lg hidden">
+            <p id="errorText" class="text-red-200"></p>
+          </div>
+        </div>
+        
+        <div class="mt-8 text-sm text-gray-300">
+          <p><i class="fas fa-info-circle mr-2"></i>Features:</p>
+          <ul class="list-disc list-inside ml-4 mt-2">
+            <li>Download videos up to 1080p</li>
+            <li>Extract audio as MP3</li>
+            <li>Background processing</li>
+            <li>Progress tracking</li>
+            <li>Direct download links</li>
+          </ul>
+        </div>
+        
+        <div class="mt-6 text-center">
+          <a href="/" class="text-purple-200 hover:text-white">
+            <i class="fas fa-arrow-left mr-2"></i>Back to Home
+          </a>
+        </div>
+      </main>
+
+      <script>
+        let currentDownloadId = null;
+        let checkInterval = null;
+        
+        async function startDownload() {
+          const url = document.getElementById('youtubeUrl').value;
+          const quality = document.getElementById('quality').value;
+          const format = document.getElementById('format').value;
+          
+          if (!url) {
+            alert('Please enter a YouTube URL');
+            return;
+          }
+          
+          const btn = document.getElementById('downloadBtn');
+          btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting...';
+          btn.disabled = true;
+          
+          try {
+            const response = await fetch(\`/youtube-download?url=\${encodeURIComponent(url)}&quality=\${quality}&format=\${format}\`);
+            const data = await response.json();
+            
+            if (data.success) {
+              currentDownloadId = data.download_id;
+              showProgress();
+              startProgressCheck();
+            } else {
+              throw new Error(data.error || 'Download failed');
+            }
+          } catch (error) {
+            showError(error.message);
+            resetButton();
+          }
+        }
+        
+        function showProgress() {
+          document.getElementById('progressContainer').classList.remove('hidden');
+          document.getElementById('errorContainer').classList.add('hidden');
+        }
+        
+        function startProgressCheck() {
+          if (checkInterval) clearInterval(checkInterval);
+          
+          checkInterval = setInterval(async () => {
+            try {
+              const response = await fetch(\`/download-status/\${currentDownloadId}\`);
+              const data = await response.json();
+              
+              if (data.success) {
+                updateProgress(data);
+                
+                if (data.status === 'completed' || data.status === 'failed') {
+                  clearInterval(checkInterval);
+                  resetButton();
+                  
+                  if (data.status === 'completed' && data.download_url) {
+                    showDownloadLink(data);
+                  } else if (data.error) {
+                    showError(data.error);
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Status check error:', error);
+            }
+          }, 2000);
+        }
+        
+        function updateProgress(data) {
+          document.getElementById('statusText').textContent = data.status || 'Processing';
+          document.getElementById('progressText').textContent = data.progress ? \`\${data.progress}%\` : '0%';
+          document.getElementById('progressFill').style.width = data.progress ? \`\${data.progress}%\` : '0%';
+        }
+        
+        function showDownloadLink(data) {
+          const linkContainer = document.getElementById('downloadLink');
+          const fileLink = document.getElementById('fileLink');
+          
+          fileLink.href = data.download_url;
+          fileLink.download = data.filename || 'download.mp4';
+          
+          linkContainer.classList.remove('hidden');
+        }
+        
+        function showError(message) {
+          const errorContainer = document.getElementById('errorContainer');
+          const errorText = document.getElementById('errorText');
+          
+          errorText.textContent = message;
+          errorContainer.classList.remove('hidden');
+        }
+        
+        function resetButton() {
+          const btn = document.getElementById('downloadBtn');
+          btn.innerHTML = '<i class="fas fa-download mr-2"></i>Download Now';
+          btn.disabled = false;
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// Function to start download in background
+async function startDownload(downloadId, url, quality = 'best', format = 'video', userId = null) {
+  try {
+    const options = {
+      output: path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+      format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+      mergeOutputFormat: 'mp4',
+      noWarnings: true,
+      noCallHome: true,
+      noCheckCertificate: true,
+      preferFreeFormats: true,
+      youtubeSkipDashManifest: true
+    };
+    
+    // Set quality
+    if (quality !== 'best' && format === 'video') {
+      options.format = `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`;
+    }
+    
+    // Set audio format
+    if (format === 'audio') {
+      options.format = 'bestaudio/best';
+      options.extractAudio = true;
+      options.audioFormat = 'mp3';
+      options.audioQuality = '192';
+    }
+    
+    // Add to active downloads
+    activeDownloads.set(downloadId, {
+      status: 'downloading',
+      progress: 0,
+      filename: null,
+      download_url: null,
+      error: null,
+      start_time: new Date(),
+      user_id: userId
+    });
+    
+    // Get video info first
+    const info = await yt_dlp(url, {
+      dumpSingleJson: true,
+      noWarnings: true
+    });
+    
+    const title = info.title || 'video';
+    const sanitizedTitle = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 100);
+    const ext = format === 'audio' ? 'mp3' : 'mp4';
+    const outputFile = path.join(DOWNLOAD_DIR, `${sanitizedTitle}.${ext}`);
+    
+    // Update with filename
+    activeDownloads.set(downloadId, {
+      ...activeDownloads.get(downloadId),
+      filename: `${sanitizedTitle}.${ext}`
+    });
+    
+    // Download the file
+    await yt_dlp(url, {
+      ...options,
+      output: outputFile,
+      progress: true
+    }, {
+      onProgress: (progress) => {
+        if (progress.percent) {
+          activeDownloads.set(downloadId, {
+            ...activeDownloads.get(downloadId),
+            progress: Math.round(progress.percent),
+            status: 'downloading'
+          });
+        }
+      }
+    });
+    
+    // Update to completed
+    activeDownloads.set(downloadId, {
+      ...activeDownloads.get(downloadId),
+      status: 'completed',
+      progress: 100,
+      download_url: `/download-file/${downloadId}`,
+      completed_time: new Date()
+    });
+    
+    // Auto cleanup after 1 hour
+    setTimeout(async () => {
+      if (activeDownloads.has(downloadId)) {
+        const downloadInfo = activeDownloads.get(downloadId);
+        if (downloadInfo.filename) {
+          const filePath = path.join(DOWNLOAD_DIR, downloadInfo.filename);
+          if (await existsAsync(filePath)) {
+            await unlinkAsync(filePath);
+          }
+        }
+        activeDownloads.delete(downloadId);
+      }
+    }, 3600000);
+    
+  } catch (error) {
+    console.error('Download error:', error);
+    activeDownloads.set(downloadId, {
+      ...activeDownloads.get(downloadId),
+      status: 'failed',
+      error: error.message
+    });
+    
+    // Cleanup failed downloads after 5 minutes
+    setTimeout(() => {
+      activeDownloads.delete(downloadId);
+    }, 300000);
+  }
+}
+
+// Cleanup old files periodically (optional)
+setInterval(async () => {
+  try {
+    const files = await fs.promises.readdir(DOWNLOAD_DIR);
+    const now = Date.now();
+    
+    for (const file of files) {
+      const filePath = path.join(DOWNLOAD_DIR, file);
+      const stats = await fs.promises.stat(filePath);
+      
+      // Delete files older than 2 hours
+      if (now - stats.mtimeMs > 7200000) {
+        await fs.promises.unlink(filePath);
+        console.log(`Cleaned up old file: ${file}`);
+      }
+    }
+  } catch (error) {
+    console.error('Cleanup error:', error);
+  }
+}, 3600000); // Run every hour
 
 // 🔹 Generate a token and return protected link
 app.get("/generate/:userId", async (req, res) => {
@@ -407,7 +845,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         <div class="user-info">
           <h3>📊 Bypass Attempt Details:</h3>
           <p><strong>User ID:</strong> ${userId}</p>
-        
           <p><strong>IP Address:</strong> ${req.ip}</p>
           <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
           <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
@@ -1120,444 +1557,6 @@ app.get("/payment/api", (req, res) => {
   });
 });
 
-
-
-// Create downloads directory if it doesn't exist
-const DOWNLOAD_DIR = path.join(process.cwd(), 'downloads');
-if (!fs.existsSync(DOWNLOAD_DIR)) {
-  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
-}
-
-// Active downloads tracking
-const activeDownloads = new Map();
-
-// YouTube Downloader API endpoint
-app.get("/youtube-download", async (req, res) => {
-  const { url, quality, format, user_id } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({
-      success: false,
-      error: "Missing YouTube URL"
-    });
-  }
-
-  // Validate YouTube URL
-  if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
-    return res.status(400).json({
-      success: false,
-      error: "Invalid YouTube URL"
-    });
-  }
-
-  try {
-    // Generate unique download ID
-    const downloadId = crypto.randomBytes(8).toString('hex');
-    
-    // Start download in background
-    startDownload(downloadId, url, quality, format, user_id);
-    
-    res.json({
-      success: true,
-      download_id: downloadId,
-      status_url: `https://${req.hostname}/download-status/${downloadId}`,
-      message: "Download started in background"
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Download status endpoint
-app.get("/download-status/:id", (req, res) => {
-  const { id } = req.params;
-  const downloadInfo = activeDownloads.get(id);
-  
-  if (!downloadInfo) {
-    return res.status(404).json({
-      success: false,
-      error: "Download not found"
-    });
-  }
-  
-  res.json({
-    success: true,
-    download_id: id,
-    status: downloadInfo.status,
-    progress: downloadInfo.progress,
-    filename: downloadInfo.filename,
-    download_url: downloadInfo.download_url,
-    error: downloadInfo.error
-  });
-});
-
-// Download file endpoint
-app.get("/download-file/:id", (req, res) => {
-  const { id } = req.params;
-  const downloadInfo = activeDownloads.get(id);
-  
-  if (!downloadInfo || !downloadInfo.filename || !downloadInfo.download_url) {
-    return res.status(404).send("File not found");
-  }
-  
-  const filePath = path.join(DOWNLOAD_DIR, downloadInfo.filename);
-  
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send("File not found");
-  }
-  
-  res.download(filePath, downloadInfo.filename);
-});
-
-// YouTube download page (UI)
-app.get("/youtube-dl", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>YouTube Downloader - MythoBot</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-      <style>
-        body {
-          font-family: 'Inter', sans-serif;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        .glass {
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .progress-bar {
-          width: 100%;
-          height: 20px;
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-          overflow: hidden;
-        }
-        .progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #4ade80, #22c55e);
-          transition: width 0.3s ease;
-        }
-      </style>
-    </head>
-    <body class="min-h-screen flex items-center justify-center p-4">
-      <main class="glass rounded-2xl shadow-xl max-w-2xl w-full p-8 text-white">
-        <div class="text-center mb-8">
-          <h1 class="text-3xl font-bold mb-2">🎬 YouTube Downloader</h1>
-          <p class="text-gray-200">Download videos and audio from YouTube</p>
-        </div>
-        
-        <div class="mb-6">
-          <label class="block text-sm font-medium mb-2">YouTube URL</label>
-          <input type="text" id="youtubeUrl" 
-                 placeholder="https://www.youtube.com/watch?v=..." 
-                 class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500">
-        </div>
-        
-        <div class="grid grid-cols-2 gap-4 mb-6">
-          <div>
-            <label class="block text-sm font-medium mb-2">Quality</label>
-            <select id="quality" class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none">
-              <option value="best">Best Quality</option>
-              <option value="1080">1080p</option>
-              <option value="720">720p</option>
-              <option value="480">480p</option>
-              <option value="360">360p</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-2">Format</label>
-            <select id="format" class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 focus:outline-none">
-              <option value="video">Video (MP4)</option>
-              <option value="audio">Audio Only (MP3)</option>
-            </select>
-          </div>
-        </div>
-        
-        <button onclick="startDownload()" 
-                id="downloadBtn"
-                class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-all">
-          <i class="fas fa-download mr-2"></i>Download Now
-        </button>
-        
-        <div id="progressContainer" class="mt-6 hidden">
-          <div class="flex justify-between text-sm mb-2">
-            <span id="statusText">Starting download...</span>
-            <span id="progressText">0%</span>
-          </div>
-          <div class="progress-bar">
-            <div id="progressFill" class="progress-fill" style="width: 0%"></div>
-          </div>
-          <div id="downloadLink" class="mt-4 text-center hidden">
-            <a id="fileLink" class="inline-block bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-all">
-              <i class="fas fa-file-download mr-2"></i>Download File
-            </a>
-          </div>
-          <div id="errorContainer" class="mt-4 p-4 bg-red-500/20 border border-red-500/30 rounded-lg hidden">
-            <p id="errorText" class="text-red-200"></p>
-          </div>
-        </div>
-        
-        <div class="mt-8 text-sm text-gray-300">
-          <p><i class="fas fa-info-circle mr-2"></i>Features:</p>
-          <ul class="list-disc list-inside ml-4 mt-2">
-            <li>Download videos up to 1080p</li>
-            <li>Extract audio as MP3</li>
-            <li>Background processing</li>
-            <li>Progress tracking</li>
-            <li>Direct download links</li>
-          </ul>
-        </div>
-        
-        <div class="mt-6 text-center">
-          <a href="/" class="text-purple-200 hover:text-white">
-            <i class="fas fa-arrow-left mr-2"></i>Back to Home
-          </a>
-        </div>
-      </main>
-
-      <script>
-        let currentDownloadId = null;
-        let checkInterval = null;
-        
-        async function startDownload() {
-          const url = document.getElementById('youtubeUrl').value;
-          const quality = document.getElementById('quality').value;
-          const format = document.getElementById('format').value;
-          
-          if (!url) {
-            alert('Please enter a YouTube URL');
-            return;
-          }
-          
-          const btn = document.getElementById('downloadBtn');
-          btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting...';
-          btn.disabled = true;
-          
-          try {
-            const response = await fetch(\`/youtube-download?url=\${encodeURIComponent(url)}&quality=\${quality}&format=\${format}\`);
-            const data = await response.json();
-            
-            if (data.success) {
-              currentDownloadId = data.download_id;
-              showProgress();
-              startProgressCheck();
-            } else {
-              throw new Error(data.error || 'Download failed');
-            }
-          } catch (error) {
-            showError(error.message);
-            resetButton();
-          }
-        }
-        
-        function showProgress() {
-          document.getElementById('progressContainer').classList.remove('hidden');
-          document.getElementById('errorContainer').classList.add('hidden');
-        }
-        
-        function startProgressCheck() {
-          if (checkInterval) clearInterval(checkInterval);
-          
-          checkInterval = setInterval(async () => {
-            try {
-              const response = await fetch(\`/download-status/\${currentDownloadId}\`);
-              const data = await response.json();
-              
-              if (data.success) {
-                updateProgress(data);
-                
-                if (data.status === 'completed' || data.status === 'failed') {
-                  clearInterval(checkInterval);
-                  resetButton();
-                  
-                  if (data.status === 'completed' && data.download_url) {
-                    showDownloadLink(data);
-                  } else if (data.error) {
-                    showError(data.error);
-                  }
-                }
-              }
-            } catch (error) {
-              console.error('Status check error:', error);
-            }
-          }, 2000);
-        }
-        
-        function updateProgress(data) {
-          document.getElementById('statusText').textContent = data.status || 'Processing';
-          document.getElementById('progressText').textContent = data.progress ? \`\${data.progress}%\` : '0%';
-          document.getElementById('progressFill').style.width = data.progress ? \`\${data.progress}%\` : '0%';
-        }
-        
-        function showDownloadLink(data) {
-          const linkContainer = document.getElementById('downloadLink');
-          const fileLink = document.getElementById('fileLink');
-          
-          fileLink.href = data.download_url;
-          fileLink.download = data.filename || 'download.mp4';
-          
-          linkContainer.classList.remove('hidden');
-        }
-        
-        function showError(message) {
-          const errorContainer = document.getElementById('errorContainer');
-          const errorText = document.getElementById('errorText');
-          
-          errorText.textContent = message;
-          errorContainer.classList.remove('hidden');
-        }
-        
-        function resetButton() {
-          const btn = document.getElementById('downloadBtn');
-          btn.innerHTML = '<i class="fas fa-download mr-2"></i>Download Now';
-          btn.disabled = false;
-        }
-      </script>
-    </body>
-    </html>
-  `);
-});
-
-// Function to start download in background
-async function startDownload(downloadId, url, quality = 'best', format = 'video', userId = null) {
-  try {
-    const options = {
-      output: path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-      format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-      mergeOutputFormat: 'mp4',
-      noWarnings: true,
-      noCallHome: true,
-      noCheckCertificate: true,
-      preferFreeFormats: true,
-      youtubeSkipDashManifest: true
-    };
-    
-    // Set quality
-    if (quality !== 'best' && format === 'video') {
-      options.format = `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`;
-    }
-    
-    // Set audio format
-    if (format === 'audio') {
-      options.format = 'bestaudio/best';
-      options.extractAudio = true;
-      options.audioFormat = 'mp3';
-      options.audioQuality = '192';
-    }
-    
-    // Add to active downloads
-    activeDownloads.set(downloadId, {
-      status: 'downloading',
-      progress: 0,
-      filename: null,
-      download_url: null,
-      error: null,
-      start_time: new Date(),
-      user_id: userId
-    });
-    
-    // Get video info first
-    const info = await yt_dlp(url, {
-      dumpSingleJson: true,
-      noWarnings: true
-    });
-    
-    const title = info.title || 'video';
-    const sanitizedTitle = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 100);
-    const ext = format === 'audio' ? 'mp3' : 'mp4';
-    const outputFile = path.join(DOWNLOAD_DIR, `${sanitizedTitle}.${ext}`);
-    
-    // Update with filename
-    activeDownloads.set(downloadId, {
-      ...activeDownloads.get(downloadId),
-      filename: `${sanitizedTitle}.${ext}`
-    });
-    
-    // Download the file
-    await yt_dlp(url, {
-      ...options,
-      output: outputFile,
-      progress: true
-    }, {
-      onProgress: (progress) => {
-        if (progress.percent) {
-          activeDownloads.set(downloadId, {
-            ...activeDownloads.get(downloadId),
-            progress: Math.round(progress.percent),
-            status: 'downloading'
-          });
-        }
-      }
-    });
-    
-    // Update to completed
-    activeDownloads.set(downloadId, {
-      ...activeDownloads.get(downloadId),
-      status: 'completed',
-      progress: 100,
-      download_url: `/download-file/${downloadId}`,
-      completed_time: new Date()
-    });
-    
-    // Auto cleanup after 1 hour
-    setTimeout(async () => {
-      if (activeDownloads.has(downloadId)) {
-        const downloadInfo = activeDownloads.get(downloadId);
-        if (downloadInfo.filename) {
-          const filePath = path.join(DOWNLOAD_DIR, downloadInfo.filename);
-          if (await existsAsync(filePath)) {
-            await unlinkAsync(filePath);
-          }
-        }
-        activeDownloads.delete(downloadId);
-      }
-    }, 3600000);
-    
-  } catch (error) {
-    console.error('Download error:', error);
-    activeDownloads.set(downloadId, {
-      ...activeDownloads.get(downloadId),
-      status: 'failed',
-      error: error.message
-    });
-    
-    // Cleanup failed downloads after 5 minutes
-    setTimeout(() => {
-      activeDownloads.delete(downloadId);
-    }, 300000);
-  }
-}
-
-// Cleanup old files periodically (optional)
-setInterval(async () => {
-  try {
-    const files = await fs.promises.readdir(DOWNLOAD_DIR);
-    const now = Date.now();
-    
-    for (const file of files) {
-      const filePath = path.join(DOWNLOAD_DIR, file);
-      const stats = await fs.promises.stat(filePath);
-      
-      // Delete files older than 2 hours
-      if (now - stats.mtimeMs > 7200000) {
-        await fs.promises.unlink(filePath);
-        console.log(`Cleaned up old file: ${file}`);
-      }
-    }
-  } catch (error) {
-    console.error('Cleanup error:', error);
-  }
-}, 3600000); // Run every hour                
-
 // 🔹 Enhanced Payment Status Check with Telegram Notifications
 app.get("/payment-status/:token", async (req, res) => {
   const { token } = req.params;
@@ -1760,12 +1759,12 @@ app.get("/", (req, res) => {
           <a href="/payment?amount=49&mythopoints=true" class="btn inline-block mt-4 bg-yellow-500 text-black font-semibold px-5 py-2 rounded-full">Use Points</a>
         </div>
 
-        <!-- Admin Notifications -->
+        <!-- YouTube Downloader -->
         <div class="glass text-center p-6 delay-600">
-          <i class="fa-solid fa-bell text-red-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Live Alerts</h2>
-          <p class="text-purple-100 text-sm mt-2">Instant Telegram notifications for all payments & activities.</p>
-          <a href="https://t.me/MythoSerialBot" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Get Alerts</a>
+          <i class="fa-brands fa-youtube text-red-500 text-3xl mb-3"></i>
+          <h2 class="text-xl font-bold">YouTube Downloader</h2>
+          <p class="text-purple-100 text-sm mt-2">Download videos and audio from YouTube in high quality.</p>
+          <a href="/youtube-dl" class="btn inline-block mt-4 bg-red-600 text-white font-semibold px-5 py-2 rounded-full">Download Videos</a>
         </div>
       </div>
 
@@ -1774,7 +1773,8 @@ app.get("/", (req, res) => {
         <p>💫 Developed by <b>@Sandip10x</b> | Powered by <b>MythoBot Server</b></p>
         <p class="mt-1">
           <a href="https://t.me/MythoSerialBot" class="underline text-purple-100">Telegram Bot</a> • 
-          <a href="/radhe" class="underline text-purple-100">Radhe Radhe Game</a>
+          <a href="/radhe" class="underline text-purple-100">Radhe Radhe Game</a> •
+          <a href="/youtube-dl" class="underline text-purple-100">YouTube Downloader</a>
         </p>
       </div>
 
@@ -1892,4 +1892,5 @@ app.listen(PORT, () => {
   console.log(`🤡 Bypass attempts will get roasted!`);
   console.log(`🔔 Telegram notifications: ${TELEGRAM_BOT_TOKEN ? 'ENABLED' : 'DISABLED'}`);
   console.log(`💰 30% MythoPoints discount system: ACTIVE`);
+  console.log(`🎬 YouTube Downloader: AVAILABLE at /youtube-dl`);
 });
