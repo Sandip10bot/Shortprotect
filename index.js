@@ -2,7 +2,7 @@
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
-import ytdlp from "yt-dlp-exec";
+
 import { spawn } from "child_process";
 
 
