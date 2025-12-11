@@ -472,7 +472,17 @@ router.get("/api/info", async (req, res) => {
         }
         
         // Use yt-dlp to get video info
-        const ytdlp = spawn("yt-dlp", ["-j", "--no-playlist", url]);
+        const ytdlp = spawn("yt-dlp", [
+            "--dump-json",
+            "--cookies", "cookies.txt",
+            "--js-runtime", "node",
+            "--no-warnings",
+            "--compat-options", "all",
+            "--force-ipv4",
+            url
+        ]);
+
+
         
         let output = "";
         let errorOutput = "";
@@ -619,7 +629,15 @@ router.get("/api/download", async (req, res) => {
                 url
             ];
             
-            const ytdlp = spawn("yt-dlp", args);
+            const ytdlp = spawn("yt-dlp", [
+                "-f", formatId,
+                "--cookies", "cookies.txt",
+                "--js-runtime", "node",
+                "--output", `downloads/%(title)s.%(ext)s`,
+                "--force-ipv4",
+                downloadUrl
+            ]);
+
             
             // Pipe the output directly to response
             ytdlp.stdout.pipe(res);
