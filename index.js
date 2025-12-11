@@ -23,13 +23,14 @@ const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID; // Your perso
 const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
+let downloadsCollection;
 
 async function connectDB() {
   await client.connect();
-  const db = client.db("mythobot");
+  const db = client.db("mythobot"); // change if you use another DB name
   doubleCollection = db.collection("double_points");
   urlShortenerCollection = db.collection("url_shortener");
-  downloadsCollection = db.collection("youtube_downloads"); // Add this line
+  downloadsCollection = db.collection("youtube_downloads"); // This line should now work
   console.log("✅ MongoDB connected");
 }
 
