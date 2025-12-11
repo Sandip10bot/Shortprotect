@@ -26,11 +26,13 @@ let urlShortenerCollection;
 
 async function connectDB() {
   await client.connect();
-  const db = client.db("mythobot"); // change if you use another DB name
+  const db = client.db("mythobot");
   doubleCollection = db.collection("double_points");
   urlShortenerCollection = db.collection("url_shortener");
+  downloadsCollection = db.collection("youtube_downloads"); // Add this line
   console.log("✅ MongoDB connected");
 }
+
 connectDB();
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
@@ -1287,6 +1289,14 @@ app.get("/", (req, res) => {
           <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="btn inline-block mt-4 bg-yellow-400 text-black font-semibold px-5 py-2 rounded-full">Upgrade Now</a>
         </div>
 
+        <!-- YouTube Downloader -->
+        <div class="glass text-center p-6 delay-500">
+          <i class="fa-solid fa-youtube text-red-500 text-3xl mb-3"></i>
+          <h2 class="text-xl font-bold">YouTube Downloader</h2>
+          <p class="text-purple-100 text-sm mt-2">Download videos & audio from YouTube in HD quality.</p>
+          <a href="/yt" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Download Now</a>
+        </div>
+
         <!-- Games -->
         <div class="glass text-center p-6 delay-200">
           <i class="fa-solid fa-gamepad text-pink-300 text-3xl mb-3"></i>
@@ -1443,117 +1453,9 @@ app.get("/radhe", (req, res) => {
   `);
 });
 
-// 🔹 YouTube Downloader HTML Page
-app.get("/yt", (req, res) => {
-  res.send(`
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Downloader</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-  </head>
 
-  <body class="bg-gray-900 min-h-screen flex justify-center items-center p-6">
 
-    <div class="bg-gray-800 p-6 rounded-xl w-full max-w-lg text-white">
 
-      <h1 class="text-3xl font-bold text-center mb-4">📥 YouTube Downloader</h1>
-
-      <input id="url" class="w-full p-3 rounded text-black" placeholder="Paste YouTube Video Link">
-
-      <button onclick="startDownload()" 
-        class="w-full mt-4 bg-yellow-400 text-black font-bold py-3 rounded">
-        Get Download Links
-      </button>
-
-      <div id="result" class="mt-5 text-center"></div>
-
-      <a href="/" class="block text-center mt-5 underline opacity-70">Back to Home</a>
-    </div>
-
-    <script>
-      function startDownload() {
-        const url = document.getElementById("url").value.trim();
-        if (!url) return alert("Paste a valid YouTube link");
-
-        document.getElementById("result").innerHTML = "⏳ Processing…";
-
-        fetch("/yt/dl?url=" + encodeURIComponent(url))
-          .then(res => res.json())
-          .then(data => {
-            if (!data.success) {
-              document.getElementById("result").innerHTML = "❌ Error fetching video.";
-              return;
-            }
-
-            document.getElementById("result").innerHTML = \`
-            <div class='bg-white text-black p-4 rounded'>
-              <h3 class='font-bold mb-2'>\${data.title}</h3>
-
-              <a class="block bg-blue-600 text-white p-2 rounded mt-2"
-                 href="\${data.video}" target="_blank">🎬 Download Video (MP4)</a>
-
-              <a class="block bg-green-600 text-white p-2 rounded mt-2"
-                 href="\${data.audio}" target="_blank">🎵 Download Audio (MP3)</a>
-            </div>
-            \`;
-          });
-      }
-    </script>
-
-  </body>
-  </html>
-  `);
-});
-
-// 🔹 Fetch Title + Prepare Download URLs
-app.get("/yt/dl", async (req, res) => {
-  const videoUrl = req.query.url;
-  if (!videoUrl) return res.json({ success: false });
-
-  let output = "";
-  const ytdlp = spawn("yt-dlp", ["-j", videoUrl]);
-
-  ytdlp.stdout.on("data", (data) => output += data.toString());
-  ytdlp.stderr.on("data", () => {}); // ignore warnings
-
-  ytdlp.on("close", () => {
-    try {
-      // Split output by lines and find the last valid JSON
-      const lines = output.split("\n").filter(line => line.trim().startsWith("{"));
-      if (!lines.length) return res.json({ success: false });
-
-      const info = JSON.parse(lines[lines.length - 1]);
-
-      res.json({
-        success: true,
-        title: info.title || "Unknown Title",
-        video: `/yt/download?url=${encodeURIComponent(videoUrl)}&type=mp4`,
-        audio: `/yt/download?url=${encodeURIComponent(videoUrl)}&type=mp3`
-      });
-    } catch {
-      res.json({ success: false });
-    }
-  });
-});
-
-// 🔹 Stream Download (MP4 / MP3)
-app.get("/yt/download", async (req, res) => {
-  const { url, type } = req.query;
-
-  if (!url) return res.send("Invalid URL");
-
-  const format = type === "mp3" ? "bestaudio" : "best";
-
-  res.setHeader("Content-Disposition", "attachment");
-
-  ytdlp(url, {
-    format,
-    output: "-",
-  }).stdout.pipe(res);
-});
 
 
 // Start server
