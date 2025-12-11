@@ -1456,7 +1456,8 @@ app.get("/radhe", (req, res) => {
 
 
 
-
+// This line should be BEFORE app.listen()
+app.use("/yt", youtubeDLRouter);
 
 
 // Start server
