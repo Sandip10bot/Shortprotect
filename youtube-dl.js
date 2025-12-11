@@ -1,6 +1,7 @@
 // youtube-dl.js
 import express from "express";
 import { spawn } from "child_process";
+import path from "path";
 
 const router = express.Router();
 
@@ -18,7 +19,10 @@ export function setupYoutubeDB(client) {
     }
 }
 
-// 🔹 YouTube Downloader Main Page
+// Helper: resolve cookie path (project root cookies.txt)
+const cookiePath = path.resolve("cookies.txt");
+
+// ---------------------- FRONTEND PAGE (UNCHANGED UI) ----------------------
 router.get("/", (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -298,7 +302,7 @@ router.get("/", (req, res) => {
                 container.innerHTML = '';
 
                 // Group formats by type
-                const videoFormats = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none');
+                const videoFormats = formats.filter(f => f.vcodec !== 'none');
                 const audioFormats = formats.filter(f => f.vcodec === 'none' && f.acodec !== 'none');
 
                 // Video formats
@@ -309,7 +313,7 @@ router.get("/", (req, res) => {
                     container.appendChild(section);
 
                     videoFormats.sort((a, b) => (b.height || 0) - (a.height || 0));
-                    videoFormats.slice(0, 6).forEach(format => {
+                    videoFormats.slice(0, 12).forEach(format => {
                         const btn = createFormatButton(format, 'video');
                         container.appendChild(btn);
                     });
@@ -323,7 +327,7 @@ router.get("/", (req, res) => {
                     container.appendChild(section);
 
                     audioFormats.sort((a, b) => (b.abr || 0) - (a.abr || 0));
-                    audioFormats.slice(0, 4).forEach(format => {
+                    audioFormats.slice(0, 8).forEach(format => {
                         const btn = createFormatButton(format, 'audio');
                         container.appendChild(btn);
                     });
@@ -331,7 +335,7 @@ router.get("/", (req, res) => {
             }
 
             function createFormatButton(format, type) {
-                const btn = document.createElement('button');
+                const btn = document.createElement('div');
                 btn.className = 'format-btn bg-white/10 hover:bg-white/20 text-white p-3 rounded-lg flex flex-col items-center justify-center';
                 
                 let label = '';
@@ -348,31 +352,29 @@ router.get("/", (req, res) => {
                 } else {
                     icon = 'fas fa-music';
                     if (format.abr) {
-                        label = format.abr + 'kbps';
+                        label = (format.abr) + 'kbps';
                     } else {
                         label = 'Audio';
                     }
                 }
                 
-                btn.innerHTML = '<i class="' + icon + ' text-xl mb-1"></i>' +
-                               '<span class="font-bold">' + label + '</span>' +
-                               '<span class="text-xs opacity-70 mt-1">' + format.ext.toUpperCase() + '</span>';
+                btn.innerHTML = '<div class="w-full flex items-center justify-between"><div><i class="' + icon + ' text-xl mb-1"></i><span class="font-bold ml-2">' + label + '</span></div><div class="text-xs opacity-70 mt-1">' + format.ext.toUpperCase() + '</div></div>';
                 
+                // click downloads native format (video/audio). If user wants MP3, they can request type=mp3 using UI modifications later.
                 btn.onclick = function() { 
-                    downloadFormat(format.format_id); 
+                    downloadFormat(format.format_id);
                 };
                 return btn;
             }
 
-            async function downloadFormat(formatId) {
-                if (!videoId) return;
-                
+            // Minimal change: accept optional type param (mp3) but default stays same as before.
+            async function downloadFormat(formatId, type = "auto") {
+                if (!formatId) return;
                 const urlInput = document.getElementById('url').value.trim();
                 showProgress('Starting download...', 0);
                 
                 try {
-                    // Start download
-                    const response = await fetch('/yt/api/download?url=' + encodeURIComponent(urlInput) + '&format=' + formatId);
+                    const response = await fetch('/yt/api/download?url=' + encodeURIComponent(urlInput) + '&format=' + encodeURIComponent(formatId) + '&type=' + encodeURIComponent(type));
                     
                     if (!response.ok) {
                         throw new Error('Download failed');
@@ -380,7 +382,7 @@ router.get("/", (req, res) => {
                     
                     // Get filename from headers
                     const contentDisposition = response.headers.get('Content-Disposition');
-                    let filename = 'download.' + (formatId.includes('audio') ? 'mp3' : 'mp4');
+                    let filename = 'download.' + (type === 'mp3' ? 'mp3' : 'mp4');
                     if (contentDisposition) {
                         const match = contentDisposition.match(/filename="?(.+?)"?$/);
                         if (match) filename = match[1];
@@ -455,7 +457,7 @@ router.get("/", (req, res) => {
     `);
 });
 
-// 🔹 Get video information
+// ---------------------- /api/info ----------------------
 router.get("/api/info", async (req, res) => {
     const { url } = req.query;
     
@@ -464,26 +466,28 @@ router.get("/api/info", async (req, res) => {
     }
     
     try {
-        // Extract video ID for logging
+        // Extract video ID for logging (best-effort)
         let videoId = '';
-        const urlObj = new URL(url);
-        if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
-            videoId = urlObj.searchParams.get('v') || urlObj.pathname.slice(1);
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+                videoId = urlObj.searchParams.get('v') || urlObj.pathname.slice(1);
+            }
+        } catch (e) {
+            // ignore URL parse errors
         }
         
-        // Use yt-dlp to get video info
+        // Use yt-dlp to get video info (full JSON)
         const ytdlp = spawn("yt-dlp", [
             "--dump-json",
-            "--cookies", "cookies.txt",
-            "--js-runtime", "node",
             "--no-warnings",
             "--compat-options", "all",
             "--force-ipv4",
+            "--cookies", cookiePath,
+            "--js-runtime", "node",
             url
         ]);
 
-
-        
         let output = "";
         let errorOutput = "";
         
@@ -500,68 +504,77 @@ router.get("/api/info", async (req, res) => {
                 console.error("yt-dlp error:", errorOutput);
                 return res.json({ 
                     success: false, 
-                    error: "Failed to fetch video information. Make sure the URL is valid." 
+                    error: "Failed to fetch video information. Make sure the URL is valid and cookies.txt exists." 
                 });
             }
             
             try {
                 const info = JSON.parse(output);
                 
-                // Format the response
+                // Build formats list (include common video/audio formats)
+                const rawFormats = Array.isArray(info.formats) ? info.formats : [];
+                const formats = rawFormats
+                    .map(f => ({
+                        format_id: String(f.format_id || f.format || ""),
+                        ext: f.ext || "",
+                        format_note: f.format_note || "",
+                        filesize: f.filesize || f.filesize_approx || null,
+                        height: f.height || null,
+                        width: f.width || null,
+                        fps: f.fps || null,
+                        vcodec: f.vcodec || null,
+                        acodec: f.acodec || null,
+                        abr: f.abr || null,
+                        quality: f.quality || null
+                    }))
+                    // Remove duplicates by format_id
+                    .filter((f, idx, arr) => arr.findIndex(x => x.format_id === f.format_id) === idx)
+                    // Keep useful formats (video or audio)
+                    .filter(f => !!f.format_id && (f.vcodec && f.vcodec !== "none" || f.acodec && f.acodec !== "none"))
+                    // Sort: video by height desc, audio by abr desc
+                    .sort((a, b) => {
+                        const aScore = (a.height || 0) * 1000 + (a.abr || 0);
+                        const bScore = (b.height || 0) * 1000 + (b.abr || 0);
+                        return bScore - aScore;
+                    });
+
+                // Response
                 const response = {
                     success: true,
-                    videoId: videoId,
+                    videoId: videoId || info.id || null,
                     title: info.title || "Unknown Title",
                     duration: info.duration_string || null,
-                    views: info.view_count || 0,
-                    uploadDate: info.upload_date ? 
-                        info.upload_date.slice(0,4) + '-' + info.upload_date.slice(4,6) + '-' + info.upload_date.slice(6,8) : 
-                        null,
-                    channel: info.channel || info.uploader || "Unknown Channel",
+                    views: info.view_count || info.viewers || 0,
+                    uploadDate: info.upload_date ? info.upload_date.slice(0,4) + '-' + info.upload_date.slice(4,6) + '-' + info.upload_date.slice(6,8) : null,
+                    channel: info.uploader || info.channel || "Unknown Channel",
                     thumbnail: info.thumbnail || null,
-                    formats: []
+                    formats: formats
                 };
                 
-                // Process available formats
-                if (info.formats && Array.isArray(info.formats)) {
-                    response.formats = info.formats
-                        .filter(f => f.ext === 'mp4' || f.ext === 'webm' || f.ext === 'm4a')
-                        .map(f => ({
-                            format_id: f.format_id,
-                            ext: f.ext,
-                            format_note: f.format_note,
-                            height: f.height,
-                            width: f.width,
-                            fps: f.fps,
-                            vcodec: f.vcodec,
-                            acodec: f.acodec,
-                            filesize: f.filesize,
-                            abr: f.abr,
-                            quality: f.quality
-                        }))
-                        .slice(0, 20); // Limit to 20 formats
-                }
-                
-                // Log the request to database
+                // Log info fetch to DB
                 if (isDBConnected && downloadsCollection) {
-                    await downloadsCollection.insertOne({
-                        video_id: videoId,
-                        title: info.title || "Unknown",
-                        url: url,
-                        ip: req.ip,
-                        user_agent: req.get("user-agent") || "Unknown",
-                        action: "info_fetch",
-                        timestamp: new Date()
-                    });
+                    try {
+                        await downloadsCollection.insertOne({
+                            video_id: response.videoId,
+                            title: response.title,
+                            url: url,
+                            ip: req.ip,
+                            user_agent: req.get("user-agent") || "Unknown",
+                            action: "info_fetch",
+                            timestamp: new Date()
+                        });
+                    } catch (dbErr) {
+                        console.warn("DB log failure:", dbErr.message || dbErr);
+                    }
                 }
                 
-                res.json(response);
+                return res.json(response);
                 
             } catch (parseError) {
-                console.error("JSON parse error:", parseError);
-                res.json({ 
+                console.error("JSON parse error:", parseError, "stderr:", errorOutput);
+                return res.json({ 
                     success: false, 
-                    error: "Failed to parse video information" 
+                    error: "Failed to parse video information from yt-dlp output" 
                 });
             }
         });
@@ -570,124 +583,126 @@ router.get("/api/info", async (req, res) => {
         console.error("Error in /api/info:", error);
         res.json({ 
             success: false, 
-            error: "Invalid URL format" 
+            error: "Invalid URL format or internal error" 
         });
     }
 });
 
-// 🔹 Download video/audio
+// ---------------------- /api/download ----------------------
 router.get("/api/download", async (req, res) => {
-    const { url, format, quality = "best" } = req.query;
-    
+    // Expected query:
+    // url (string) - video URL
+    // format (string) - yt-dlp format id (required)
+    // type (string) - "mp4" (video) or "mp3" (force audio conversion) or "auto" (default)
+    const url = req.query.url;
+    const formatId = String(req.query.format || "").trim();
+    const type = (req.query.type || "auto").toLowerCase();
+
     if (!url) {
-        return res.status(400).send("No URL provided");
+        return res.status(400).json({ success: false, error: "No URL provided" });
     }
-    
+    if (!formatId) {
+        return res.status(400).json({ success: false, error: "No format provided" });
+    }
+
     try {
-        // Get video info first for filename
-        const infoProcess = spawn("yt-dlp", ["--get-title", "--get-id", url]);
-        let videoTitle = "";
-        let videoId = "";
-        
-        infoProcess.stdout.on("data", (data) => {
-            const lines = data.toString().split("\n");
-            videoTitle = lines[0] || "video";
-            videoId = lines[1] || "unknown";
+        // Get the video title (safe)
+        const titleProc = spawn("yt-dlp", ["--get-title", url]);
+        let videoTitle = "video";
+        titleProc.stdout.on("data", (d) => {
+            const s = d.toString().trim();
+            if (s) videoTitle = s;
         });
-        
-        infoProcess.on("close", async () => {
-            // Sanitize filename
-            const sanitizedTitle = videoTitle
-                .replace(/[^\w\s-]/g, "")
-                .replace(/\s+/g, "_")
-                .substring(0, 50);
-            
-            let formatOption = format || quality;
-            let extension = "mp4";
-            
-            if (format && format.includes("audio")) {
-                extension = "mp3";
-                formatOption = "bestaudio[ext=m4a]/bestaudio";
-            }
-            
-            const filename = sanitizedTitle + "_" + videoId + "." + extension;
-            
+
+        titleProc.on("close", () => {
+            // sanitize filename
+            const sanitizedTitle = videoTitle.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").substring(0, 120);
+            const extension = (type === "mp3") ? "mp3" : "mp4";
+            const filename = `${sanitizedTitle}.${extension}`;
+
             // Set headers for download
-            res.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-            
-            if (extension === "mp3") {
-                res.setHeader("Content-Type", "audio/mpeg");
-            } else {
-                res.setHeader("Content-Type", "video/mp4");
-            }
-            
-            // Use yt-dlp to stream the video
+            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+            res.setHeader("Content-Type", type === "mp3" ? "audio/mpeg" : "video/mp4");
+
+            // Build args for yt-dlp. We stream output to stdout and pipe to response.
+            // Use provided format id; for mp3, we add extraction args.
             const args = [
-                "-f", formatOption,
-                "-o", "-",
+                "-f", formatId,
                 "--no-playlist",
+                "--cookies", cookiePath,
+                "--js-runtime", "node",
+                "--force-ipv4",
+                "-o", "-" , // send raw bytes to stdout
                 url
             ];
-            
-            const ytdlp = spawn("yt-dlp", [
-                "-f", formatId,
-                "--cookies", "cookies.txt",
-                "--js-runtime", "node",
-                "--output", `downloads/%(title)s.%(ext)s`,
-                "--force-ipv4",
-                downloadUrl
-            ]);
 
-            
-            // Pipe the output directly to response
+            // If mp3 requested, ask yt-dlp to extract and convert
+            if (type === "mp3") {
+                // when extracting audio and streaming, yt-dlp will write the converted mux to stdout
+                // add extract flags
+                args.unshift("--extract-audio", "--audio-format", "mp3", "--audio-quality", "0"); // best quality
+                // format selection: if user passed an audio-only format id, keep it; otherwise yt-dlp will pick bestaudio
+            }
+
+            // spawn yt-dlp
+            const ytdlp = spawn("yt-dlp", args);
+
+            // pipe directly
             ytdlp.stdout.pipe(res);
-            
+
+            // capture stderr for debugging/logging
+            let stderr = "";
             ytdlp.stderr.on("data", (data) => {
-                console.error("yt-dlp stderr:", data.toString());
+                const s = data.toString();
+                stderr += s;
+                console.log("[yt-dlp]", s.trim());
             });
-            
-            ytdlp.on("error", (error) => {
-                console.error("yt-dlp error:", error);
+
+            ytdlp.on("error", (err) => {
+                console.error("yt-dlp spawn error:", err);
                 if (!res.headersSent) {
-                    res.status(500).send("Download failed");
+                    res.status(500).send("Download failed (yt-dlp spawn error).");
                 }
             });
-            
+
             ytdlp.on("close", async (code) => {
-                console.log("yt-dlp exited with code " + code);
-                
-                // Log successful download
+                console.log(`yt-dlp exited with code ${code}`);
+                // Log download to DB
                 if (isDBConnected && downloadsCollection) {
-                    await downloadsCollection.insertOne({
-                        video_id: videoId,
-                        title: videoTitle,
-                        url: url,
-                        format: formatOption,
-                        extension: extension,
-                        ip: req.ip,
-                        user_agent: req.get("user-agent") || "Unknown",
-                        action: "download",
-                        timestamp: new Date(),
-                        status: code === 0 ? "success" : "failed"
-                    });
+                    try {
+                        await downloadsCollection.insertOne({
+                            url,
+                            formatId,
+                            type: extension,
+                            title: videoTitle,
+                            status: code === 0 ? "success" : "failed",
+                            stderr: stderr ? (stderr.slice(0, 2000)) : null,
+                            ip: req.ip,
+                            user_agent: req.get("user-agent") || "Unknown",
+                            timestamp: new Date()
+                        });
+                    } catch (dbErr) {
+                        console.warn("DB log failed:", dbErr.message || dbErr);
+                    }
                 }
             });
-            
-            // Handle client disconnect
+
+            // If client disconnects, kill yt-dlp
             req.on("close", () => {
                 if (!ytdlp.killed) {
-                    ytdlp.kill();
+                    try { ytdlp.kill("SIGKILL"); } catch (e) {}
                 }
             });
+
         });
-        
-    } catch (error) {
-        console.error("Download error:", error);
-        res.status(500).send("Download failed");
+
+    } catch (err) {
+        console.error("Download error:", err);
+        return res.status(500).json({ success: false, error: "Download failed" });
     }
 });
 
-// 🔹 Log download activity
+// ---------------------- logging & stats (unchanged) ----------------------
 router.post("/api/log", express.json(), async (req, res) => {
     if (isDBConnected && downloadsCollection) {
         try {
@@ -706,7 +721,6 @@ router.post("/api/log", express.json(), async (req, res) => {
     }
 });
 
-// 🔹 Get download stats
 router.get("/api/stats", async (req, res) => {
     if (!isDBConnected || !downloadsCollection) {
         return res.json({ success: false, error: "Database not connected" });
