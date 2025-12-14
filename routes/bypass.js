@@ -1,120 +1,134 @@
 // routes/bypass.js
 import express from "express";
 import { generateToken, isValidUrl } from "../utils/helpers.js";
+import { getCollections } from "../utils/database.js";
 
 const router = express.Router();
 
 // 🔹 Generate a token and return protected link
 router.get("/generate/:userId", async (req, res) => {
-  const { userId } = req.params;
-  const token = generateToken();
-  const { doubleCollection } = req.collections;
+  try {
+    const { userId } = req.params;
+    const token = generateToken();
+    const collections = getCollections();
+    const { doubleCollection } = collections;
 
-  await doubleCollection.insertOne({
-    token,
-    user_id: userId,
-    used: false,
-    created_at: new Date()
-  });
+    await doubleCollection.insertOne({
+      token,
+      user_id: userId,
+      used: false,
+      created_at: new Date()
+    });
 
-  const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
-  res.send(`
-    ✅ Token generated!<br>
-    Copy this link and shorten it with Softurl:<br><br>
-    <code>${protectedLink}</code>
-  `);
+    const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
+    res.send(`
+      ✅ Token generated!<br>
+      Copy this link and shorten it with Softurl:<br><br>
+      <code>${protectedLink}</code>
+    `);
+  } catch (error) {
+    console.error("Generate error:", error);
+    res.status(500).send("Server error");
+  }
 });
 
 // 🔹 Validate and redirect for double points
 router.get("/double/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { doubleCollection } = req.collections;
+  try {
+    const { userId, token } = req.params;
+    const collections = getCollections();
+    const { doubleCollection } = collections;
 
-  console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
+    console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
 
-  // Check referer (must come from softurl.in)
-  const referer = req.get("referer") || "";
-  if (!referer.includes("softurl.in")) {
-    // Roast message for double points bypass
-    const roastMessages = [
-      "🚫 Oops! Trying to double points without SoftURL? Even my grandma follows links better!",
-      "🤡 Nice try, points pirate! But this isn't a shortcut to free MythoPoints!",
-      "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
-      "🔐 Awww, trying to skip the line? The points system feels offended!",
-      "🧐 I see what you did there! Too bad I see everything!"
-    ];
-    const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
-    
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Bypass Detected! 🚫</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
-          body { 
-            font-family: 'Comic Neue', cursive; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
-            color: white;
-            text-align: center;
-          }
-          .roast-container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            margin: 20px 0;
-          }
-          .roast-message {
-            font-size: 24px;
-            margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-          }
-        </style>
-      </head>
-      <body>
-        <div class="roast-container">
-          <div class="roast-message">"${randomRoast}"</div>
-          <p>Use the proper SoftURL link to double your MythoPoints!</p>
-          <a href="https://t.me/MythoSerialBot" style="
-            display: inline-block;
-            background: white;
-            color: #ff6b6b;
-            padding: 12px 24px;
-            border-radius: 25px;
-            text-decoration: none;
-            margin-top: 20px;
-            font-weight: bold;
-          ">🤖 Go To MythoBot</a>
-        </div>
-      </body>
-      </html>
-    `);
+    // Check referer (must come from softurl.in)
+    const referer = req.get("referer") || "";
+    if (!referer.includes("softurl.in")) {
+      // Roast message for double points bypass
+      const roastMessages = [
+        "🚫 Oops! Trying to double points without SoftURL? Even my grandma follows links better!",
+        "🤡 Nice try, points pirate! But this isn't a shortcut to free MythoPoints!",
+        "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
+        "🔐 Awww, trying to skip the line? The points system feels offended!",
+        "🧐 I see what you did there! Too bad I see everything!"
+      ];
+      const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Bypass Detected! 🚫</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
+            body { 
+              font-family: 'Comic Neue', cursive; 
+              max-width: 600px; 
+              margin: 50px auto; 
+              padding: 20px;
+              background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
+              color: white;
+              text-align: center;
+            }
+            .roast-container {
+              background: rgba(255,255,255,0.1);
+              padding: 30px;
+              border-radius: 20px;
+              backdrop-filter: blur(10px);
+              border: 2px solid rgba(255,255,255,0.2);
+              margin: 20px 0;
+            }
+            .roast-message {
+              font-size: 24px;
+              margin: 20px 0;
+              text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="roast-container">
+            <div class="roast-message">"${randomRoast}"</div>
+            <p>Use the proper SoftURL link to double your MythoPoints!</p>
+            <a href="https://t.me/MythoSerialBot" style="
+              display: inline-block;
+              background: white;
+              color: #ff6b6b;
+              padding: 12px 24px;
+              border-radius: 25px;
+              text-decoration: none;
+              margin-top: 20px;
+              font-weight: bold;
+            ">🤖 Go To MythoBot</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Mark token as used
+    await doubleCollection.updateOne(
+      { user_id: userId, token },
+      { $set: { used: true, used_at: new Date() } }
+    );
+
+    // Redirect to bot deep link
+    const botUsername = "MythoSerialBot";
+    const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
+
+    res.redirect(deepLink);
+  } catch (error) {
+    console.error("Double points error:", error);
+    res.status(500).send("Server error");
   }
-
-  // Mark token as used
-  await doubleCollection.updateOne(
-    { user_id: userId, token },
-    { $set: { used: true, used_at: new Date() } }
-  );
-
-  // Redirect to bot deep link
-  const botUsername = "MythoSerialBot";
-  const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
-
-  res.redirect(deepLink);
 });
 
 // 🔹 Bypass protection for URL shortener
 router.get("/Bypass/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const { doubleCollection, urlShortenerCollection } = req.collections;
+    const collections = getCollections();
+    const { doubleCollection, urlShortenerCollection } = collections;
 
     console.log("--- incoming /Bypass request ---");
     console.log("token:", token);
@@ -288,7 +302,6 @@ router.get("/Bypass/:token", async (req, res) => {
 // 🔹 URL Shortener API endpoint
 router.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
-  const { urlShortenerCollection } = req.collections;
   
   if (!url || !userId) {
     return res.status(400).json({
@@ -305,6 +318,9 @@ router.get("/shorten", async (req, res) => {
         error: "Invalid URL format"
       });
     }
+    
+    const collections = getCollections();
+    const { urlShortenerCollection } = collections;
     
     // Generate token for the URL
     const token = generateToken();
@@ -345,9 +361,11 @@ router.get("/shorten", async (req, res) => {
 // 🔹 Get URL access statistics
 router.get("/stats/:userId", async (req, res) => {
   const { userId } = req.params;
-  const { urlShortenerCollection } = req.collections;
   
   try {
+    const collections = getCollections();
+    const { urlShortenerCollection } = collections;
+    
     const stats = await urlShortenerCollection
       .find({ user_id: parseInt(userId) })
       .sort({ created_at: -1 })
