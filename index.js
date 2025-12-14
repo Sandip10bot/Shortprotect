@@ -5,7 +5,6 @@ import crypto from "crypto";
 import youtubeDLRouter from "./youtube-dl.js";
 import { spawn } from "child_process";
 
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -35,6 +34,61 @@ async function connectDB() {
 }
 
 connectDB();
+
+// Base62 Encoding/Decoding functions
+function base62_encode(data) {
+    const dataBytes = Buffer.from(data, 'utf-8');
+    const base64Str = dataBytes.toString('base64').replace(/=/g, '');
+    
+    // Custom character mapping for base62-like appearance
+    const translation = {
+        'A': '9', 'B': 'q', 'C': 'w', 'D': 'e', 'E': 'r', 'F': 't', 'G': 'y',
+        'H': 'u', 'I': 'i', 'J': 'o', 'K': 'p', 'L': 'a', 'M': 's', 'N': 'd',
+        'O': 'f', 'P': 'g', 'Q': 'h', 'R': 'j', 'S': 'k', 'T': 'l', 'U': 'z',
+        'V': 'x', 'W': 'c', 'X': 'v', 'Y': 'b', 'Z': 'n',
+        'a': 'Q', 'b': 'W', 'c': 'E', 'd': 'R', 'e': 'T', 'f': 'Y', 'g': 'U',
+        'h': 'I', 'i': 'O', 'j': 'P', 'k': 'A', 'l': 'S', 'm': 'D', 'n': 'F',
+        'o': 'G', 'p': 'H', 'q': 'J', 'r': 'K', 's': 'L', 't': 'Z', 'u': 'X',
+        'v': 'C', 'w': 'V', 'x': 'B', 'y': 'N', 'z': 'M',
+        '0': '1', '1': '2', '2': '3', '3': '4', '4': '5', '5': '6',
+        '6': '7', '7': '8', '8': '0', '9': '5', '+': '-', '/': '_', '-': '+', '_': '/'
+    };
+    
+    let result = '';
+    for (let char of base64Str) {
+        result += translation[char] || char;
+    }
+    return result;
+}
+
+function base62_decode(encoded) {
+    const translation = {
+        '9': 'A', 'q': 'B', 'w': 'C', 'e': 'D', 'r': 'E', 't': 'F', 'y': 'G',
+        'u': 'H', 'i': 'I', 'o': 'J', 'p': 'K', 'a': 'L', 's': 'M', 'd': 'N',
+        'f': 'O', 'g': 'P', 'h': 'Q', 'j': 'R', 'k': 'S', 'l': 'T', 'z': 'U',
+        'x': 'V', 'c': 'W', 'v': 'X', 'b': 'Y', 'n': 'Z',
+        'Q': 'a', 'W': 'b', 'E': 'c', 'R': 'd', 'T': 'e', 'Y': 'f', 'U': 'g',
+        'I': 'h', 'O': 'i', 'P': 'j', 'A': 'k', 'S': 'l', 'D': 'm', 'F': 'n',
+        'G': 'o', 'H': 'p', 'J': 'q', 'K': 'r', 'L': 's', 'Z': 't', 'X': 'u',
+        'C': 'v', 'V': 'w', 'B': 'x', 'N': 'y', 'M': 'z',
+        '1': '0', '2': '1', '3': '2', '4': '3', '5': '4', '6': '5',
+        '7': '6', '8': '7', '0': '8', '5': '9', '-': '+', '_': '/', '+': '-', '/': '_'
+    };
+    
+    let base64Str = '';
+    for (let char of encoded) {
+        base64Str += translation[char] || char;
+    }
+    
+    const padding = 4 - (base64Str.length % 4);
+    if (padding !== 4) {
+        base64Str += '='.repeat(padding);
+    }
+    
+    const decodedBytes = Buffer.from(base64Str, 'base64');
+    return decodedBytes.toString('utf-8');
+}
+
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
   const testMessage = `
@@ -52,6 +106,7 @@ app.get("/test-notification", async (req, res) => {
   await sendTelegramNotification(testMessage);
   res.send('✅ Test notification sent! Check your Telegram.');
 });
+
 // 🔹 Send Telegram Notification
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
@@ -206,22 +261,125 @@ app.get("/double/:userId/:token", async (req, res) => {
   res.redirect(deepLink);
 });
 
-// 🔹 Bypass protection for URL shortener with roast messages
+// 🔹 Updated Bypass protection for URL shortener
 app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { target } = req.query;
-  
-  console.log(`--- incoming /Bypass request for user=${userId} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-  console.log("target URL:", target);
-  
-  // Check if this is a direct bypass attempt (no referer or not from softurl)
-  const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("softurl.in");
-  
-  // If no target URL provided, show info page
-  if (!target) {
+    const { userId, token } = req.params;
+    const { t } = req.query; // Changed from 'target' to 't' for base62 encoded
+    
+    console.log(`--- incoming /Bypass request for user=${userId} ---`);
+    console.log("token:", token);
+    console.log("encoded target (t):", t);
+    console.log("referer:", req.get("referer"));
+    console.log("user-agent:", req.get("user-agent"));
+    console.log("ip:", req.ip);
+    
+    // Check if token exists in database first
+    let dbRecord = null;
+    try {
+        dbRecord = await urlShortenerCollection.findOne({ 
+            token: token,
+            creator_id: parseInt(userId) 
+        });
+        console.log("Database record found:", dbRecord ? "YES" : "NO");
+    } catch (dbError) {
+        console.error("Database error:", dbError);
+    }
+    
+    // If database record exists, use that URL (direct access allowed)
+    if (dbRecord) {
+        console.log("Using URL from database:", dbRecord.target_url);
+        
+        // Increment click count
+        await urlShortenerCollection.updateOne(
+            { token: token },
+            { $inc: { clicks: 1 } }
+        );
+        
+        // Add to access logs
+        await urlShortenerCollection.updateOne(
+            { token: token },
+            {
+                $push: {
+                    access_logs: {
+                        accessed_at: new Date(),
+                        ip: req.ip,
+                        user_agent: req.get("user-agent"),
+                        referer: req.get("referer"),
+                        via_db: true
+                    }
+                }
+            }
+        );
+        
+        // Redirect to target URL
+        return res.redirect(dbRecord.target_url);
+    }
+    
+    // If no database record but we have encoded parameter
+    if (t) {
+        try {
+            console.log("Decoding target from parameter...");
+            // Decode the target URL from base62
+            const decodedTarget = base62_decode(t);
+            console.log("Decoded target:", decodedTarget);
+            
+            // Validate URL
+            new URL(decodedTarget);
+            
+            // Store in database for future use
+            await urlShortenerCollection.insertOne({
+                token: token,
+                creator_id: parseInt(userId),
+                target_url: decodedTarget,
+                encoded_target: t,
+                created_at: new Date(),
+                clicks: 1,
+                access_logs: [{
+                    accessed_at: new Date(),
+                    ip: req.ip,
+                    user_agent: req.get("user-agent"),
+                    referer: req.get("referer"),
+                    via_param: true
+                }]
+            });
+            
+            console.log(`✅ Redirecting user ${userId} to: ${decodedTarget}`);
+            return res.redirect(decodedTarget);
+            
+        } catch (error) {
+            console.error("Decoding/validation error:", error);
+            
+            // If decode fails, try old method (URL decode for backward compatibility)
+            try {
+                const oldDecoded = decodeURIComponent(t);
+                new URL(oldDecoded);
+                
+                await urlShortenerCollection.insertOne({
+                    token: token,
+                    creator_id: parseInt(userId),
+                    target_url: oldDecoded,
+                    created_at: new Date(),
+                    clicks: 1,
+                    is_legacy: true,
+                    access_logs: [{
+                        accessed_at: new Date(),
+                        ip: req.ip,
+                        user_agent: req.get("user-agent"),
+                        referer: req.get("referer"),
+                        via_param: true,
+                        legacy: true
+                    }]
+                });
+                
+                console.log(`✅ Redirecting via legacy method: ${oldDecoded}`);
+                return res.redirect(oldDecoded);
+            } catch (oldError) {
+                console.error("Legacy decode also failed:", oldError);
+            }
+        }
+    }
+    
+    // No token in DB and no encoded parameter - show info page
     return res.send(`
       <!DOCTYPE html>
       <html>
@@ -232,257 +390,46 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
           body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
           .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
           .success { background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; }
+          .error { background: #f8d7da; padding: 15px; border-radius: 8px; margin: 15px 0; }
           code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
         </style>
       </head>
       <body>
         <h1>🛡️ MythoBot URL Bypass Protection</h1>
         
-        <div class="success">
-          <h3>✅ Legitimate Access Detected</h3>
-          <p>You're accessing this endpoint properly through SoftURL!</p>
-        </div>
-        
         <div class="info">
           <h3>📊 Request Information:</h3>
           <p><strong>User ID:</strong> <code>${userId}</code></p>
           <p><strong>Token:</strong> <code>${token}</code></p>
+          <p><strong>Encoded Target:</strong> <code>${t || 'Not provided'}</code></p>
           <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
           <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Status:</strong> <span style="color: green;">VALID ACCESS</span> ✅</p>
+          <p><strong>Status:</strong> 
+            ${t ? '<span style="color: orange;">MISSING_DB_RECORD</span> ⚠️' : '<span style="color: red;">NO_TARGET_PARAMETER</span> ❌'}
+          </p>
         </div>
+        
+        ${t ? `
+        <div class="error">
+          <h3>❌ Error Details:</h3>
+          <p>This link appears to be corrupted or incomplete.</p>
+          <p>Please regenerate the link from the bot.</p>
+        </div>
+        ` : `
+        <div class="info">
+          <h3>ℹ️ Usage Information:</h3>
+          <p>This endpoint requires a target URL parameter.</p>
+          <p>Proper format: <code>/Bypass/&lt;userId&gt;/&lt;token&gt;?t=&lt;encoded_url&gt;</code></p>
+        </div>
+        `}
         
         <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
       </body>
       </html>
     `);
-  }
-  
-  // Decode the target URL
-  let decodedTarget;
-  try {
-    decodedTarget = decodeURIComponent(target);
-  } catch (error) {
-    return res.status(400).send("Invalid URL encoding");
-  }
-
-  // Fun roast messages for bypass attempts
-  const roastMessages = [
-    "🚫 Oops! Trying to be a hacker? Even my grandma follows links better!",
-    "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
-    "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
-    "🔐 Awww, trying to skip the line? The URL feels offended!",
-    "🧐 I see what you did there! Too bad I see everything!",
-    "🚷 No ticket, no entry! This isn't a free ride, buddy!",
-    "🎪 Welcome to the circus! You're the clown trying to bypass!",
-    "📵 Error 404: Bypass skills not found!",
-    "🦸 Wannabe superhero! Even Superman follows links properly!",
-    "🍌 This isn't a banana peel you can slip through!",
-    "🎮 Game Over! Bypass attempt failed! Insert coin to try again!",
-    "🧙 You shall not pass! - Gandalf (probably talking about URL bypass)",
-    "🐌 Your bypass attempt is slower than a snail on vacation!",
-    "🎰 Jackpot! You found the 'I tried to bypass' prize! It's nothing!",
-    "🔍 Sherlock Holmes couldn't bypass this, what makes you think you can?",
-    "🍪 No cookies for bypassers! The URL is on a diet!",
-    "🚀 Trying to launch directly? Missing rocket fuel (aka proper link)!",
-    "🎵 Why you gotta be so bypass? Just follow the link like everyone else!",
-    "📚 Bypass 101: You failed the exam! Better luck next semester!",
-    "🎪 Stop clowning around and use the proper link!",
-    "🕵️‍♂️ Secret agent mode activated... and failed! Mission impossible!",
-    "💀 Rest in peace, your bypass attempt! 2024-2024",
-    "🎨 You're painting outside the lines! Stay within the link!",
-    "🍕 Even pizza delivery follows better routes than your bypass attempt!",
-    "👻 Spooky! Your bypass attempt vanished into thin air!",
-    "🎪 Three rings of failure: Bypass attempt, no skills, try again!",
-    "🚦 Red light! Stop trying to bypass and follow the traffic!",
-    "🎯 Bullseye! You hit the 'wrong way' target perfectly!",
-    "🍦 This isn't an ice cream cone you can lick from the bottom!",
-    "🎮 Player 1: Bypass Attempt → Game Over! Insert proper link to continue!"
-  ];
-
-  // If it's a bypass attempt, show roast page
-  if (isBypassAttempt) {
-    const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
-    
-    // Log the blocked bypass attempt
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: true,
-      blocked: true,
-      status: "BLOCKED - Bypass attempt"
-    });
-    
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Bypass Detected! 🚫</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
-          body { 
-            font-family: 'Comic Neue', cursive; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
-            color: white;
-            text-align: center;
-          }
-          .roast-container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            margin: 20px 0;
-          }
-          .roast-message {
-            font-size: 24px;
-            margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-          }
-          .emoji {
-            font-size: 50px;
-            margin: 10px;
-          }
-          .user-info {
-            background: rgba(0,0,0,0.3);
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-family: monospace;
-          }
-          .button {
-            background: #ff6b6b;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 25px;
-            font-size: 16px;
-            cursor: pointer;
-            margin: 10px;
-            text-decoration: none;
-            display: inline-block;
-            transition: transform 0.3s;
-          }
-          .button:hover {
-            transform: scale(1.1);
-            background: #ff5252;
-          }
-          .fireworks {
-            font-size: 30px;
-            animation: bounce 2s infinite;
-          }
-          @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-          }
-          .attempt-counter {
-            background: rgba(255,255,255,0.2);
-            padding: 10px;
-            border-radius: 10px;
-            margin: 10px 0;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="fireworks">🎆🎇✨</div>
-        <h1>🚫 BYPASS DETECTED! 🚫</h1>
-        
-        <div class="roast-container">
-          <div class="emoji">🤡🎪👻</div>
-          <div class="roast-message">"${randomRoast}"</div>
-          <div class="emoji">🔐🚷🕵️‍♂️</div>
-        </div>
-
-        <div class="user-info">
-          <h3>📊 Bypass Attempt Details:</h3>
-          <p><strong>User ID:</strong> ${userId}</p>
-        
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <a href="https://t.me/MythoSerialBot" class="button">🤖 Go To Proper Bot</a>
-          <a href="/" class="button">🏠 Server Home</a>
-        </div>
-      </body>
-      </html>
-    `);
-  }
-
-  // LEGITIMATE ACCESS FROM SOFTURL - REDIRECT TO TARGET URL
-  try {
-    // Validate the URL
-    new URL(decodedTarget);
-    
-    // Log the successful legitimate access
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: false,
-      blocked: false,
-      status: "SUCCESS - Redirected to target"
-    });
-    
-    console.log(`✅ Legitimate access from SoftURL - Redirecting user ${userId} to: ${decodedTarget}`);
-    
-    // REDIRECT to the target URL for legitimate SoftURL accesses
-    res.redirect(decodedTarget);
-    
-  } catch (error) {
-    // Invalid URL handling
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: false,
-      blocked: true,
-      status: "ERROR - Invalid URL"
-    });
-    
-    res.status(400).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Invalid URL</title>
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .error { background: #f8d7da; padding: 15px; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="error">
-          <h2>❌ Invalid URL</h2>
-          <p>The provided URL is invalid: <code>${decodedTarget}</code></p>
-          <p>Error: ${error.message}</p>
-        </div>
-        <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-      </body>
-      </html>
-    `);
-  }
 });
 
-// 🔹 URL Shortener API endpoint
+// 🔹 URL Shortener API endpoint (for bot to generate links)
 app.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
   
@@ -500,19 +447,35 @@ app.get("/shorten", async (req, res) => {
     // Generate token for the URL
     const token = crypto.randomBytes(8).toString("hex");
     
-    // Generate bypass URL
-    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?target=${encodeURIComponent(url)}`;
+    // Encode URL using base62
+    const encodedUrl = base62_encode(url);
+    
+    // Generate bypass URL with base62 encoded parameter
+    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
+    
+    // Store in database
+    await urlShortenerCollection.insertOne({
+      token: token,
+      creator_id: parseInt(userId),
+      target_url: url,
+      encoded_target: encodedUrl,
+      created_at: new Date(),
+      clicks: 0,
+      access_logs: []
+    });
     
     res.json({
       success: true,
       original_url: url,
       bypass_url: bypassUrl,
+      encoded_target: encodedUrl,
       token: token,
       user_id: userId,
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
+    console.error("Shorten error:", error);
     res.status(400).json({
       success: false,
       error: "Invalid URL format"
@@ -526,19 +489,28 @@ app.get("/stats/:userId", async (req, res) => {
   
   try {
     const stats = await urlShortenerCollection
-      .find({ user_id: parseInt(userId) })
-      .sort({ accessed_at: -1 })
+      .find({ creator_id: parseInt(userId) })
+      .sort({ created_at: -1 })
       .limit(50)
       .toArray();
     
     res.json({
       success: true,
       user_id: userId,
-      total_accesses: stats.length,
-      accesses: stats
+      total_links: stats.length,
+      total_clicks: stats.reduce((sum, item) => sum + (item.clicks || 0), 0),
+      links: stats.map(item => ({
+        token: item.token,
+        target_url: item.target_url,
+        encoded_target: item.encoded_target,
+        created_at: item.created_at,
+        clicks: item.clicks || 0,
+        last_access: item.access_logs?.[0]?.accessed_at || null
+      }))
     });
     
   } catch (error) {
+    console.error("Stats error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to fetch statistics"
@@ -1118,8 +1090,6 @@ app.get("/payment/api", (req, res) => {
   });
 });
 
-                
-
 // 🔹 Enhanced Payment Status Check with Telegram Notifications
 app.get("/payment-status/:token", async (req, res) => {
   const { token } = req.params;
@@ -1454,18 +1424,15 @@ app.get("/radhe", (req, res) => {
   `);
 });
 
-
-
 // This line should be BEFORE app.listen()
 app.use("/yt", youtubeDLRouter);
-
 
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Bypass protection with roast messages activated!`);
-  console.log(`✅ Legitimate SoftURL accesses will redirect to target URLs`);
-  console.log(`🤡 Bypass attempts will get roasted!`);
+  console.log(`🎯 Bypass protection with base62 encoding activated!`);
+  console.log(`✅ URLs will now show encoded parameters: /Bypass/123/abc?t=encoded_string`);
   console.log(`🔔 Telegram notifications: ${TELEGRAM_BOT_TOKEN ? 'ENABLED' : 'DISABLED'}`);
   console.log(`💰 30% MythoPoints discount system: ACTIVE`);
+  console.log(`🔗 Use /shorten API to generate encoded URLs for bot`);
 });
