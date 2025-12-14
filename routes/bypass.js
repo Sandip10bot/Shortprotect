@@ -1,15 +1,14 @@
 // routes/bypass.js
 import express from "express";
-import { getCollections } from "../utils/database.js";
 import { generateToken, isValidUrl } from "../utils/helpers.js";
 
 const router = express.Router();
-const { doubleCollection, urlShortenerCollection } = getCollections();
 
 // 🔹 Generate a token and return protected link
 router.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = generateToken();
+  const { doubleCollection } = req.collections;
 
   await doubleCollection.insertOne({
     token,
@@ -29,10 +28,9 @@ router.get("/generate/:userId", async (req, res) => {
 // 🔹 Validate and redirect for double points
 router.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
+  const { doubleCollection } = req.collections;
 
   console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
 
   // Check referer (must come from softurl.in)
   const referer = req.get("referer") || "";
@@ -77,17 +75,11 @@ router.get("/double/:userId/:token", async (req, res) => {
             margin: 20px 0;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
           }
-          .emoji {
-            font-size: 50px;
-            margin: 10px;
-          }
         </style>
       </head>
       <body>
         <div class="roast-container">
-          <div class="emoji">🚫🎯🤡</div>
           <div class="roast-message">"${randomRoast}"</div>
-          <div class="emoji">🔐🚷🕵️‍♂️</div>
           <p>Use the proper SoftURL link to double your MythoPoints!</p>
           <a href="https://t.me/MythoSerialBot" style="
             display: inline-block;
@@ -122,22 +114,17 @@ router.get("/double/:userId/:token", async (req, res) => {
 router.get("/Bypass/:token", async (req, res) => {
   try {
     const { token } = req.params;
+    const { doubleCollection, urlShortenerCollection } = req.collections;
 
     console.log("--- incoming /Bypass request ---");
     console.log("token:", token);
-    console.log("referer:", req.get("referer"));
-    console.log("user-agent:", req.get("user-agent"));
 
     const referer = req.get("referer") || "";
     const isBypassAttempt = !referer.includes("softurl.in");
 
     // Look for the token in the database
     const record = await urlShortenerCollection.findOne({ 
-      token: token,
-      $or: [
-        { target_url: { $exists: true } },
-        { original_url: { $exists: true } }
-      ]
+      token: token
     });
 
     if (!record) {
@@ -191,6 +178,10 @@ router.get("/Bypass/:token", async (req, res) => {
     // Get the target URL from either field
     const targetUrl = record.target_url || record.original_url;
     
+    if (!targetUrl) {
+      return res.status(404).send("No target URL found for this token");
+    }
+    
     // Check referer for bypass attempts
     if (!referer.includes("softurl.in")) {
       // This is a bypass attempt
@@ -201,15 +192,6 @@ router.get("/Bypass/:token", async (req, res) => {
             is_bypass_attempt: true,
             blocked: true,
             status: "BLOCKED - Direct access attempt"
-          },
-          $push: {
-            access_logs: {
-              timestamp: new Date(),
-              ip: req.ip,
-              user_agent: req.get("user-agent"),
-              referer: referer,
-              status: "blocked"
-            }
           }
         }
       );
@@ -294,6 +276,7 @@ router.get("/Bypass/:token", async (req, res) => {
         <div class="error">
           <h2>❌ Server Error</h2>
           <p>Something went wrong on our end. Please try again later.</p>
+          <p>Error: ${err.message}</p>
         </div>
         <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
       </body>
@@ -305,6 +288,7 @@ router.get("/Bypass/:token", async (req, res) => {
 // 🔹 URL Shortener API endpoint
 router.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
+  const { urlShortenerCollection } = req.collections;
   
   if (!url || !userId) {
     return res.status(400).json({
@@ -333,7 +317,8 @@ router.get("/shorten", async (req, res) => {
       target_url: url,
       created_at: new Date(),
       clicks: 0,
-      is_active: true
+      is_active: true,
+      status: "active"
     });
     
     // Generate bypass URL
@@ -360,11 +345,12 @@ router.get("/shorten", async (req, res) => {
 // 🔹 Get URL access statistics
 router.get("/stats/:userId", async (req, res) => {
   const { userId } = req.params;
+  const { urlShortenerCollection } = req.collections;
   
   try {
     const stats = await urlShortenerCollection
       .find({ user_id: parseInt(userId) })
-      .sort({ accessed_at: -1 })
+      .sort({ created_at: -1 })
       .limit(50)
       .toArray();
     
