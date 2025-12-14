@@ -14,9 +14,8 @@ function extractTokenFromSoftURL(softurlToken) {
     const parts = softurlToken.split('_');
     
     // SoftURL format: PREFIX_RANDOM_TOKEN
-    // We want the RANDOM_TOKEN part
+    // We want the RANDOM_TOKEN part (last part)
     if (parts.length >= 2) {
-      // Return the last part (the actual token)
       const extractedToken = parts[parts.length - 1];
       console.log("Extracted token:", extractedToken);
       return extractedToken;
@@ -25,6 +24,14 @@ function extractTokenFromSoftURL(softurlToken) {
   
   // If no underscore, return as is
   return softurlToken;
+}
+
+// Helper function to generate a clean token (just the random part)
+function generateCleanToken() {
+  // Generate 12 random bytes = 24 hex characters
+  const token = generateToken(12);
+  console.log("Generated clean token:", token);
+  return token;
 }
 
 // 🔹 Bypass protection for URL shortener (Main Route)
@@ -36,8 +43,6 @@ router.get("/Bypass/:token", async (req, res) => {
 
     console.log("=== NEW BYPASS REQUEST ===");
     console.log("Incoming token from URL:", token);
-    console.log("Referer:", req.get("referer"));
-    console.log("User Agent:", req.get("user-agent"));
 
     // Extract the actual token from SoftURL format
     const actualToken = extractTokenFromSoftURL(token);
@@ -49,24 +54,49 @@ router.get("/Bypass/:token", async (req, res) => {
 
     console.log("Is from SoftURL?", isFromSoftURL);
 
-    // Look for the token in the database
-    let record = await urlShortenerCollection.findOne({ 
+    // Look for the token in the database - try multiple approaches
+    let record = null;
+    
+    // FIRST: Try to find by the extracted token (the random part)
+    record = await urlShortenerCollection.findOne({ 
       token: actualToken 
     });
 
-    // If not found with actual token, try the original token
-    if (!record && actualToken !== token) {
+    // SECOND: If not found, try to find by full token
+    if (!record) {
       record = await urlShortenerCollection.findOne({ 
         token: token 
+      });
+    }
+
+    // THIRD: If still not found, search for any token that contains the extracted token
+    if (!record) {
+      const allRecords = await urlShortenerCollection.find({}).toArray();
+      record = allRecords.find(r => {
+        if (!r.token) return false;
+        
+        // Check if stored token ends with the extracted token
+        if (r.token.endsWith(actualToken)) {
+          console.log("Found partial match:", r.token, "ends with", actualToken);
+          return true;
+        }
+        
+        // Check if stored token contains the extracted token
+        if (r.token.includes(actualToken)) {
+          console.log("Found contains match:", r.token, "contains", actualToken);
+          return true;
+        }
+        
+        return false;
       });
     }
 
     if (!record) {
       console.log("Token not found in database");
       
-      // Create a test response to debug
+      // Get all tokens for debugging
       const allTokens = await urlShortenerCollection.find({}).project({ token: 1, _id: 0 }).toArray();
-      console.log("All tokens in database:", allTokens.map(t => t.token));
+      const uniqueTokens = [...new Set(allTokens.map(t => t.token))];
       
       return res.status(404).send(`
         <!DOCTYPE html>
@@ -87,25 +117,27 @@ router.get("/Bypass/:token", async (req, res) => {
             <p><strong>Received Token:</strong> <code>${token}</code></p>
             <p><strong>Extracted Token:</strong> <code>${actualToken}</code></p>
             <p><strong>Is from SoftURL:</strong> ${isFromSoftURL ? 'Yes' : 'No'}</p>
-            <p><strong>Referer:</strong> ${referer || 'None'}</p>
           </div>
           
           <div class="debug">
-            <h3>Debug Information:</h3>
-            <p><strong>Total records in database:</strong> ${allTokens.length}</p>
-            <p><strong>All stored tokens:</strong></p>
+            <h3>Database Tokens (${uniqueTokens.length} unique):</h3>
             <ul>
-              ${allTokens.map(t => `<li><code>${t.token || 'No token'}</code></li>`).join('')}
+              ${uniqueTokens.map(t => `<li><code>${t || 'No token'}</code></li>`).join('')}
             </ul>
           </div>
           
           <div class="success">
-            <h3>Test Links:</h3>
-            <p><a href="/test/shorten?url=https://google.com">Create a test short URL</a></p>
-            <p><a href="/debug/tokens">View all tokens (JSON)</a></p>
+            <h3>Fix This Issue:</h3>
+            <p>The problem is that your database has tokens WITH SoftURL prefixes (like <code>xnBJZGfX_02750b6813</code>).</p>
+            <p>You need to:</p>
+            <ol>
+              <li>Clear your database or update existing records</li>
+              <li>Use the new <a href="/fix-database">Fix Database</a> tool</li>
+              <li>Create new short URLs using the updated system</li>
+            </ol>
           </div>
           
-          <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+          <p><a href="/">Back to Home</a> | <a href="/fix-database">Fix Database</a></p>
         </body>
         </html>
       `);
@@ -113,9 +145,8 @@ router.get("/Bypass/:token", async (req, res) => {
 
     console.log("Found record:", {
       id: record._id,
-      token: record.token,
-      target_url: record.target_url,
-      original_url: record.original_url
+      stored_token: record.token,
+      target_url: record.target_url
     });
 
     // Update click count
@@ -140,7 +171,7 @@ router.get("/Bypass/:token", async (req, res) => {
       return res.status(404).send("No target URL found for this token");
     }
     
-    console.log("Target URL:", targetUrl);
+    console.log("Redirecting to:", targetUrl);
     
     // Check if this is a bypass attempt (not from SoftURL)
     if (!isFromSoftURL) {
@@ -157,7 +188,7 @@ router.get("/Bypass/:token", async (req, res) => {
         }
       );
       
-      // Show roast page for bypass attempts
+      // Show roast page
       const roastMessages = [
         "🚫 Oops! Trying to bypass SoftURL? Even my grandma follows links better!",
         "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
@@ -212,10 +243,6 @@ router.get("/Bypass/:token", async (req, res) => {
               font-weight: bold;
             ">🤖 Go To MythoBot</a>
           </div>
-          <p style="font-size: 12px; margin-top: 20px;">
-            Token: ${record.token}<br>
-            Access blocked: ${new Date().toLocaleString()}
-          </p>
         </body>
         </html>
       `);
@@ -263,7 +290,7 @@ router.get("/Bypass/:token", async (req, res) => {
   }
 });
 
-// 🔹 URL Shortener API endpoint
+// 🔹 URL Shortener API endpoint (UPDATED - Store clean tokens)
 router.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
   
@@ -286,34 +313,36 @@ router.get("/shorten", async (req, res) => {
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
     
-    // Generate a clean token (just random hex, no prefix)
-    const token = generateToken(12); // 12 bytes = 24 hex characters
+    // Generate a CLEAN token (just the random part, no prefix)
+    const cleanToken = generateCleanToken();
     
-    console.log("Creating short URL with token:", token);
+    console.log("Creating short URL with CLEAN token:", cleanToken);
     
-    // Store in database
+    // Store in database - ONLY the clean token
     await urlShortenerCollection.insertOne({
       user_id: parseInt(userId),
-      token: token,
+      token: cleanToken, // Store ONLY the clean token
       original_url: url,
       target_url: url,
       created_at: new Date(),
       clicks: 0,
       is_active: true,
-      status: "active"
+      status: "active",
+      note: "Clean token stored - SoftURL will add its own prefix"
     });
     
-    // Generate bypass URL for SoftURL
-    const bypassUrl = `https://${req.hostname}/Bypass/${token}`;
+    // Generate bypass URL
+    const bypassUrl = `https://${req.hostname}/Bypass/${cleanToken}`;
     
     res.json({
       success: true,
       original_url: url,
       bypass_url: bypassUrl,
-      token: token,
+      token: cleanToken,
+      clean_token: cleanToken,
       user_id: userId,
       timestamp: new Date().toISOString(),
-      note: "Use this bypass_url with SoftURL.in. The token will be extracted automatically."
+      note: "IMPORTANT: Use this bypass_url with SoftURL.in. The system will extract the clean token automatically."
     });
     
   } catch (error) {
@@ -325,6 +354,145 @@ router.get("/shorten", async (req, res) => {
   }
 });
 
+// 🔹 Fix Database Tool
+router.get("/fix-database", async (req, res) => {
+  try {
+    const collections = getCollections();
+    const { urlShortenerCollection } = collections;
+    
+    // Get all records
+    const allRecords = await urlShortenerCollection.find({}).toArray();
+    
+    let fixedCount = 0;
+    let errorCount = 0;
+    const results = [];
+    
+    // Process each record
+    for (const record of allRecords) {
+      if (record.token && record.token.includes('_')) {
+        const oldToken = record.token;
+        const newToken = extractTokenFromSoftURL(oldToken);
+        
+        if (newToken !== oldToken) {
+          try {
+            // Update the record with clean token
+            await urlShortenerCollection.updateOne(
+              { _id: record._id },
+              { 
+                $set: { 
+                  token: newToken,
+                  fixed_at: new Date(),
+                  old_token: oldToken // Keep old token for reference
+                }
+              }
+            );
+            
+            fixedCount++;
+            results.push({
+              id: record._id.toString(),
+              old_token: oldToken,
+              new_token: newToken,
+              status: "FIXED"
+            });
+            
+          } catch (error) {
+            errorCount++;
+            results.push({
+              id: record._id.toString(),
+              old_token: oldToken,
+              error: error.message,
+              status: "ERROR"
+            });
+          }
+        }
+      }
+    }
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Database Fix Tool</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+          .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; }
+          .error { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; }
+          .info { background: #d1ecf1; padding: 15px; border-radius: 8px; margin: 15px 0; }
+          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>
+        <h1>Database Fix Tool</h1>
+        
+        <div class="success">
+          <h3>✅ Database Fix Complete</h3>
+          <p><strong>Total Records Processed:</strong> ${allRecords.length}</p>
+          <p><strong>Fixed:</strong> ${fixedCount}</p>
+          <p><strong>Errors:</strong> ${errorCount}</p>
+        </div>
+        
+        ${results.length > 0 ? `
+        <div class="info">
+          <h3>Fix Results:</h3>
+          <table>
+            <tr>
+              <th>Record ID</th>
+              <th>Old Token</th>
+              <th>New Token</th>
+              <th>Status</th>
+            </tr>
+            ${results.map(r => `
+            <tr>
+              <td>${r.id.substring(0, 8)}...</td>
+              <td><code>${r.old_token}</code></td>
+              <td><code>${r.new_token || ''}</code></td>
+              <td>${r.status}</td>
+            </tr>
+            `).join('')}
+          </table>
+        </div>
+        ` : ''}
+        
+        <div class="info">
+          <h3>Next Steps:</h3>
+          <ol>
+            <li><a href="/test/shorten">Create a test short URL</a> to verify the fix</li>
+            <li><a href="/debug/tokens">Check all tokens</a> to ensure they're clean</li>
+            <li>Test with SoftURL to confirm redirection works</li>
+          </ol>
+        </div>
+        
+        <p><a href="/">Back to Home</a></p>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Database Fix Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+          .error { background: #f8d7da; padding: 20px; border-radius: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h2>❌ Database Fix Error</h2>
+          <p>Error: ${error.message}</p>
+        </div>
+        <p><a href="/">Back to Home</a></p>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // 🔹 Test endpoint to create a short URL
 router.get("/test/shorten", async (req, res) => {
   const { url = "https://google.com", userId = "test123" } = req.query;
@@ -333,11 +501,12 @@ router.get("/test/shorten", async (req, res) => {
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
     
-    const token = generateToken(12);
+    // Generate CLEAN token
+    const cleanToken = generateCleanToken();
     
     await urlShortenerCollection.insertOne({
       user_id: parseInt(userId),
-      token: token,
+      token: cleanToken,
       original_url: url,
       target_url: url,
       created_at: new Date(),
@@ -346,7 +515,7 @@ router.get("/test/shorten", async (req, res) => {
       status: "test"
     });
     
-    const bypassUrl = `https://${req.hostname}/Bypass/${token}`;
+    const bypassUrl = `https://${req.hostname}/Bypass/${cleanToken}`;
     
     res.send(`
       <!DOCTYPE html>
@@ -366,26 +535,29 @@ router.get("/test/shorten", async (req, res) => {
         <div class="success">
           <h3>Successfully Created!</h3>
           <p><strong>Original URL:</strong> <code>${url}</code></p>
-          <p><strong>Token:</strong> <code>${token}</code></p>
-          <p><strong>User ID:</strong> ${userId}</p>
+          <p><strong>Clean Token:</strong> <code>${cleanToken}</code></p>
+          <p><strong>Bypass URL:</strong> <code>${bypassUrl}</code></p>
         </div>
         
         <div class="info">
-          <h3>Test Links:</h3>
+          <h3>Test Steps:</h3>
+          <ol>
+            <li>Copy this bypass URL: <code>${bypassUrl}</code></li>
+            <li>Go to <a href="https://softurl.in" target="_blank">softurl.in</a></li>
+            <li>Paste the bypass URL and shorten it</li>
+            <li>Click the SoftURL shortened link</li>
+            <li>It should redirect to <code>${url}</code></li>
+          </ol>
+        </div>
+        
+        <div class="info">
+          <h3>Direct Test Links:</h3>
           <p>1. <a href="${bypassUrl}" target="_blank">Direct Access (Should show bypass page)</a></p>
-          <p>2. <a href="/shorten?url=${encodeURIComponent(url)}&userId=${userId}">API Response (JSON)</a></p>
+          <p>2. <a href="/shorten?url=${encodeURIComponent(url)}&userId=${userId}">API Response</a></p>
           <p>3. <a href="/debug/tokens">View All Tokens</a></p>
         </div>
         
-        <div class="info">
-          <h3>Instructions for SoftURL:</h3>
-          <p>1. Go to <a href="https://softurl.in" target="_blank">softurl.in</a></p>
-          <p>2. Paste this URL: <code>${bypassUrl}</code></p>
-          <p>3. Get the shortened link from SoftURL</p>
-          <p>4. Click the SoftURL link - it should redirect to ${url}</p>
-        </div>
-        
-        <p><a href="/">Back to Home</a></p>
+        <p><a href="/">Back to Home</a> | <a href="/fix-database">Fix Old Tokens</a></p>
       </body>
       </html>
     `);
@@ -410,7 +582,10 @@ router.get("/debug/tokens", async (req, res) => {
       success: true,
       total_tokens: tokens.length,
       tokens: tokens.map(t => ({
+        id: t._id.toString().substring(0, 8) + '...',
         token: t.token,
+        clean_token: t.token.includes('_') ? extractTokenFromSoftURL(t.token) : t.token,
+        has_prefix: t.token.includes('_'),
         url: t.target_url || t.original_url,
         created_at: t.created_at,
         clicks: t.clicks || 0,
@@ -425,7 +600,5 @@ router.get("/debug/tokens", async (req, res) => {
     });
   }
 });
-
-// Other routes remain the same...
 
 export default router;
