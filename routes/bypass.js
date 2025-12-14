@@ -136,23 +136,40 @@ router.get("/Bypass/:token", async (req, res) => {
     const referer = req.get("referer") || "";
     const isBypassAttempt = !referer.includes("softurl.in");
 
+    // Clean the token - remove any underscores that might be added
+    const cleanToken = token.includes('_') ? token.split('_')[1] || token : token;
+    
+    console.log("Searching for token:", cleanToken);
+
     // Look for the token in the database
-    const record = await urlShortenerCollection.findOne({ 
-      token: token
+    let record = await urlShortenerCollection.findOne({ 
+      token: cleanToken
     });
+
+    // If not found with clean token, try the original token
+    if (!record && cleanToken !== token) {
+      record = await urlShortenerCollection.findOne({ 
+        token: token
+      });
+    }
 
     if (!record) {
       // If not found, try to find it in double_points collection
-      const doubleRecord = await doubleCollection.findOne({ token });
+      let doubleRecord = await doubleCollection.findOne({ token: cleanToken });
+      
+      if (!doubleRecord && cleanToken !== token) {
+        doubleRecord = await doubleCollection.findOne({ token });
+      }
+      
       if (doubleRecord && !doubleRecord.used) {
         // Mark as used and redirect to bot
         await doubleCollection.updateOne(
-          { token },
+          { _id: doubleRecord._id },
           { $set: { used: true, used_at: new Date() } }
         );
         
         const botUsername = "MythoSerialBot";
-        const deepLink = `https://t.me/${botUsername}?start=double_${doubleRecord.user_id}_${token}`;
+        const deepLink = `https://t.me/${botUsername}?start=double_${doubleRecord.user_id}_${doubleRecord.token}`;
         return res.redirect(deepLink);
       }
       
@@ -175,7 +192,12 @@ router.get("/Bypass/:token", async (req, res) => {
               <li>The link has expired</li>
               <li>The token was already used</li>
               <li>Invalid token format</li>
+              <li>Token: ${token}</li>
+              <li>Clean token: ${cleanToken}</li>
             </ul>
+            <p><strong>Debug Info:</strong></p>
+            <p>Total records in urlShortenerCollection: ${await urlShortenerCollection.countDocuments()}</p>
+            <p>Total records in doubleCollection: ${await doubleCollection.countDocuments()}</p>
           </div>
           <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
         </body>
@@ -325,8 +347,10 @@ router.get("/shorten", async (req, res) => {
     // Generate token for the URL
     const token = generateToken();
     
+    console.log("Generated token for shortening:", token);
+    
     // Store in database
-    await urlShortenerCollection.insertOne({
+    const result = await urlShortenerCollection.insertOne({
       user_id: parseInt(userId),
       token: token,
       original_url: url,
@@ -337,6 +361,8 @@ router.get("/shorten", async (req, res) => {
       status: "active"
     });
     
+    console.log("Inserted record with ID:", result.insertedId);
+    
     // Generate bypass URL
     const bypassUrl = `https://${req.hostname}/Bypass/${token}`;
     
@@ -346,7 +372,11 @@ router.get("/shorten", async (req, res) => {
       bypass_url: bypassUrl,
       token: token,
       user_id: userId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      debug: {
+        inserted: true,
+        recordId: result.insertedId
+      }
     });
     
   } catch (error) {
@@ -383,6 +413,31 @@ router.get("/stats/:userId", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch statistics"
+    });
+  }
+});
+
+// 🔹 Debug endpoint to see all tokens
+router.get("/debug/tokens", async (req, res) => {
+  try {
+    const collections = getCollections();
+    const { urlShortenerCollection, doubleCollection } = collections;
+    
+    const urlTokens = await urlShortenerCollection.find({}).project({ token: 1, created_at: 1, _id: 0 }).toArray();
+    const doubleTokens = await doubleCollection.find({}).project({ token: 1, created_at: 1, _id: 0 }).toArray();
+    
+    res.json({
+      success: true,
+      url_tokens: urlTokens,
+      double_tokens: doubleTokens,
+      total_url_tokens: urlTokens.length,
+      total_double_tokens: doubleTokens.length
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
