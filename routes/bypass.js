@@ -9,95 +9,69 @@ const router = express.Router();
 function extractTokenFromSoftURL(softurlToken) {
   console.log("Extracting token from:", softurlToken);
   
-  // If token has underscore, it's likely from SoftURL
+  // If token has underscore, extract the part after the last underscore
   if (softurlToken.includes('_')) {
     const parts = softurlToken.split('_');
-    
-    // SoftURL format: PREFIX_RANDOM_TOKEN
-    // We want the RANDOM_TOKEN part (last part)
-    if (parts.length >= 2) {
-      const extractedToken = parts[parts.length - 1];
-      console.log("Extracted token:", extractedToken);
-      return extractedToken;
-    }
+    const extractedToken = parts[parts.length - 1];
+    console.log("Extracted token:", extractedToken);
+    return extractedToken;
   }
   
-  // If no underscore, return as is
   return softurlToken;
 }
 
-// Helper function to generate a clean token (just the random part)
-function generateCleanToken() {
-  // Generate 12 random bytes = 24 hex characters
-  const token = generateToken(12);
-  console.log("Generated clean token:", token);
-  return token;
-}
-
-// 🔹 Bypass protection for URL shortener (Main Route)
-router.get("/Bypass/:token", async (req, res) => {
+// 🔹 Bypass protection with userId and token format: /Bypass/:userId/:token
+router.get("/Bypass/:userId/:token", async (req, res) => {
   try {
-    const { token } = req.params;
+    const { userId, token } = req.params;
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
 
-    console.log("=== NEW BYPASS REQUEST ===");
-    console.log("Incoming token from URL:", token);
+    console.log("=== BYPASS REQUEST WITH USER ID ===");
+    console.log("User ID:", userId);
+    console.log("Token from URL:", token);
 
-    // Extract the actual token from SoftURL format
-    const actualToken = extractTokenFromSoftURL(token);
-    console.log("Actual token to search:", actualToken);
+    // Extract clean token
+    const cleanToken = extractTokenFromSoftURL(token);
+    console.log("Clean token:", cleanToken);
 
+    // Check referer to determine if it's from SoftURL
     const referer = req.get("referer") || "";
-    const userAgent = req.get("user-agent") || "";
-    const isFromSoftURL = referer.includes("softurl.in") || userAgent.includes("SoftURL");
-
+    const isFromSoftURL = referer.includes("softurl.in");
+    console.log("Referer:", referer);
     console.log("Is from SoftURL?", isFromSoftURL);
 
-    // Look for the token in the database - try multiple approaches
-    let record = null;
-    
-    // FIRST: Try to find by the extracted token (the random part)
-    record = await urlShortenerCollection.findOne({ 
-      token: actualToken 
+    // Try to find the record with user_id and token
+    let record = await urlShortenerCollection.findOne({ 
+      user_id: parseInt(userId),
+      token: cleanToken
     });
 
-    // SECOND: If not found, try to find by full token
+    // If not found with clean token, try with original token
+    if (!record && cleanToken !== token) {
+      record = await urlShortenerCollection.findOne({ 
+        user_id: parseInt(userId),
+        token: token
+      });
+    }
+
+    // If still not found, try just by token (any user)
     if (!record) {
       record = await urlShortenerCollection.findOne({ 
-        token: token 
+        token: cleanToken
       });
-    }
-
-    // THIRD: If still not found, search for any token that contains the extracted token
-    if (!record) {
-      const allRecords = await urlShortenerCollection.find({}).toArray();
-      record = allRecords.find(r => {
-        if (!r.token) return false;
-        
-        // Check if stored token ends with the extracted token
-        if (r.token.endsWith(actualToken)) {
-          console.log("Found partial match:", r.token, "ends with", actualToken);
-          return true;
-        }
-        
-        // Check if stored token contains the extracted token
-        if (r.token.includes(actualToken)) {
-          console.log("Found contains match:", r.token, "contains", actualToken);
-          return true;
-        }
-        
-        return false;
-      });
+      
+      if (!record && cleanToken !== token) {
+        record = await urlShortenerCollection.findOne({ 
+          token: token
+        });
+      }
     }
 
     if (!record) {
-      console.log("Token not found in database");
+      console.log("Token not found for user", userId);
       
-      // Get all tokens for debugging
-      const allTokens = await urlShortenerCollection.find({}).project({ token: 1, _id: 0 }).toArray();
-      const uniqueTokens = [...new Set(allTokens.map(t => t.token))];
-      
+      // Show error page
       return res.status(404).send(`
         <!DOCTYPE html>
         <html>
@@ -105,49 +79,33 @@ router.get("/Bypass/:token", async (req, res) => {
           <title>Token Not Found</title>
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
             .error { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; }
             .debug { background: #e9ecef; padding: 15px; border-radius: 8px; margin: 15px 0; font-family: monospace; font-size: 12px; }
-            .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; }
           </style>
         </head>
         <body>
           <div class="error">
-            <h2>❌ Token Not Found in Database</h2>
-            <p><strong>Received Token:</strong> <code>${token}</code></p>
-            <p><strong>Extracted Token:</strong> <code>${actualToken}</code></p>
-            <p><strong>Is from SoftURL:</strong> ${isFromSoftURL ? 'Yes' : 'No'}</p>
+            <h2>❌ Token Not Found</h2>
+            <p>User ID: <code>${userId}</code></p>
+            <p>Token: <code>${token}</code></p>
+            <p>Clean Token: <code>${cleanToken}</code></p>
+            <p>This token was not found in the database for the specified user.</p>
           </div>
           
           <div class="debug">
-            <h3>Database Tokens (${uniqueTokens.length} unique):</h3>
-            <ul>
-              ${uniqueTokens.map(t => `<li><code>${t || 'No token'}</code></li>`).join('')}
-            </ul>
+            <h4>Debug Info:</h4>
+            <p><strong>From SoftURL:</strong> ${isFromSoftURL ? 'Yes' : 'No'}</p>
+            <p><strong>Referer:</strong> ${referer || 'None'}</p>
+            <p><strong>Solution:</strong> Create a new short URL using the API</p>
           </div>
           
-          <div class="success">
-            <h3>Fix This Issue:</h3>
-            <p>The problem is that your database has tokens WITH SoftURL prefixes (like <code>xnBJZGfX_02750b6813</code>).</p>
-            <p>You need to:</p>
-            <ol>
-              <li>Clear your database or update existing records</li>
-              <li>Use the new <a href="/fix-database">Fix Database</a> tool</li>
-              <li>Create new short URLs using the updated system</li>
-            </ol>
-          </div>
-          
-          <p><a href="/">Back to Home</a> | <a href="/fix-database">Fix Database</a></p>
+          <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+          <p><a href="/create-short?userId=${userId}">Create Short URL for User ${userId}</a></p>
         </body>
         </html>
       `);
     }
-
-    console.log("Found record:", {
-      id: record._id,
-      stored_token: record.token,
-      target_url: record.target_url
-    });
 
     // Update click count
     await urlShortenerCollection.updateOne(
@@ -158,24 +116,19 @@ router.get("/Bypass/:token", async (req, res) => {
           last_accessed: new Date(),
           accessed_from: isFromSoftURL ? 'softurl' : 'direct',
           referer: referer,
-          user_agent: userAgent,
-          ip_address: req.ip
+          last_user_id: userId
         }
       }
     );
 
-    // Get the target URL
-    const targetUrl = record.target_url || record.original_url;
-    
-    if (!targetUrl) {
-      return res.status(404).send("No target URL found for this token");
-    }
+    // Get target URL
+    const targetUrl = record.target_url || record.original_url || "https://t.me/MythoSerialBot";
     
     console.log("Redirecting to:", targetUrl);
     
-    // Check if this is a bypass attempt (not from SoftURL)
+    // Check if it's a direct bypass attempt (not from SoftURL)
     if (!isFromSoftURL) {
-      console.log("Bypass attempt detected!");
+      console.log("Direct access attempt detected");
       
       await urlShortenerCollection.updateOne(
         { _id: record._id },
@@ -188,11 +141,11 @@ router.get("/Bypass/:token", async (req, res) => {
         }
       );
       
-      // Show roast page
+      // Show roast page for direct access attempts
       const roastMessages = [
-        "🚫 Oops! Trying to bypass SoftURL? Even my grandma follows links better!",
-        "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
-        "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
+        "🚫 Direct access detected! You must use SoftURL!",
+        "🤡 Trying to skip the line? Not on my watch!",
+        "🎯 Bypass attempt blocked! Use the proper SoftURL link!",
       ];
       const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
       
@@ -200,7 +153,7 @@ router.get("/Bypass/:token", async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Bypass Detected! 🚫</title>
+          <title>Direct Access Blocked! 🚫</title>
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
@@ -231,7 +184,8 @@ router.get("/Bypass/:token", async (req, res) => {
         <body>
           <div class="roast-container">
             <div class="roast-message">"${randomRoast}"</div>
-            <p>Use the proper SoftURL link to access this content!</p>
+            <p>User ID: <code>${userId}</code></p>
+            <p>This content is protected and can only be accessed through SoftURL!</p>
             <a href="https://t.me/MythoSerialBot" style="
               display: inline-block;
               background: white;
@@ -248,21 +202,21 @@ router.get("/Bypass/:token", async (req, res) => {
       `);
     }
 
-    // LEGITIMATE ACCESS FROM SOFTURL
-    console.log(`✅ Legitimate SoftURL access - Redirecting to: ${targetUrl}`);
+    // LEGITIMATE SOFTURL ACCESS - REDIRECT
+    console.log(`✅ Legitimate SoftURL access for user ${userId} - Redirecting to: ${targetUrl}`);
     
-    // Log successful access
     await urlShortenerCollection.updateOne(
       { _id: record._id },
       { 
         $set: { 
-          status: "SUCCESS - Redirected",
-          last_success_access: new Date()
+          status: "SUCCESS - Redirected via SoftURL",
+          last_success_access: new Date(),
+          last_success_user_id: userId
         }
       }
     );
 
-    // REDIRECT to the target URL
+    // REDIRECT to target URL
     return res.redirect(targetUrl);
 
   } catch (err) {
@@ -290,14 +244,205 @@ router.get("/Bypass/:token", async (req, res) => {
   }
 });
 
-// 🔹 URL Shortener API endpoint (UPDATED - Store clean tokens)
+// 🔹 Bypass protection with just token format: /Bypass/:token (for backward compatibility)
+router.get("/Bypass/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const collections = getCollections();
+    const { urlShortenerCollection } = collections;
+
+    console.log("=== BYPASS REQUEST (TOKEN ONLY) ===");
+    console.log("Token from URL:", token);
+
+    // Extract clean token
+    const cleanToken = extractTokenFromSoftURL(token);
+    console.log("Clean token:", cleanToken);
+
+    // Check referer
+    const referer = req.get("referer") || "";
+    const isFromSoftURL = referer.includes("softurl.in");
+    console.log("Is from SoftURL?", isFromSoftURL);
+
+    // Find record by token
+    let record = await urlShortenerCollection.findOne({ 
+      token: cleanToken
+    });
+
+    if (!record && cleanToken !== token) {
+      record = await urlShortenerCollection.findOne({ 
+        token: token
+      });
+    }
+
+    if (!record) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Token Not Found</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h2>❌ Token Not Found</h2>
+            <p>Token: <code>${token}</code> was not found in the database.</p>
+            <p>Please use the correct URL format with user ID.</p>
+          </div>
+          <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+        </body>
+        </html>
+      `);
+    }
+
+    // Get user ID from record
+    const userId = record.user_id || "unknown";
+    
+    // Update click count
+    await urlShortenerCollection.updateOne(
+      { _id: record._id },
+      { 
+        $inc: { clicks: 1 }, 
+        $set: { 
+          last_accessed: new Date(),
+          accessed_from: isFromSoftURL ? 'softurl' : 'direct',
+          referer: referer
+        }
+      }
+    );
+
+    // Get target URL
+    const targetUrl = record.target_url || record.original_url || "https://t.me/MythoSerialBot";
+    
+    console.log("Redirecting to:", targetUrl);
+    
+    // Check if it's a direct bypass attempt
+    if (!isFromSoftURL) {
+      console.log("Direct access attempt detected");
+      
+      await urlShortenerCollection.updateOne(
+        { _id: record._id },
+        { 
+          $set: { 
+            is_bypass_attempt: true,
+            blocked: true,
+            status: "BLOCKED - Direct access"
+          }
+        }
+      );
+      
+      // Show roast page
+      const roastMessages = [
+        "🚫 Direct access detected! You must use SoftURL!",
+        "🤡 Trying to bypass? This isn't the right way!",
+        "🎯 Bypass attempt blocked!",
+      ];
+      const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Direct Access Blocked! 🚫</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
+            body { 
+              font-family: 'Comic Neue', cursive; 
+              max-width: 600px; 
+              margin: 50px auto; 
+              padding: 20px;
+              background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
+              color: white;
+              text-align: center;
+            }
+            .roast-container {
+              background: rgba(255,255,255,0.1);
+              padding: 30px;
+              border-radius: 20px;
+              backdrop-filter: blur(10px);
+              border: 2px solid rgba(255,255,255,0.2);
+              margin: 20px 0;
+            }
+            .roast-message {
+              font-size: 24px;
+              margin: 20px 0;
+              text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="roast-container">
+            <div class="roast-message">"${randomRoast}"</div>
+            <p>User ID: <code>${userId}</code></p>
+            <p>Use SoftURL to access this content!</p>
+            <a href="https://t.me/MythoSerialBot" style="
+              display: inline-block;
+              background: white;
+              color: #ff6b6b;
+              padding: 12px 24px;
+              border-radius: 25px;
+              text-decoration: none;
+              margin-top: 20px;
+              font-weight: bold;
+            ">🤖 Go To MythoBot</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // LEGITIMATE SOFTURL ACCESS - REDIRECT
+    console.log(`✅ Legitimate SoftURL access - Redirecting to: ${targetUrl}`);
+    
+    await urlShortenerCollection.updateOne(
+      { _id: record._id },
+      { 
+        $set: { 
+          status: "SUCCESS - Redirected via SoftURL",
+          last_success_access: new Date()
+        }
+      }
+    );
+
+    // REDIRECT to target URL
+    return res.redirect(targetUrl);
+
+  } catch (err) {
+    console.error("Bypass route error:", err);
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Server Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { background: #f8d7da; padding: 20px; border-radius: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h2>❌ Server Error</h2>
+          <p>Something went wrong on our end. Please try again later.</p>
+          <p>Error: ${err.message}</p>
+        </div>
+        <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// 🔹 URL Shortener API endpoint
 router.get("/shorten", async (req, res) => {
-  const { url, userId } = req.query;
+  const { url, userId = "0" } = req.query;
   
-  if (!url || !userId) {
+  if (!url) {
     return res.status(400).json({
       success: false,
-      error: "Missing url or userId parameters"
+      error: "Missing url parameter"
     });
   }
   
@@ -313,36 +458,39 @@ router.get("/shorten", async (req, res) => {
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
     
-    // Generate a CLEAN token (just the random part, no prefix)
-    const cleanToken = generateCleanToken();
+    // Generate a clean token
+    const cleanToken = generateToken(12);
     
-    console.log("Creating short URL with CLEAN token:", cleanToken);
+    console.log("Creating short URL for user", userId, "with token:", cleanToken);
     
-    // Store in database - ONLY the clean token
+    // Store in database
     await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: cleanToken, // Store ONLY the clean token
+      user_id: parseInt(userId) || 0,
+      token: cleanToken,
       original_url: url,
       target_url: url,
       created_at: new Date(),
       clicks: 0,
       is_active: true,
-      status: "active",
-      note: "Clean token stored - SoftURL will add its own prefix"
+      status: "active"
     });
     
-    // Generate bypass URL
-    const bypassUrl = `https://${req.hostname}/Bypass/${cleanToken}`;
+    // Generate TWO bypass URLs:
+    // 1. With user ID: /Bypass/:userId/:token
+    // 2. Without user ID: /Bypass/:token (for backward compatibility)
+    const bypassUrlWithUser = `https://${req.hostname}/Bypass/${userId}/${cleanToken}`;
+    const bypassUrlSimple = `https://${req.hostname}/Bypass/${cleanToken}`;
     
     res.json({
       success: true,
       original_url: url,
-      bypass_url: bypassUrl,
+      bypass_url_with_user: bypassUrlWithUser,
+      bypass_url_simple: bypassUrlSimple,
       token: cleanToken,
-      clean_token: cleanToken,
       user_id: userId,
       timestamp: new Date().toISOString(),
-      note: "IMPORTANT: Use this bypass_url with SoftURL.in. The system will extract the clean token automatically."
+      recommended_url: bypassUrlWithUser,
+      note: "Use bypass_url_with_user for better user tracking"
     });
     
   } catch (error) {
@@ -354,158 +502,18 @@ router.get("/shorten", async (req, res) => {
   }
 });
 
-// 🔹 Fix Database Tool
-router.get("/fix-database", async (req, res) => {
-  try {
-    const collections = getCollections();
-    const { urlShortenerCollection } = collections;
-    
-    // Get all records
-    const allRecords = await urlShortenerCollection.find({}).toArray();
-    
-    let fixedCount = 0;
-    let errorCount = 0;
-    const results = [];
-    
-    // Process each record
-    for (const record of allRecords) {
-      if (record.token && record.token.includes('_')) {
-        const oldToken = record.token;
-        const newToken = extractTokenFromSoftURL(oldToken);
-        
-        if (newToken !== oldToken) {
-          try {
-            // Update the record with clean token
-            await urlShortenerCollection.updateOne(
-              { _id: record._id },
-              { 
-                $set: { 
-                  token: newToken,
-                  fixed_at: new Date(),
-                  old_token: oldToken // Keep old token for reference
-                }
-              }
-            );
-            
-            fixedCount++;
-            results.push({
-              id: record._id.toString(),
-              old_token: oldToken,
-              new_token: newToken,
-              status: "FIXED"
-            });
-            
-          } catch (error) {
-            errorCount++;
-            results.push({
-              id: record._id.toString(),
-              old_token: oldToken,
-              error: error.message,
-              status: "ERROR"
-            });
-          }
-        }
-      }
-    }
-    
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Database Fix Tool</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-          .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; }
-          .error { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; }
-          .info { background: #d1ecf1; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-        </style>
-      </head>
-      <body>
-        <h1>Database Fix Tool</h1>
-        
-        <div class="success">
-          <h3>✅ Database Fix Complete</h3>
-          <p><strong>Total Records Processed:</strong> ${allRecords.length}</p>
-          <p><strong>Fixed:</strong> ${fixedCount}</p>
-          <p><strong>Errors:</strong> ${errorCount}</p>
-        </div>
-        
-        ${results.length > 0 ? `
-        <div class="info">
-          <h3>Fix Results:</h3>
-          <table>
-            <tr>
-              <th>Record ID</th>
-              <th>Old Token</th>
-              <th>New Token</th>
-              <th>Status</th>
-            </tr>
-            ${results.map(r => `
-            <tr>
-              <td>${r.id.substring(0, 8)}...</td>
-              <td><code>${r.old_token}</code></td>
-              <td><code>${r.new_token || ''}</code></td>
-              <td>${r.status}</td>
-            </tr>
-            `).join('')}
-          </table>
-        </div>
-        ` : ''}
-        
-        <div class="info">
-          <h3>Next Steps:</h3>
-          <ol>
-            <li><a href="/test/shorten">Create a test short URL</a> to verify the fix</li>
-            <li><a href="/debug/tokens">Check all tokens</a> to ensure they're clean</li>
-            <li>Test with SoftURL to confirm redirection works</li>
-          </ol>
-        </div>
-        
-        <p><a href="/">Back to Home</a></p>
-      </body>
-      </html>
-    `);
-    
-  } catch (error) {
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Database Fix Error</title>
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .error { background: #f8d7da; padding: 20px; border-radius: 10px; }
-        </style>
-      </head>
-      <body>
-        <div class="error">
-          <h2>❌ Database Fix Error</h2>
-          <p>Error: ${error.message}</p>
-        </div>
-        <p><a href="/">Back to Home</a></p>
-      </body>
-      </html>
-    `);
-  }
-});
-
-// 🔹 Test endpoint to create a short URL
-router.get("/test/shorten", async (req, res) => {
-  const { url = "https://google.com", userId = "test123" } = req.query;
+// 🔹 Create a short URL with user ID
+router.get("/create-short", async (req, res) => {
+  const { url = "https://google.com", userId = "5189870730" } = req.query;
   
   try {
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
     
-    // Generate CLEAN token
-    const cleanToken = generateCleanToken();
+    const cleanToken = generateToken(12);
     
     await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
+      user_id: parseInt(userId) || 5189870730,
       token: cleanToken,
       original_url: url,
       target_url: url,
@@ -515,49 +523,59 @@ router.get("/test/shorten", async (req, res) => {
       status: "test"
     });
     
-    const bypassUrl = `https://${req.hostname}/Bypass/${cleanToken}`;
+    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${cleanToken}`;
     
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Test Short URL Created</title>
+        <title>Short URL Created</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
           .success { background: #d4edda; padding: 20px; border-radius: 10px; margin: 20px 0; }
           .info { background: #d1ecf1; padding: 15px; border-radius: 8px; margin: 15px 0; }
           code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
+          .url-box { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 5px; margin: 10px 0; }
         </style>
       </head>
       <body>
-        <h1>✅ Test Short URL Created</h1>
+        <h1>✅ Short URL Created!</h1>
         
         <div class="success">
-          <h3>Successfully Created!</h3>
+          <h3>Your Short URL Details:</h3>
+          <p><strong>User ID:</strong> <code>${userId}</code></p>
           <p><strong>Original URL:</strong> <code>${url}</code></p>
           <p><strong>Clean Token:</strong> <code>${cleanToken}</code></p>
-          <p><strong>Bypass URL:</strong> <code>${bypassUrl}</code></p>
         </div>
         
         <div class="info">
-          <h3>Test Steps:</h3>
+          <h3>📋 Your Bypass URL:</h3>
+          <div class="url-box">
+            <code>${bypassUrl}</code>
+          </div>
+          <p><a href="${bypassUrl}" target="_blank">Test this URL directly</a></p>
+        </div>
+        
+        <div class="info">
+          <h3>📝 How to Test with SoftURL:</h3>
           <ol>
             <li>Copy this bypass URL: <code>${bypassUrl}</code></li>
             <li>Go to <a href="https://softurl.in" target="_blank">softurl.in</a></li>
-            <li>Paste the bypass URL and shorten it</li>
-            <li>Click the SoftURL shortened link</li>
-            <li>It should redirect to <code>${url}</code></li>
+            <li>Paste the bypass URL and click "Shorten URL"</li>
+            <li>Copy the shortened SoftURL link</li>
+            <li>Open the SoftURL link in a new tab</li>
+            <li><strong>Expected:</strong> It should redirect to <code>${url}</code></li>
           </ol>
         </div>
         
         <div class="info">
-          <h3>Direct Test Links:</h3>
-          <p>1. <a href="${bypassUrl}" target="_blank">Direct Access (Should show bypass page)</a></p>
-          <p>2. <a href="/shorten?url=${encodeURIComponent(url)}&userId=${userId}">API Response</a></p>
-          <p>3. <a href="/debug/tokens">View All Tokens</a></p>
+          <h3>🔧 API Endpoint:</h3>
+          <p><a href="/shorten?url=${encodeURIComponent(url)}&userId=${userId}">View JSON API response</a></p>
+          <p><a href="/view-all">View all stored URLs</a></p>
         </div>
         
-        <p><a href="/">Back to Home</a> | <a href="/fix-database">Fix Old Tokens</a></p>
+        <p><a href="/">Back to Home</a></p>
       </body>
       </html>
     `);
@@ -567,37 +585,75 @@ router.get("/test/shorten", async (req, res) => {
   }
 });
 
-// 🔹 Debug endpoint to see all tokens
-router.get("/debug/tokens", async (req, res) => {
+// 🔹 View all stored URLs
+router.get("/view-all", async (req, res) => {
   try {
     const collections = getCollections();
     const { urlShortenerCollection } = collections;
     
-    const tokens = await urlShortenerCollection.find({})
+    const urls = await urlShortenerCollection.find({})
       .sort({ created_at: -1 })
       .limit(100)
       .toArray();
     
-    res.json({
-      success: true,
-      total_tokens: tokens.length,
-      tokens: tokens.map(t => ({
-        id: t._id.toString().substring(0, 8) + '...',
-        token: t.token,
-        clean_token: t.token.includes('_') ? extractTokenFromSoftURL(t.token) : t.token,
-        has_prefix: t.token.includes('_'),
-        url: t.target_url || t.original_url,
-        created_at: t.created_at,
-        clicks: t.clicks || 0,
-        status: t.status || 'active'
-      }))
-    });
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>All Stored URLs</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 1200px; margin: 50px auto; padding: 20px; }
+          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; }
+          th { background-color: #f2f2f2; }
+          .token { font-family: monospace; font-size: 12px; }
+          .url { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .create-btn { display: inline-block; background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <h1>📋 All Stored URLs (${urls.length})</h1>
+        
+        <a href="/create-short?userId=5189870730" class="create-btn">➕ Create New URL for User 5189870730</a>
+        
+        <table>
+          <tr>
+            <th>User ID</th>
+            <th>Token</th>
+            <th>Target URL</th>
+            <th>Created</th>
+            <th>Clicks</th>
+            <th>Status</th>
+            <th>Test Links</th>
+          </tr>
+          ${urls.map(u => `
+          <tr>
+            <td>${u.user_id || 'N/A'}</td>
+            <td class="token"><code>${u.token || 'N/A'}</code></td>
+            <td class="url" title="${u.target_url || u.original_url || ''}">
+              <a href="${u.target_url || u.original_url || '#'}" target="_blank">
+                ${(u.target_url || u.original_url || '').substring(0, 40)}...
+              </a>
+            </td>
+            <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            <td>${u.clicks || 0}</td>
+            <td>${u.status || 'active'}</td>
+            <td>
+              ${u.user_id ? `<a href="/Bypass/${u.user_id}/${u.token}" target="_blank">With User ID</a><br>` : ''}
+              <a href="/Bypass/${u.token}" target="_blank">Token Only</a>
+            </td>
+          </tr>
+          `).join('')}
+        </table>
+        
+        <p><a href="/">Back to Home</a></p>
+      </body>
+      </html>
+    `);
     
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).send("Error: " + error.message);
   }
 });
 
