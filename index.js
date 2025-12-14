@@ -210,87 +210,76 @@ app.get("/double/:userId/:token", async (req, res) => {
 // 🔹 Bypass protection for URL shortener (target hidden, DB based)
 app.get("/Bypass/:userId/:token", async (req, res) => {
   try {
-    const { userId, token } = req.params;
+    const { token } = req.params;
 
-    console.log(`--- incoming /Bypass request for user=${userId} token=${token} ---`);
-    console.log("referer:", req.get("referer"));
-    console.log("user-agent:", req.get("user-agent"));
+    const referer = (req.get("referer") || "").toLowerCase();
+    const ua = (req.get("user-agent") || "").toLowerCase();
 
-    // 🔐 Check referer (SoftURL only)
-    const referer = req.get("referer") || "";
-    const isBypassAttempt = !referer.includes("softurl.in");
-
-    if (isBypassAttempt) {
-      return res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Access Blocked</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <style>
-            body { font-family: Arial; background:#020617; color:#e5e7eb; text-align:center; padding-top:80px; }
-            .box { background:#0f172a; padding:25px; border-radius:12px; display:inline-block; }
-          </style>
-        </head>
-        <body>
-          <div class="box">
-            <h2>🚫 Direct Access Blocked</h2>
-            <p>Please open this link via the official short link.</p>
-            <p>🔗 <a style="color:#38bdf8" href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-          </div>
-        </body>
-        </html>
-      `);
-    }
-
-    // 📦 Fetch target URL from DB using token
     const record = await ShortLink.findOne({ token });
-
-    if (!record || !record.target_url) {
-      return res.status(404).send("❌ Invalid or expired link");
+    if (!record) {
+      return blocked(res);
     }
 
-    const target = record.target_url;
+    /* ---------- LAYER 4: EXPIRY ---------- */
+    const age = Date.now() - new Date(record.created_at).getTime();
+    if (age > 30 * 1000) {
+      return blocked(res);
+    }
 
-    // 📊 Update click count
+    /* ---------- LAYER 3: ONE-TIME ---------- */
+    if (record.used === true) {
+      return blocked(res);
+    }
+
+    /* ---------- LAYER 1: REFERER ---------- */
+    if (!referer.includes("softurl.in")) {
+      return blocked(res);
+    }
+
+    /* ---------- LAYER 2: USER AGENT ---------- */
+    const badAgents = [
+      "bot", "curl", "wget", "python",
+      "go-http-client", "axios", "httpclient"
+    ];
+
+    if (!ua || badAgents.some(b => ua.includes(b))) {
+      return blocked(res);
+    }
+
+    /* ---------- MARK USED ---------- */
     await ShortLink.updateOne(
       { token },
-      { $inc: { clicks: 1 } }
+      { $set: { used: true }, $inc: { clicks: 1 } }
     );
 
-    console.log("✅ Legitimate access detected");
-    console.log("🎯 Target URL:", target);
-
-    // ✅ Legitimate access page + auto redirect
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Redirecting...</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="refresh" content="2;url=${target}">
-        <style>
-          body { font-family: Arial; background:#020617; color:#e5e7eb; text-align:center; padding-top:70px; }
-          .box { background:#0f172a; padding:25px; border-radius:12px; display:inline-block; max-width:600px; }
-          .url { color:#22c55e; word-break:break-all; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <h2>✅ Legitimate Access Detected</h2>
-          <p>Redirecting you to:</p>
-          <p class="url">${target}</p>
-          <p>Please wait…</p>
-        </div>
-      </body>
-      </html>
-    `);
+    /* ---------- FINAL REDIRECT ---------- */
+    return res.redirect(302, record.target_url);
 
   } catch (err) {
-    console.error("Bypass error:", err);
-    return res.status(500).send("Internal Server Error");
+    return blocked(res);
   }
 });
+
+/* ---------- BLOCK PAGE ---------- */
+function blocked(res) {
+  return res.status(403).send(`
+    <html>
+      <head><title>Blocked</title></head>
+      <body style="
+        background:black;
+        color:#00ffcc;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        height:100vh;
+        font-size:22px;
+        font-family:monospace;
+      ">
+        😎 Sorry bro, your bot is not that level
+      </body>
+    </html>
+  `);
+}
 
   
   
