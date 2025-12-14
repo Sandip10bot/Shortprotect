@@ -25,7 +25,7 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
   try {
     const { userId, token } = req.params;
     const collections = getCollections();
-    const { urlShortenerCollection } = collections;
+    const { short_collection } = collections;
 
     console.log("=== BYPASS REQUEST WITH USER ID ===");
     console.log("User ID:", userId);
@@ -42,14 +42,14 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
     console.log("Is from SoftURL?", isFromSoftURL);
 
     // Try to find the record with user_id and token
-    let record = await urlShortenerCollection.findOne({ 
+    let record = await short_collection.findOne({ 
       user_id: parseInt(userId),
       token: cleanToken
     });
 
     // If not found with clean token, try with original token
     if (!record && cleanToken !== token) {
-      record = await urlShortenerCollection.findOne({ 
+      record = await short_collection.findOne({ 
         user_id: parseInt(userId),
         token: token
       });
@@ -57,12 +57,12 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
 
     // If still not found, try just by token (any user)
     if (!record) {
-      record = await urlShortenerCollection.findOne({ 
+      record = await short_collection.findOne({ 
         token: cleanToken
       });
       
       if (!record && cleanToken !== token) {
-        record = await urlShortenerCollection.findOne({ 
+        record = await short_collection.findOne({ 
           token: token
         });
       }
@@ -108,7 +108,7 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
     }
 
     // Update click count
-    await urlShortenerCollection.updateOne(
+    await short_collection.updateOne(
       { _id: record._id },
       { 
         $inc: { clicks: 1 }, 
@@ -205,7 +205,7 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
     // LEGITIMATE SOFTURL ACCESS - REDIRECT
     console.log(`✅ Legitimate SoftURL access for user ${userId} - Redirecting to: ${targetUrl}`);
     
-    await urlShortenerCollection.updateOne(
+    await short_collection.updateOne(
       { _id: record._id },
       { 
         $set: { 
@@ -249,7 +249,7 @@ router.get("/Bypass/:token", async (req, res) => {
   try {
     const { token } = req.params;
     const collections = getCollections();
-    const { urlShortenerCollection } = collections;
+    const { short_collection } = collections;
 
     console.log("=== BYPASS REQUEST (TOKEN ONLY) ===");
     console.log("Token from URL:", token);
@@ -264,12 +264,12 @@ router.get("/Bypass/:token", async (req, res) => {
     console.log("Is from SoftURL?", isFromSoftURL);
 
     // Find record by token
-    let record = await urlShortenerCollection.findOne({ 
+    let record = await short_collection.findOne({ 
       token: cleanToken
     });
 
     if (!record && cleanToken !== token) {
-      record = await urlShortenerCollection.findOne({ 
+      record = await short_collection.findOne({ 
         token: token
       });
     }
@@ -301,7 +301,7 @@ router.get("/Bypass/:token", async (req, res) => {
     const userId = record.user_id || "unknown";
     
     // Update click count
-    await urlShortenerCollection.updateOne(
+    await short_collection.updateOne(
       { _id: record._id },
       { 
         $inc: { clicks: 1 }, 
@@ -322,7 +322,7 @@ router.get("/Bypass/:token", async (req, res) => {
     if (!isFromSoftURL) {
       console.log("Direct access attempt detected");
       
-      await urlShortenerCollection.updateOne(
+      await short_collection.updateOne(
         { _id: record._id },
         { 
           $set: { 
@@ -397,7 +397,7 @@ router.get("/Bypass/:token", async (req, res) => {
     // LEGITIMATE SOFTURL ACCESS - REDIRECT
     console.log(`✅ Legitimate SoftURL access - Redirecting to: ${targetUrl}`);
     
-    await urlShortenerCollection.updateOne(
+    await short_collection.updateOne(
       { _id: record._id },
       { 
         $set: { 
@@ -456,7 +456,7 @@ router.get("/shorten", async (req, res) => {
     }
     
     const collections = getCollections();
-    const { urlShortenerCollection } = collections;
+    const { short_collection } = collections;
     
     // Generate a clean token
     const cleanToken = generateToken(12);
@@ -464,7 +464,7 @@ router.get("/shorten", async (req, res) => {
     console.log("Creating short URL for user", userId, "with token:", cleanToken);
     
     // Store in database
-    await urlShortenerCollection.insertOne({
+    await short_collection.insertOne({
       user_id: parseInt(userId) || 0,
       token: cleanToken,
       original_url: url,
@@ -508,11 +508,11 @@ router.get("/create-short", async (req, res) => {
   
   try {
     const collections = getCollections();
-    const { urlShortenerCollection } = collections;
+    const { short_collection } = collections;
     
     const cleanToken = generateToken(12);
     
-    await urlShortenerCollection.insertOne({
+    await short_collection.insertOne({
       user_id: parseInt(userId) || 5189870730,
       token: cleanToken,
       original_url: url,
@@ -589,9 +589,9 @@ router.get("/create-short", async (req, res) => {
 router.get("/view-all", async (req, res) => {
   try {
     const collections = getCollections();
-    const { urlShortenerCollection } = collections;
+    const { short_collection } = collections;
     
-    const urls = await urlShortenerCollection.find({})
+    const urls = await short_collection.find({})
       .sort({ created_at: -1 })
       .limit(100)
       .toArray();
