@@ -5,7 +5,6 @@ import crypto from "crypto";
 import youtubeDLRouter from "./youtube-dl.js";
 import { spawn } from "child_process";
 
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -35,6 +34,7 @@ async function connectDB() {
 }
 
 connectDB();
+
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
   const testMessage = `
@@ -52,6 +52,7 @@ app.get("/test-notification", async (req, res) => {
   await sendTelegramNotification(testMessage);
   res.send('✅ Test notification sent! Check your Telegram.');
 });
+
 // 🔹 Send Telegram Notification
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
@@ -206,7 +207,7 @@ app.get("/double/:userId/:token", async (req, res) => {
   res.redirect(deepLink);
 });
 
-// 🔹 Bypass protection for URL shortener with roast messages
+// 🔹 Bypass protection for URL shortener (simple version)
 app.get("/Bypass/:token", async (req, res) => {
   try {
     const { token } = req.params;
@@ -219,13 +220,13 @@ app.get("/Bypass/:token", async (req, res) => {
     const referer = req.get("referer") || "";
     const isBypassAttempt = !referer.includes("softurl.in");
 
-    const record = await short_collection.findOne({ token });
+    const record = await urlShortenerCollection.findOne({ token });
 
     if (!record) {
       return res.status(404).send("Invalid or expired link");
     }
 
-    await short_collection.updateOne(
+    await urlShortenerCollection.updateOne(
       { token },
       { $inc: { clicks: 1 } }
     );
@@ -238,7 +239,19 @@ app.get("/Bypass/:token", async (req, res) => {
   }
 });
 
-  
+// 🔹 URL Shortener Bypass Protection with Roast Messages
+app.get("/Bypass/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  const { target } = req.query;
+
+  console.log(`--- incoming /Bypass request for user=${userId} token=${token} ---`);
+  console.log("target:", target);
+  console.log("referer:", req.get("referer"));
+  console.log("user-agent:", req.get("user-agent"));
+
+  const referer = req.get("referer") || "";
+  const isBypassAttempt = !referer.includes("softurl.in");
+
   // If no target URL provided, show info page
   if (!target) {
     return res.send(`
@@ -424,7 +437,6 @@ app.get("/Bypass/:token", async (req, res) => {
         <div class="user-info">
           <h3>📊 Bypass Attempt Details:</h3>
           <p><strong>User ID:</strong> ${userId}</p>
-        
           <p><strong>IP Address:</strong> ${req.ip}</p>
           <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
           <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
@@ -1137,8 +1149,6 @@ app.get("/payment/api", (req, res) => {
   });
 });
 
-                
-
 // 🔹 Enhanced Payment Status Check with Telegram Notifications
 app.get("/payment-status/:token", async (req, res) => {
   const { token } = req.params;
@@ -1473,11 +1483,8 @@ app.get("/radhe", (req, res) => {
   `);
 });
 
-
-
 // This line should be BEFORE app.listen()
 app.use("/yt", youtubeDLRouter);
-
 
 // Start server
 app.listen(PORT, () => {
