@@ -240,216 +240,192 @@ app.get("/Bypass/:token", async (req, res) => {
 });
 
 // 🔹 URL Shortener Bypass Protection with Roast Messages
-app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { target } = req.query;
-
-  console.log(`--- incoming /Bypass request for user=${userId} token=${token} ---`);
-  console.log("target:", target);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-
-  const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("softurl.in");
-
-  // If no target URL provided, show info page
-  if (!target) {
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>MythoBot URL Bypass Protection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .success { background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
-        </style>
-      </head>
-      <body>
-        <h1>🛡️ MythoBot URL Bypass Protection</h1>
-        
-        <div class="success">
-          <h3>✅ Legitimate Access Detected</h3>
-          <p>You're accessing this endpoint properly through SoftURL!</p>
-        </div>
-        
-        <div class="info">
-          <h3>📊 Request Information:</h3>
-          <p><strong>User ID:</strong> <code>${userId}</code></p>
-          <p><strong>Token:</strong> <code>${token}</code></p>
-          <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Status:</strong> <span style="color: green;">VALID ACCESS</span> ✅</p>
-        </div>
-        
-        <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-      </body>
-      </html>
-    `);
-  }
-  
-  // Decode the target URL
-  let decodedTarget;
+// 🔹 Bypass protection for URL shortener (simple version)
+app.get("/Bypass/:token", async (req, res) => {
   try {
-    decodedTarget = decodeURIComponent(target);
-  } catch (error) {
-    return res.status(400).send("Invalid URL encoding");
-  }
+    const { token } = req.params;
 
-  // Fun roast messages for bypass attempts
-  const roastMessages = [
-    "🚫 Oops! Trying to be a hacker? Even my grandma follows links better!",
-    "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
-    "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
-    "🔐 Awww, trying to skip the line? The URL feels offended!",
-    "🧐 I see what you did there! Too bad I see everything!",
-    "🚷 No ticket, no entry! This isn't a free ride, buddy!",
-    "🎪 Welcome to the circus! You're the clown trying to bypass!",
-    "📵 Error 404: Bypass skills not found!",
-    "🦸 Wannabe superhero! Even Superman follows links properly!",
-    "🍌 This isn't a banana peel you can slip through!",
-    "🎮 Game Over! Bypass attempt failed! Insert coin to try again!",
-    "🧙 You shall not pass! - Gandalf (probably talking about URL bypass)",
-    "🐌 Your bypass attempt is slower than a snail on vacation!",
-    "🎰 Jackpot! You found the 'I tried to bypass' prize! It's nothing!",
-    "🔍 Sherlock Holmes couldn't bypass this, what makes you think you can?",
-    "🍪 No cookies for bypassers! The URL is on a diet!",
-    "🚀 Trying to launch directly? Missing rocket fuel (aka proper link)!",
-    "🎵 Why you gotta be so bypass? Just follow the link like everyone else!",
-    "📚 Bypass 101: You failed the exam! Better luck next semester!",
-    "🎪 Stop clowning around and use the proper link!",
-    "🕵️‍♂️ Secret agent mode activated... and failed! Mission impossible!",
-    "💀 Rest in peace, your bypass attempt! 2024-2024",
-    "🎨 You're painting outside the lines! Stay within the link!",
-    "🍕 Even pizza delivery follows better routes than your bypass attempt!",
-    "👻 Spooky! Your bypass attempt vanished into thin air!",
-    "🎪 Three rings of failure: Bypass attempt, no skills, try again!",
-    "🚦 Red light! Stop trying to bypass and follow the traffic!",
-    "🎯 Bullseye! You hit the 'wrong way' target perfectly!",
-    "🍦 This isn't an ice cream cone you can lick from the bottom!",
-    "🎮 Player 1: Bypass Attempt → Game Over! Insert proper link to continue!"
-  ];
+    console.log("--- incoming /Bypass request ---");
+    console.log("token:", token);
+    console.log("referer:", req.get("referer"));
+    console.log("user-agent:", req.get("user-agent"));
 
-  // If it's a bypass attempt, show roast page
-  if (isBypassAttempt) {
-    const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
-    
-    // Log the blocked bypass attempt
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
+    const referer = req.get("referer") || "";
+    const isBypassAttempt = !referer.includes("softurl.in");
+
+    // Look for the token in the database - you need to find it without user_id
+    const record = await urlShortenerCollection.findOne({ 
       token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: true,
-      blocked: true,
-      status: "BLOCKED - Bypass attempt"
+      // Also check if it's a bypass link record (not a user-specific one)
+      $or: [
+        { target_url: { $exists: true } },
+        { original_url: { $exists: true } }
+      ]
     });
+
+    if (!record) {
+      // If not found, try to find it in double_points collection
+      const doubleRecord = await doubleCollection.findOne({ token });
+      if (doubleRecord && !doubleRecord.used) {
+        // Mark as used and redirect to bot
+        await doubleCollection.updateOne(
+          { token },
+          { $set: { used: true, used_at: new Date() } }
+        );
+        
+        const botUsername = "MythoSerialBot";
+        const deepLink = `https://t.me/${botUsername}?start=double_${doubleRecord.user_id}_${token}`;
+        return res.redirect(deepLink);
+      }
+      
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Invalid Link</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { background: #f8d7da; padding: 20px; border-radius: 10px; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h2>❌ Invalid or Expired Link</h2>
+            <p>The token <code>${token}</code> was not found or has expired.</p>
+            <p>This could be because:</p>
+            <ul style="text-align: left; margin: 10px 0;">
+              <li>The link has expired</li>
+              <li>The token was already used</li>
+              <li>Invalid token format</li>
+            </ul>
+          </div>
+          <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+        </body>
+        </html>
+      `);
+    }
+
+    // Update click count
+    await urlShortenerCollection.updateOne(
+      { _id: record._id },
+      { $inc: { clicks: 1 }, $set: { last_accessed: new Date() } }
+    );
+
+    // Get the target URL from either field
+    const targetUrl = record.target_url || record.original_url;
     
-    return res.send(`
+    // Check referer for bypass attempts
+    if (!referer.includes("softurl.in")) {
+      // This is a bypass attempt
+      await urlShortenerCollection.updateOne(
+        { _id: record._id },
+        { 
+          $set: { 
+            is_bypass_attempt: true,
+            blocked: true,
+            status: "BLOCKED - Direct access attempt"
+          },
+          $push: {
+            access_logs: {
+              timestamp: new Date(),
+              ip: req.ip,
+              user_agent: req.get("user-agent"),
+              referer: referer,
+              status: "blocked"
+            }
+          }
+        }
+      );
+      
+      // Show roast page
+      const roastMessages = [
+        "🚫 Oops! Trying to bypass SoftURL? Even my grandma follows links better!",
+        "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
+        "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
+      ];
+      const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Bypass Detected! 🚫</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
+            body { 
+              font-family: 'Comic Neue', cursive; 
+              max-width: 600px; 
+              margin: 50px auto; 
+              padding: 20px;
+              background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
+              color: white;
+              text-align: center;
+            }
+            .roast-container {
+              background: rgba(255,255,255,0.1);
+              padding: 30px;
+              border-radius: 20px;
+              backdrop-filter: blur(10px);
+              border: 2px solid rgba(255,255,255,0.2);
+              margin: 20px 0;
+            }
+            .roast-message {
+              font-size: 24px;
+              margin: 20px 0;
+              text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="roast-container">
+            <div class="roast-message">"${randomRoast}"</div>
+            <p>Use the proper SoftURL link to access this content!</p>
+            <a href="https://t.me/MythoSerialBot" style="
+              display: inline-block;
+              background: white;
+              color: #ff6b6b;
+              padding: 12px 24px;
+              border-radius: 25px;
+              text-decoration: none;
+              margin-top: 20px;
+              font-weight: bold;
+            ">🤖 Go To MythoBot</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Legitimate access - redirect to target
+    console.log(`✅ Legitimate access from SoftURL - Redirecting to: ${targetUrl}`);
+    return res.redirect(targetUrl);
+
+  } catch (err) {
+    console.error("Bypass route error:", err);
+    return res.status(500).send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Bypass Detected! 🚫</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Server Error</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
-          body { 
-            font-family: 'Comic Neue', cursive; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
-            color: white;
-            text-align: center;
-          }
-          .roast-container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            margin: 20px 0;
-          }
-          .roast-message {
-            font-size: 24px;
-            margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-          }
-          .emoji {
-            font-size: 50px;
-            margin: 10px;
-          }
-          .user-info {
-            background: rgba(0,0,0,0.3);
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-family: monospace;
-          }
-          .button {
-            background: #ff6b6b;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 25px;
-            font-size: 16px;
-            cursor: pointer;
-            margin: 10px;
-            text-decoration: none;
-            display: inline-block;
-            transition: transform 0.3s;
-          }
-          .button:hover {
-            transform: scale(1.1);
-            background: #ff5252;
-          }
-          .fireworks {
-            font-size: 30px;
-            animation: bounce 2s infinite;
-          }
-          @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-          }
-          .attempt-counter {
-            background: rgba(255,255,255,0.2);
-            padding: 10px;
-            border-radius: 10px;
-            margin: 10px 0;
-          }
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { background: #f8d7da; padding: 20px; border-radius: 10px; }
         </style>
       </head>
       <body>
-        <div class="fireworks">🎆🎇✨</div>
-        <h1>🚫 BYPASS DETECTED! 🚫</h1>
-        
-        <div class="roast-container">
-          <div class="emoji">🤡🎪👻</div>
-          <div class="roast-message">"${randomRoast}"</div>
-          <div class="emoji">🔐🚷🕵️‍♂️</div>
+        <div class="error">
+          <h2>❌ Server Error</h2>
+          <p>Something went wrong on our end. Please try again later.</p>
         </div>
-
-        <div class="user-info">
-          <h3>📊 Bypass Attempt Details:</h3>
-          <p><strong>User ID:</strong> ${userId}</p>
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <a href="https://t.me/MythoSerialBot" class="button">🤖 Go To Proper Bot</a>
-          <a href="/" class="button">🏠 Server Home</a>
-        </div>
+        <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
       </body>
       </html>
     `);
   }
+});
+  
+
 
   // LEGITIMATE ACCESS FROM SOFTURL - REDIRECT TO TARGET URL
   try {
