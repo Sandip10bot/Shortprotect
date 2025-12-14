@@ -207,18 +207,37 @@ app.get("/double/:userId/:token", async (req, res) => {
 });
 
 // 🔹 Bypass protection for URL shortener with roast messages
-app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { target } = req.query;
-  
-  console.log(`--- incoming /Bypass request for user=${userId} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-  console.log("target URL:", target);
-  
-  // Check if this is a direct bypass attempt (no referer or not from softurl)
-  const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("softurl.in");
+app.get("/Bypass/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    console.log("--- incoming /Bypass request ---");
+    console.log("token:", token);
+    console.log("referer:", req.get("referer"));
+    console.log("user-agent:", req.get("user-agent"));
+
+    const referer = req.get("referer") || "";
+    const isBypassAttempt = !referer.includes("softurl.in");
+
+    const record = await short_collection.findOne({ token });
+
+    if (!record) {
+      return res.status(404).send("Invalid or expired link");
+    }
+
+    await short_collection.updateOne(
+      { token },
+      { $inc: { clicks: 1 } }
+    );
+
+    return res.redirect(record.target_url);
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send("Server error");
+  }
+});
+
   
   // If no target URL provided, show info page
   if (!target) {
