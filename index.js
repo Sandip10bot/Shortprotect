@@ -207,64 +207,93 @@ app.get("/double/:userId/:token", async (req, res) => {
 });
 
 // 🔹 Bypass protection for URL shortener with roast messages
+// 🔹 Bypass protection for URL shortener (target hidden, DB based)
 app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { target } = req.query;
-  
-  console.log(`--- incoming /Bypass request for user=${userId} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-  console.log("target URL:", target);
-  
-  // Check if this is a direct bypass attempt (no referer or not from softurl)
-  const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("softurl.in");
-  
-  // If no target URL provided, show info page
-  if (!target) {
+  try {
+    const { userId, token } = req.params;
+
+    console.log(`--- incoming /Bypass request for user=${userId} token=${token} ---`);
+    console.log("referer:", req.get("referer"));
+    console.log("user-agent:", req.get("user-agent"));
+
+    // 🔐 Check referer (SoftURL only)
+    const referer = req.get("referer") || "";
+    const isBypassAttempt = !referer.includes("softurl.in");
+
+    if (isBypassAttempt) {
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Access Blocked</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: Arial; background:#020617; color:#e5e7eb; text-align:center; padding-top:80px; }
+            .box { background:#0f172a; padding:25px; border-radius:12px; display:inline-block; }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <h2>🚫 Direct Access Blocked</h2>
+            <p>Please open this link via the official short link.</p>
+            <p>🔗 <a style="color:#38bdf8" href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // 📦 Fetch target URL from DB using token
+    const record = await ShortLink.findOne({ token });
+
+    if (!record || !record.target_url) {
+      return res.status(404).send("❌ Invalid or expired link");
+    }
+
+    const target = record.target_url;
+
+    // 📊 Update click count
+    await ShortLink.updateOne(
+      { token },
+      { $inc: { clicks: 1 } }
+    );
+
+    console.log("✅ Legitimate access detected");
+    console.log("🎯 Target URL:", target);
+
+    // ✅ Legitimate access page + auto redirect
     return res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>MythoBot URL Bypass Protection</title>
+        <title>Redirecting...</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="refresh" content="2;url=${target}">
         <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .success { background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
+          body { font-family: Arial; background:#020617; color:#e5e7eb; text-align:center; padding-top:70px; }
+          .box { background:#0f172a; padding:25px; border-radius:12px; display:inline-block; max-width:600px; }
+          .url { color:#22c55e; word-break:break-all; }
         </style>
       </head>
       <body>
-        <h1>🛡️ MythoBot URL Bypass Protection</h1>
-        
-        <div class="success">
-          <h3>✅ Legitimate Access Detected</h3>
-          <p>You're accessing this endpoint properly through SoftURL!</p>
+        <div class="box">
+          <h2>✅ Legitimate Access Detected</h2>
+          <p>Redirecting you to:</p>
+          <p class="url">${target}</p>
+          <p>Please wait…</p>
         </div>
-        
-        <div class="info">
-          <h3>📊 Request Information:</h3>
-          <p><strong>User ID:</strong> <code>${userId}</code></p>
-          <p><strong>Token:</strong> <code>${token}</code></p>
-          <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Status:</strong> <span style="color: green;">VALID ACCESS</span> ✅</p>
-        </div>
-        
-        <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
       </body>
       </html>
     `);
+
+  } catch (err) {
+    console.error("Bypass error:", err);
+    return res.status(500).send("Internal Server Error");
   }
+});
+
   
-  // Decode the target URL
-  let decodedTarget;
-  try {
-    decodedTarget = decodeURIComponent(target);
-  } catch (error) {
-    return res.status(400).send("Invalid URL encoding");
-  }
+  
 
   // Fun roast messages for bypass attempts
   const roastMessages = [
