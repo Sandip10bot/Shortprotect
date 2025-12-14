@@ -25,6 +25,11 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
   try {
     const { userId, token } = req.params;
     const collections = getCollections();
+    
+    if (!collections) {
+      throw new Error("Database collections not available");
+    }
+    
     const { short_collection } = collections;
 
     console.log("=== BYPASS REQUEST WITH USER ID ===");
@@ -130,7 +135,7 @@ router.get("/Bypass/:userId/:token", async (req, res) => {
     if (!isFromSoftURL) {
       console.log("Direct access attempt detected");
       
-      await urlShortenerCollection.updateOne(
+      await short_collection.updateOne(
         { _id: record._id },
         { 
           $set: { 
@@ -249,6 +254,11 @@ router.get("/Bypass/:token", async (req, res) => {
   try {
     const { token } = req.params;
     const collections = getCollections();
+    
+    if (!collections) {
+      throw new Error("Database collections not available");
+    }
+    
     const { short_collection } = collections;
 
     console.log("=== BYPASS REQUEST (TOKEN ONLY) ===");
@@ -456,6 +466,11 @@ router.get("/shorten", async (req, res) => {
     }
     
     const collections = getCollections();
+    
+    if (!collections) {
+      throw new Error("Database collections not available");
+    }
+    
     const { short_collection } = collections;
     
     // Generate a clean token
@@ -508,6 +523,11 @@ router.get("/create-short", async (req, res) => {
   
   try {
     const collections = getCollections();
+    
+    if (!collections) {
+      throw new Error("Database collections not available");
+    }
+    
     const { short_collection } = collections;
     
     const cleanToken = generateToken(12);
@@ -589,6 +609,11 @@ router.get("/create-short", async (req, res) => {
 router.get("/view-all", async (req, res) => {
   try {
     const collections = getCollections();
+    
+    if (!collections) {
+      throw new Error("Database collections not available");
+    }
+    
     const { short_collection } = collections;
     
     const urls = await short_collection.find({})
