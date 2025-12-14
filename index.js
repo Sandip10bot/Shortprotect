@@ -3,21 +3,20 @@ import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
 import youtubeDLRouter from "./youtube-dl.js";
-import { spawn } from "child_process";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// MongoDB setup (use your Koyeb secret or .env variable)
-const MONGO_URI = process.env.DATABASE_URI;  // set this in Koyeb secrets
+// MongoDB setup
+const MONGO_URI = process.env.DATABASE_URI;
 if (!MONGO_URI) {
   console.error("❌ Missing MONGODB_URI in environment variables");
   process.exit(1);
 }
 
 // Telegram Bot Configuration
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Set in Koyeb secrets
-const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID; // Your personal chat ID
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
 const client = new MongoClient(MONGO_URI);
 let doubleCollection;
@@ -26,67 +25,81 @@ let downloadsCollection;
 
 async function connectDB() {
   await client.connect();
-  const db = client.db("mythobot"); // change if you use another DB name
+  const db = client.db("mythobot");
   doubleCollection = db.collection("double_points");
   urlShortenerCollection = db.collection("url_shortener");
-  downloadsCollection = db.collection("youtube_downloads"); // This line should now work
+  downloadsCollection = db.collection("youtube_downloads");
   console.log("✅ MongoDB connected");
 }
 
 connectDB();
 
-// Base62 Encoding/Decoding functions
+// Simple Base62 Encoding/Decoding functions
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
 function base62_encode(data) {
-    const dataBytes = Buffer.from(data, 'utf-8');
-    const base64Str = dataBytes.toString('base64').replace(/=/g, '');
-    
-    // Custom character mapping for base62-like appearance
-    const translation = {
-        'A': '9', 'B': 'q', 'C': 'w', 'D': 'e', 'E': 'r', 'F': 't', 'G': 'y',
-        'H': 'u', 'I': 'i', 'J': 'o', 'K': 'p', 'L': 'a', 'M': 's', 'N': 'd',
-        'O': 'f', 'P': 'g', 'Q': 'h', 'R': 'j', 'S': 'k', 'T': 'l', 'U': 'z',
-        'V': 'x', 'W': 'c', 'X': 'v', 'Y': 'b', 'Z': 'n',
-        'a': 'Q', 'b': 'W', 'c': 'E', 'd': 'R', 'e': 'T', 'f': 'Y', 'g': 'U',
-        'h': 'I', 'i': 'O', 'j': 'P', 'k': 'A', 'l': 'S', 'm': 'D', 'n': 'F',
-        'o': 'G', 'p': 'H', 'q': 'J', 'r': 'K', 's': 'L', 't': 'Z', 'u': 'X',
-        'v': 'C', 'w': 'V', 'x': 'B', 'y': 'N', 'z': 'M',
-        '0': '1', '1': '2', '2': '3', '3': '4', '4': '5', '5': '6',
-        '6': '7', '7': '8', '8': '0', '9': '5', '+': '-', '/': '_', '-': '+', '_': '/'
-    };
-    
-    let result = '';
-    for (let char of base64Str) {
-        result += translation[char] || char;
+    try {
+        // Convert string to bytes
+        const buffer = Buffer.from(data, 'utf-8');
+        const hex = buffer.toString('hex');
+        let num = BigInt('0x' + hex);
+        let encoded = '';
+        
+        // Handle zero case
+        if (num === 0n) {
+            return '0';
+        }
+        
+        while (num > 0n) {
+            const remainder = Number(num % 62n);
+            encoded = BASE62_CHARS[remainder] + encoded;
+            num = num / 62n;
+        }
+        
+        return encoded;
+    } catch (error) {
+        console.error("Base62 encode error:", error);
+        // Fallback to URL-safe base64
+        return Buffer.from(data, 'utf-8')
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
     }
-    return result;
 }
 
 function base62_decode(encoded) {
-    const translation = {
-        '9': 'A', 'q': 'B', 'w': 'C', 'e': 'D', 'r': 'E', 't': 'F', 'y': 'G',
-        'u': 'H', 'i': 'I', 'o': 'J', 'p': 'K', 'a': 'L', 's': 'M', 'd': 'N',
-        'f': 'O', 'g': 'P', 'h': 'Q', 'j': 'R', 'k': 'S', 'l': 'T', 'z': 'U',
-        'x': 'V', 'c': 'W', 'v': 'X', 'b': 'Y', 'n': 'Z',
-        'Q': 'a', 'W': 'b', 'E': 'c', 'R': 'd', 'T': 'e', 'Y': 'f', 'U': 'g',
-        'I': 'h', 'O': 'i', 'P': 'j', 'A': 'k', 'S': 'l', 'D': 'm', 'F': 'n',
-        'G': 'o', 'H': 'p', 'J': 'q', 'K': 'r', 'L': 's', 'Z': 't', 'X': 'u',
-        'C': 'v', 'V': 'w', 'B': 'x', 'N': 'y', 'M': 'z',
-        '1': '0', '2': '1', '3': '2', '4': '3', '5': '4', '6': '5',
-        '7': '6', '8': '7', '0': '8', '5': '9', '-': '+', '_': '/', '+': '-', '/': '_'
-    };
-    
-    let base64Str = '';
-    for (let char of encoded) {
-        base64Str += translation[char] || char;
+    try {
+        let num = 0n;
+        
+        for (let i = 0; i < encoded.length; i++) {
+            const char = encoded[i];
+            const value = BASE62_CHARS.indexOf(char);
+            if (value === -1) {
+                throw new Error('Invalid base62 character: ' + char);
+            }
+            num = num * 62n + BigInt(value);
+        }
+        
+        // Convert BigInt to hex string
+        let hex = num.toString(16);
+        // Ensure even length for Buffer
+        if (hex.length % 2 !== 0) {
+            hex = '0' + hex;
+        }
+        
+        const buffer = Buffer.from(hex, 'hex');
+        return buffer.toString('utf-8');
+    } catch (error) {
+        console.error("Base62 decode error:", error);
+        // Fallback to URL-safe base64 decode
+        let padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const padding = 4 - (padded.length % 4);
+        if (padding !== 4) {
+            padded += '='.repeat(padding);
+        }
+        return Buffer.from(padded, 'base64').toString('utf-8');
     }
-    
-    const padding = 4 - (base64Str.length % 4);
-    if (padding !== 4) {
-        base64Str += '='.repeat(padding);
-    }
-    
-    const decodedBytes = Buffer.from(base64Str, 'base64');
-    return decodedBytes.toString('utf-8');
 }
 
 // 🔹 Test Telegram Notification
@@ -255,7 +268,7 @@ app.get("/double/:userId/:token", async (req, res) => {
   );
 
   // Redirect to bot deep link
-  const botUsername = "MythoSerialBot"; // change to your bot username
+  const botUsername = "MythoSerialBot";
   const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
 
   res.redirect(deepLink);
@@ -264,7 +277,7 @@ app.get("/double/:userId/:token", async (req, res) => {
 // 🔹 Updated Bypass protection for URL shortener
 app.get("/Bypass/:userId/:token", async (req, res) => {
     const { userId, token } = req.params;
-    const { t } = req.query; // Changed from 'target' to 't' for base62 encoded
+    const { t } = req.query;
     
     console.log(`--- incoming /Bypass request for user=${userId} ---`);
     console.log("token:", token);
@@ -319,9 +332,48 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
     if (t) {
         try {
             console.log("Decoding target from parameter...");
-            // Decode the target URL from base62
-            const decodedTarget = base62_decode(t);
-            console.log("Decoded target:", decodedTarget);
+            
+            let decodedTarget = null;
+            let decodeMethod = "";
+            let decodeError = null;
+            
+            // Method 1: Try base62 decode
+            try {
+                decodedTarget = base62_decode(t);
+                new URL(decodedTarget);
+                decodeMethod = "base62";
+                console.log("Successfully decoded via base62:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
+            } catch (e1) {
+                decodeError = e1;
+                console.log("Base62 decode failed:", e1.message);
+                
+                // Method 2: Try legacy URL decode
+                try {
+                    decodedTarget = decodeURIComponent(t);
+                    new URL(decodedTarget);
+                    decodeMethod = "legacy_url";
+                    console.log("Successfully decoded via legacy URL decode:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
+                } catch (e2) {
+                    decodeError = e2;
+                    console.log("Legacy URL decode also failed:", e2.message);
+                    
+                    // Method 3: Try direct if it looks like a URL
+                    try {
+                        if (t.startsWith('http://') || t.startsWith('https://') || t.startsWith('t.me/') || t.startsWith('tg://')) {
+                            decodedTarget = t;
+                            new URL(decodedTarget);
+                            decodeMethod = "direct";
+                            console.log("Using direct URL:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
+                        } else {
+                            throw new Error("Not a valid URL format");
+                        }
+                    } catch (e3) {
+                        decodeError = e3;
+                        console.log("Direct URL also failed:", e3.message);
+                        throw new Error(`All decode methods failed. Last error: ${decodeError.message}`);
+                    }
+                }
+            }
             
             // Validate URL
             new URL(decodedTarget);
@@ -332,6 +384,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                 creator_id: parseInt(userId),
                 target_url: decodedTarget,
                 encoded_target: t,
+                decode_method: decodeMethod,
                 created_at: new Date(),
                 clicks: 1,
                 access_logs: [{
@@ -339,43 +392,120 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                     ip: req.ip,
                     user_agent: req.get("user-agent"),
                     referer: req.get("referer"),
-                    via_param: true
+                    via_param: true,
+                    decode_method: decodeMethod
                 }]
             });
             
-            console.log(`✅ Redirecting user ${userId} to: ${decodedTarget}`);
+            console.log(`✅ Redirecting user ${userId} to target URL (via ${decodeMethod})`);
             return res.redirect(decodedTarget);
             
         } catch (error) {
-            console.error("Decoding/validation error:", error);
+            console.error("Final decoding/validation error:", error.message);
             
-            // If decode fails, try old method (URL decode for backward compatibility)
-            try {
-                const oldDecoded = decodeURIComponent(t);
-                new URL(oldDecoded);
-                
-                await urlShortenerCollection.insertOne({
-                    token: token,
-                    creator_id: parseInt(userId),
-                    target_url: oldDecoded,
-                    created_at: new Date(),
-                    clicks: 1,
-                    is_legacy: true,
-                    access_logs: [{
-                        accessed_at: new Date(),
-                        ip: req.ip,
-                        user_agent: req.get("user-agent"),
-                        referer: req.get("referer"),
-                        via_param: true,
-                        legacy: true
-                    }]
-                });
-                
-                console.log(`✅ Redirecting via legacy method: ${oldDecoded}`);
-                return res.redirect(oldDecoded);
-            } catch (oldError) {
-                console.error("Legacy decode also failed:", oldError);
-            }
+            // Log the failed attempt
+            await urlShortenerCollection.insertOne({
+                token: token,
+                creator_id: parseInt(userId),
+                encoded_target: t,
+                decode_method: "failed",
+                created_at: new Date(),
+                clicks: 0,
+                error: error.message,
+                access_logs: [{
+                    accessed_at: new Date(),
+                    ip: req.ip,
+                    user_agent: req.get("user-agent"),
+                    referer: req.get("referer"),
+                    error: error.message
+                }]
+            });
+            
+            // Show error page
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Invalid Link - MythoBot</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body { 
+                            font-family: Arial, sans-serif; 
+                            max-width: 600px; 
+                            margin: 50px auto; 
+                            padding: 20px; 
+                            text-align: center; 
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                        }
+                        .error-container { 
+                            background: rgba(255,255,255,0.1);
+                            padding: 30px;
+                            border-radius: 15px;
+                            backdrop-filter: blur(10px);
+                            border: 1px solid rgba(255,255,255,0.2);
+                            margin: 20px 0;
+                        }
+                        .info-box { 
+                            background: rgba(0,0,0,0.2); 
+                            padding: 15px; 
+                            border-radius: 8px; 
+                            margin: 15px 0; 
+                            font-family: monospace; 
+                            text-align: left;
+                            overflow-wrap: break-word;
+                        }
+                        .btn {
+                            display: inline-block;
+                            background: #8b5cf6;
+                            color: white;
+                            padding: 12px 24px;
+                            border-radius: 25px;
+                            text-decoration: none;
+                            margin-top: 20px;
+                            font-weight: bold;
+                            transition: transform 0.3s;
+                        }
+                        .btn:hover {
+                            transform: scale(1.05);
+                            background: #7c3aed;
+                        }
+                        .emoji {
+                            font-size: 50px;
+                            margin: 10px;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="emoji">🔗❌</div>
+                    <h1>Invalid or Corrupted Link</h1>
+                    
+                    <div class="error-container">
+                        <h3>⚠️ Unable to Process Link</h3>
+                        <p>The link appears to be corrupted or uses an unsupported encoding format.</p>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <p>Please regenerate the link from the Telegram bot.</p>
+                    </div>
+                    
+                    <div class="info-box">
+                        <p><strong>Debug Information:</strong></p>
+                        <p><strong>Token:</strong> ${token}</p>
+                        <p><strong>User ID:</strong> ${userId}</p>
+                        <p><strong>Encoded String:</strong> ${t.substring(0, 100)}${t.length > 100 ? '...' : ''}</p>
+                        <p><strong>Length:</strong> ${t.length} characters</p>
+                        <p><strong>Time:</strong> ${new Date().toUTCString()}</p>
+                    </div>
+                    
+                    <a href="https://t.me/MythoSerialBot" class="btn">
+                        <span style="vertical-align: middle;">🤖 Go To MythoBot</span>
+                    </a>
+                    
+                    <div style="margin-top: 30px; font-size: 12px; color: rgba(255,255,255,0.7);">
+                        <p>If this error persists, contact @Sandip10x on Telegram</p>
+                    </div>
+                </body>
+                </html>
+            `);
         }
     }
     
@@ -387,11 +517,39 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         <title>MythoBot URL Bypass Protection</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .success { background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .error { background: #f8d7da; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
+          body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+          }
+          .info { 
+            background: rgba(255,255,255,0.1); 
+            padding: 20px; 
+            border-radius: 15px; 
+            margin: 20px 0; 
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+          }
+          code { 
+            background: rgba(0,0,0,0.3); 
+            padding: 2px 6px; 
+            border-radius: 4px; 
+            font-family: monospace;
+          }
+          .btn {
+            display: inline-block;
+            background: #8b5cf6;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            margin-top: 20px;
+            font-weight: bold;
+          }
         </style>
       </head>
       <body>
@@ -410,7 +568,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         </div>
         
         ${t ? `
-        <div class="error">
+        <div class="info" style="background: rgba(255,165,0,0.2);">
           <h3>❌ Error Details:</h3>
           <p>This link appears to be corrupted or incomplete.</p>
           <p>Please regenerate the link from the bot.</p>
@@ -423,7 +581,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         </div>
         `}
         
-        <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
+        <a href="https://t.me/MythoSerialBot" class="btn">🤖 Go to MythoBot</a>
       </body>
       </html>
     `);
@@ -862,7 +1020,7 @@ app.get("/premium-payment", async (req, res) => {
     duration: parseInt(finalDuration),
     status: 'pending',
     created_at: new Date(),
-    expires_at: new Date(Date.now() + 30 * 60 * 1000) // 30 minutes expiry
+    expires_at: new Date(Date.now() + 30 * 60 * 1000)
   });
 
   res.send(`
@@ -1052,7 +1210,7 @@ app.get("/premium-payment", async (req, res) => {
             }
 
             // Start status checking
-            statusCheckInterval = setInterval(checkPaymentStatus, 5000); // Check every 5 seconds
+            statusCheckInterval = setInterval(checkPaymentStatus, 5000);
         </script>
     </body>
     </html>
@@ -1151,16 +1309,8 @@ ${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${p
   res.json({ status: 'pending' });
 });
 
-// 🔹 UPI Payment Verification (Placeholder - Implement based on your payment gateway)
+// 🔹 UPI Payment Verification
 async function verifyUPIPayment(paymentSession) {
-  // Implement actual UPI payment verification here
-  // This could involve:
-  // 1. Checking with your payment gateway API
-  // 2. Webhook verification
-  // 3. Manual verification through admin panel
-  // 4. Bank statement parsing
-  
-  // For now, return false - you'll need to implement this based on your payment processor
   return false;
 }
 
