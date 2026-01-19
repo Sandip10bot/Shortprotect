@@ -1336,6 +1336,26 @@ async function activatePremiumSubscription(userId, duration) {
   
   console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
 }
+app.get("/ad/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  
+  // Check referer
+  const referer = req.get("referer") || "";
+  
+  if (!referer.includes("softurl.in")) {
+    return res.send("❌ Open ad via SoftURL link only!");
+  }
+  
+  // Verify and mark ad as opened
+  const adGateCollection = client.db("mythobot").collection("spin_ad_gate");
+  await adGateCollection.updateOne(
+    { user_id: parseInt(userId), token },
+    { $set: { opened: true, opened_at: new Date() } }
+  );
+  
+  // Redirect to Telegram bot
+  res.redirect(`https://t.me/MythoSerialBot?start=ad_unlocked_${userId}`);
+});
 
 // 🏠 MythoBot Animated Home Page
 app.get("/", (req, res) => {
