@@ -115,31 +115,8 @@ app.get("/link/:hex", (req, res) => {
     new URL(targetUrl);
     
     // 🔥 TRICK: Open about:blank first, then change URL
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Loading...</title>
-        <script>
-          // Open a blank tab first (shows about:blank in address bar)
-          const newWindow = window.open('about:blank', '_blank');
-          
-          if (newWindow) {
-            // Change the blank tab's location to target URL
-            newWindow.location.href = '${targetUrl}';
-            // Close this tab immediately
-            setTimeout(() => window.close(), 100);
-          } else {
-            // If popup blocked, redirect normally
-            window.location.href = '${targetUrl}';
-          }
-        </script>
-      </head>
-      <body style="margin:0;padding:0;background:#f0f0f0;">
-        <div style="display:none;">Opening link...</div>
-      </body>
-      </html>
-    `);
+    res.redirect(302, targetUrl);
+
     
   } catch (error) {
     res.redirect('https://t.me/MythoSerialBot');
@@ -174,37 +151,8 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     } catch(e) {}
     
     // 🔥 SAME TRICK: about:blank then redirect
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Opening...</title>
-        <script>
-          // Method 1: Try to open in new tab with about:blank
-          try {
-            const w = window.open('about:blank', '_blank');
-            if (w) {
-              // Set target URL after blank tab opens
-              setTimeout(() => {
-                w.location.href = '${targetUrl}';
-                // Close this window quickly
-                setTimeout(() => window.close(), 200);
-              }, 50);
-            } else {
-              // Fallback: direct redirect
-              window.location.href = '${targetUrl}';
-            }
-          } catch(e) {
-            // Direct redirect on error
-            window.location.href = '${targetUrl}';
-          }
-        </script>
-      </head>
-      <body style="margin:0;padding:0;background:#f0f0f0;">
-        <!-- Empty page -->
-      </body>
-      </html>
-    `);
+    res.redirect(302, targetUrl);
+
     
   } catch (error) {
     res.send(`
