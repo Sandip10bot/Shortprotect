@@ -107,58 +107,128 @@ function base62_decode(encoded) {
     }
 }
 
-// 🔹 Create masked SoftURL
-app.get("/create-mask", async (req, res) => {
-  const { softurl, userId } = req.query;
 
-  if (!softurl || !userId) {
-    return res.status(400).json({ error: "Missing params" });
+
+// 🔹 URL Masking Endpoint (Hides shortxlink URLs)
+app.get("/mask/:encodedUrl", async (req, res) => {
+  const { encodedUrl } = req.params;
+  
+  try {
+    // Decode the base62 encoded URL
+    const targetUrl = base62_decode(encodedUrl);
+    
+    // Validate it's a proper URL
+    new URL(targetUrl);
+    
+    console.log(`🔗 Masked redirect: ${targetUrl.substring(0, 80)}...`);
+    
+    // Simple tracking (optional)
+    const maskedCollection = client.db("mythobot").collection("masked_links");
+    await maskedCollection.insertOne({
+      encoded: encodedUrl,
+      target: targetUrl,
+      clicked_at: new Date(),
+      ip: req.ip
+    });
+    
+    // Show loading page for 1 second then redirect
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Redirecting...</title>
+        <meta http-equiv="refresh" content="1;url=${targetUrl}">
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            padding: 50px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+          }
+          .loader {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 4px solid white;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+          }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+      </head>
+      <body>
+        <h2>🔗 Opening Link...</h2>
+        <div class="loader"></div>
+        <p>Redirecting to destination...</p>
+        <p style="font-size: 12px; margin-top: 20px; opacity: 0.8;">
+          If not redirected, <a href="${targetUrl}" style="color: #ffcc00;">click here</a>
+        </p>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error("❌ Mask URL error:", error.message);
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Invalid Link</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+        </style>
+      </head>
+      <body>
+        <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto;">
+          <h2 style="color: #dc2626;">❌ Invalid Link</h2>
+          <p>This link appears to be corrupted or expired.</p>
+          <a href="https://t.me/MythoSerialBot" style="
+            display: inline-block;
+            background: #0088cc;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            margin-top: 20px;
+          ">🤖 Go to MythoBot</a>
+        </div>
+      </body>
+      </html>
+    `);
   }
-
-  const code = crypto.randomBytes(5).toString("hex");
-
-  await maskCollection.insertOne({
-    code,
-    target_url: softurl,
-    user_id: parseInt(userId),
-    used: false,
-    created_at: new Date(),
-    expires_at: Date.now() + 5 * 60 * 1000 // 5 min
-  });
-
-  res.json({
-    masked_url: `https://${req.hostname}/mask/${code}`
-  });
 });
 
-
-// 🔐 MASKED REDIRECT (SoftURL Hidden)
-app.get("/mask/:code", async (req, res) => {
-  const { code } = req.params;
-
-  const record = await maskCollection.findOne({ code });
-
-  if (!record) {
-    return res.status(404).send("❌ Invalid or expired link");
+// 🔹 Simple API to generate masked URLs (for Python bot)
+app.get("/api/mask", (req, res) => {
+  const { url } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({ error: "Missing url parameter" });
   }
-
-  // Optional: one-time use
-  if (record.used) {
-    return res.status(410).send("⛔ Link already used");
+  
+  try {
+    new URL(url); // Validate URL
+    
+    // Encode the URL using base62
+    const encodedUrl = base62_encode(url);
+    
+    // Create masked URL
+    const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
+    
+    res.json({
+      success: true,
+      original_url: url,
+      masked_url: maskedUrl,
+      encoded: encodedUrl
+    });
+    
+  } catch (error) {
+    res.status(400).json({ error: "Invalid URL format" });
   }
-
-  // Optional: expiry
-  if (Date.now() > record.expires_at) {
-    return res.status(410).send("⏰ Link expired");
-  }
-
-  await maskCollection.updateOne(
-    { code },
-    { $set: { used: true, used_at: new Date() } }
-  );
-
-  // 🚀 REAL REDIRECT (SoftURL never shown in Telegram)
-  return res.redirect(record.target_url);
 });
 
 
