@@ -108,6 +108,28 @@ function base62_decode(encoded) {
 }
 
 
+// 🔹 HEX-based redirect (even simpler)
+app.get("/link/:hex", (req, res) => {
+  const { hex } = req.params;
+  
+  try {
+    // Convert hex back to string
+    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    
+    // Validate URL
+    new URL(targetUrl);
+    
+    console.log(`🔗 Hex redirect to: ${targetUrl.substring(0, 80)}...`);
+    res.redirect(targetUrl);
+    
+  } catch (error) {
+    res.status(400).send(`
+      <h3>❌ Invalid link</h3>
+      <p>Hex: ${hex.substring(0, 50)}...</p>
+      <a href="https://t.me/MythoSerialBot">🤖 Bot</a>
+    `);
+  }
+});
 
 // 🔹 URL Masking Endpoint (Hides shortxlink URLs)
 app.get("/mask/:encodedUrl", async (req, res) => {
