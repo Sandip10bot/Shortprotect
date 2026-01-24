@@ -107,8 +107,410 @@ function base62_decode(encoded) {
     }
 }
 
-app.get("/link/:hex", (req, res) => {
-  const { hex } = req.params;
+const crypto = require('crypto');
+const useragent = require('user-agent-parse');
+
+// Configuration for reCAPTCHA (you'll need to add these to your environment)
+const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || 'your-secret-key-here';
+const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || 'your-site-key-here';
+
+// Middleware to check Chrome browser and add security headers
+const chromeOnlyWithSecurity = (req, res, next) => {
+  // Security headers
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  
+  // Strict browser checking
+  const userAgent = req.headers['user-agent'] || '';
+  const isChrome = userAgent.includes('Chrome') && !userAgent.includes('Edg') && !userAgent.includes('OPR');
+  const isHeadless = /HeadlessChrome|PhantomJS|Puppeteer/i.test(userAgent);
+  
+  // Additional security checks
+  const hasValidAccept = req.headers['accept'] && req.headers['accept'].includes('text/html');
+  const hasValidConnection = req.headers['connection'] === 'keep-alive' || req.headers['connection'] === 'close';
+  
+  // Generate session token for this request
+  const sessionToken = crypto.randomBytes(16).toString('hex');
+  req.sessionToken = sessionToken;
+  res.setHeader('X-Security-Token', sessionToken);
+  
+  if (!isChrome || isHeadless || !hasValidAccept || !hasValidConnection) {
+    // Redirect to browser requirement page
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Browser Requirement</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+          }
+          .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+          }
+          .chrome-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+          }
+          h1 {
+            font-size: 28px;
+            margin-bottom: 20px;
+          }
+          p {
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+          }
+          .download-btn {
+            display: inline-block;
+            background: #4285f4;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: bold;
+            transition: transform 0.3s, background 0.3s;
+          }
+          .download-btn:hover {
+            background: #3367d6;
+            transform: translateY(-2px);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="chrome-icon">🌐</div>
+          <h1>Chrome Browser Required</h1>
+          <p>For security reasons, this link can only be accessed using Google Chrome browser.</p>
+          <p>Please download and use the latest version of Chrome to continue.</p>
+          <a href="https://www.google.com/chrome/" class="download-btn" target="_blank">
+            Download Chrome
+          </a>
+          <p style="margin-top: 30px; font-size: 14px; opacity: 0.8;">
+            Detected Browser: ${userAgent.substring(0, 100)}...
+          </p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+  
+  next();
+};
+
+// Rate limiting storage
+const rateLimitStore = new Map();
+
+// Rate limiting middleware
+const rateLimiter = (req, res, next) => {
+  const ip = req.ip;
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 minutes
+  const maxRequests = 10; // Max 10 requests per window
+  
+  if (!rateLimitStore.has(ip)) {
+    rateLimitStore.set(ip, { count: 1, startTime: now });
+  } else {
+    const data = rateLimitStore.get(ip);
+    
+    if (now - data.startTime > windowMs) {
+      // Reset window
+      data.count = 1;
+      data.startTime = now;
+    } else {
+      data.count++;
+      
+      if (data.count > maxRequests) {
+        return res.status(429).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Rate Limited</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding: 50px;
+                background: #f8f9fa;
+              }
+              .container {
+                max-width: 500px;
+                margin: 0 auto;
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              }
+              h1 {
+                color: #dc3545;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>⚠️ Too Many Requests</h1>
+              <p>You have made too many requests. Please try again in 15 minutes.</p>
+              <p>This is a security measure to prevent abuse.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+    }
+    
+    rateLimitStore.set(ip, data);
+  }
+  
+  // Cleanup old entries (optional)
+  setTimeout(() => {
+    for (const [key, value] of rateLimitStore.entries()) {
+      if (now - value.startTime > windowMs) {
+        rateLimitStore.delete(key);
+      }
+    }
+  }, 60000);
+  
+  next();
+};
+
+// Function to verify reCAPTCHA
+const verifyRecaptcha = async (token) => {
+  try {
+    const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `secret=${RECAPTCHA_SECRET_KEY}&response=${token}`
+    });
+    
+    const data = await response.json();
+    return data.success && data.score > 0.5; // Require score > 0.5
+  } catch (error) {
+    console.error('reCAPTCHA verification error:', error);
+    return false;
+  }
+};
+
+// reCAPTCHA middleware
+const requireRecaptcha = async (req, res, next) => {
+  const { recaptcha_token } = req.query;
+  
+  if (!recaptcha_token) {
+    // Show reCAPTCHA page
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Security Verification</title>
+        <script src="https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 100px auto;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+          }
+          .container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+          }
+          .lock-icon {
+            font-size: 60px;
+            color: #4CAF50;
+            margin-bottom: 20px;
+          }
+          h1 {
+            color: #333;
+            margin-bottom: 20px;
+          }
+          p {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+          }
+          #verify-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.3s;
+            margin-top: 20px;
+          }
+          #verify-btn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+          }
+          #verify-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+          }
+          .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="lock-icon">🔒</div>
+          <h1>Security Verification Required</h1>
+          <p>To prevent automated access, please complete the security verification below.</p>
+          <p>This helps us ensure you're a real person and not a bot.</p>
+          
+          <button id="verify-btn" onclick="verifyHuman()">
+            <span id="btn-text">Verify I'm Human</span>
+            <div id="spinner" class="spinner"></div>
+          </button>
+          
+          <p style="margin-top: 30px; font-size: 12px; color: #999;">
+            <i class="fas fa-shield-alt"></i> Protected by reCAPTCHA v3
+          </p>
+        </div>
+        
+        <script>
+          function verifyHuman() {
+            const btn = document.getElementById('verify-btn');
+            const btnText = document.getElementById('btn-text');
+            const spinner = document.getElementById('spinner');
+            
+            btn.disabled = true;
+            btnText.textContent = 'Verifying...';
+            spinner.style.display = 'block';
+            
+            grecaptcha.ready(function() {
+              grecaptcha.execute('${RECAPTCHA_SITE_KEY}', {action: 'submit'}).then(function(token) {
+                // Add token to URL and redirect
+                const currentUrl = window.location.href;
+                const separator = currentUrl.includes('?') ? '&' : '?';
+                window.location.href = currentUrl + separator + 'recaptcha_token=' + encodeURIComponent(token);
+              }).catch(function(error) {
+                alert('Verification failed. Please try again.');
+                btn.disabled = false;
+                btnText.textContent = 'Verify I\'m Human';
+                spinner.style.display = 'none';
+              });
+            });
+          }
+          
+          // Auto-start verification after 2 seconds
+          setTimeout(verifyHuman, 2000);
+        </script>
+      </body>
+      </html>
+    `);
+  }
+  
+  // Verify reCAPTCHA token
+  const isVerified = await verifyRecaptcha(recaptcha_token);
+  
+  if (!isVerified) {
+    return res.status(403).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Verification Failed</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background: #f8f9fa;
+          }
+          .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          }
+          h1 {
+            color: #dc3545;
+          }
+          .retry-btn {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            margin-top: 20px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>⚠️ Verification Failed</h1>
+          <p>We couldn't verify that you're human. This could be because:</p>
+          <ul style="text-align: left; display: inline-block;">
+            <li>reCAPTCHA verification failed</li>
+            <li>Suspicious activity detected</li>
+            <li>Browser extensions interfering</li>
+          </ul>
+          <br>
+          <a href="javascript:location.reload()" class="retry-btn">Try Again</a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+  
+  next();
+};
+
+// Enhanced route handlers with security
+app.get("/link/:hex", rateLimiter, chromeOnlyWithSecurity, async (req, res) => {
+  const { hex, recaptcha_token } = req.params;
+  
+  // Check for reCAPTCHA token
+  if (!recaptcha_token) {
+    return requireRecaptcha(req, res, async () => {
+      // Continue with original logic after verification
+      try {
+        const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+        new URL(targetUrl);
+        
+        // 🔥 TRICK: Open about:blank first, then change URL
+        res.redirect(302, targetUrl);
+        
+      } catch (error) {
+        res.redirect('https://t.me/MythoSerialBot');
+      }
+    });
+  }
   
   try {
     const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
@@ -116,16 +518,57 @@ app.get("/link/:hex", (req, res) => {
     
     // 🔥 TRICK: Open about:blank first, then change URL
     res.redirect(302, targetUrl);
-
     
   } catch (error) {
     res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
-
-app.get("/mask/:encodedUrl", async (req, res) => {
-  const { encodedUrl } = req.params;
+app.get("/mask/:encodedUrl", rateLimiter, chromeOnlyWithSecurity, async (req, res) => {
+  const { encodedUrl, recaptcha_token } = req.params;
+  
+  // Check for reCAPTCHA token
+  if (!recaptcha_token) {
+    return requireRecaptcha(req, res, async () => {
+      // Continue with original logic after verification
+      try {
+        let targetUrl;
+        try {
+          const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
+          targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
+          if (!targetUrl.includes('://')) throw new Error('Not a URL');
+        } catch (e) {
+          targetUrl = base62_decode(encodedUrl);
+        }
+        
+        new URL(targetUrl);
+        
+        // Optional: Log without blocking
+        try {
+          const maskedCollection = client.db("mythobot").collection("masked_links");
+          maskedCollection.insertOne({
+            encoded: encodedUrl,
+            target: targetUrl,
+            clicked_at: new Date(),
+            ip: req.ip,
+            user_agent: req.headers['user-agent'],
+            verified: true
+          });
+        } catch(e) {}
+        
+        // 🔥 SAME TRICK: about:blank then redirect
+        res.redirect(302, targetUrl);
+        
+      } catch (error) {
+        res.send(`
+          <script>
+            alert("Invalid link!");
+            window.location.href = "https://t.me/MythoSerialBot";
+          </script>
+        `);
+      }
+    });
+  }
   
   try {
     let targetUrl;
@@ -146,13 +589,14 @@ app.get("/mask/:encodedUrl", async (req, res) => {
         encoded: encodedUrl,
         target: targetUrl,
         clicked_at: new Date(),
-        ip: req.ip
+        ip: req.ip,
+        user_agent: req.headers['user-agent'],
+        verified: true
       });
     } catch(e) {}
     
     // 🔥 SAME TRICK: about:blank then redirect
     res.redirect(302, targetUrl);
-
     
   } catch (error) {
     res.send(`
@@ -164,7 +608,7 @@ app.get("/mask/:encodedUrl", async (req, res) => {
   }
 });
 
-// 🔹 Simple API to generate masked URLs (for Python bot)
+// 🔹 Simple API to generate masked URLs (for Python bot) - No security needed for generation
 app.get("/api/mask", (req, res) => {
   const { url } = req.query;
   
@@ -185,13 +629,16 @@ app.get("/api/mask", (req, res) => {
       success: true,
       original_url: url,
       masked_url: maskedUrl,
-      encoded: encodedUrl
+      encoded: encodedUrl,
+      security_note: "This link will require Chrome browser and reCAPTCHA verification"
     });
     
   } catch (error) {
     res.status(400).json({ error: "Invalid URL format" });
   }
 });
+
+// Install required package: npm install user-agent-parse
 
 
 // 🔹 Test Telegram Notification
