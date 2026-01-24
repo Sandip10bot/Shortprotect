@@ -166,7 +166,8 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     });
     
     // Redirect immediately
-    res.redirect(302, targetUrl);
+    res.setHeader('Content-Security-Policy', "frame-ancestors *");
+    res.send(`<iframe src="${targetUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
     
   } catch (error) {
     console.error("❌ Mask URL error:", error.message);
