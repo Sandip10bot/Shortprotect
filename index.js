@@ -165,10 +165,12 @@ app.get("/mask/:encodedUrl", async (req, res) => {
       ip: req.ip
     });
     
-    // Redirect immediately
-    res.setHeader('Content-Security-Policy', "frame-ancestors *");
-    res.send(`<iframe src="${targetUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
-    
+    const userAgent = req.get('user-agent') || '';
+    if (userAgent.toLowerCase().includes('telegram')) {
+      res.redirect(targetUrl); // For Telegram browser
+    } else {
+      res.send(`<iframe src="${targetUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
+    }    
   } catch (error) {
     console.error("❌ Mask URL error:", error.message);
     
