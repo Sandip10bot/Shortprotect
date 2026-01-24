@@ -107,144 +107,125 @@ function base62_decode(encoded) {
     }
 }
 
+
+
+// ================== LINK (HEX) ==================
 app.get("/link/:hex", (req, res) => {
   const { hex } = req.params;
-  
+
   try {
-    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    const targetUrl = Buffer.from(hex, "hex").toString("utf-8");
     new URL(targetUrl);
-    
-    // 🔥 TRICK: Open about:blank first, then change URL
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Loading...</title>
-        <script>
-          // Open a blank tab first (shows about:blank in address bar)
-          const newWindow = window.open('about:blank', '_blank');
-          
-          if (newWindow) {
-            // Change the blank tab's location to target URL
-            newWindow.location.href = '${targetUrl}';
-            // Close this tab immediately
-            setTimeout(() => window.close(), 100);
-          } else {
-            // If popup blocked, redirect normally
-            window.location.href = '${targetUrl}';
-          }
-        </script>
-      </head>
-      <body style="margin:0;padding:0;background:#f0f0f0;">
-        <div style="display:none;">Opening link...</div>
-      </body>
-      </html>
-    `);
-    
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
+
+    res.send(minRedirect(targetUrl));
+  } catch {
+    res.redirect("https://t.me/MythoSerialBot");
   }
 });
 
 
+// ================== MASK LINK ==================
 app.get("/mask/:encodedUrl", async (req, res) => {
   const { encodedUrl } = req.params;
-  
+  let targetUrl;
+
   try {
-    let targetUrl;
     try {
-      const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
-      targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
-      if (!targetUrl.includes('://')) throw new Error('Not a URL');
-    } catch (e) {
+      const padded = encodedUrl.padEnd(
+        encodedUrl.length + (4 - encodedUrl.length % 4) % 4,
+        "="
+      );
+      targetUrl = Buffer.from(padded, "base64").toString("utf-8");
+      if (!targetUrl.includes("://")) throw 0;
+    } catch {
       targetUrl = base62_decode(encodedUrl);
     }
-    
+
     new URL(targetUrl);
-    
-    // Optional: Log without blocking
+
+    // silent log
     try {
-      const maskedCollection = client.db("mythobot").collection("masked_links");
-      maskedCollection.insertOne({
+      client.db("mythobot").collection("masked_links").insertOne({
         encoded: encodedUrl,
         target: targetUrl,
-        clicked_at: new Date(),
-        ip: req.ip
+        ip: req.ip,
+        clicked_at: new Date()
       });
-    } catch(e) {}
-    
-    // 🔥 SAME TRICK: about:blank then redirect
+    } catch {}
+
+    res.send(minRedirect(targetUrl));
+
+  } catch {
     res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Opening...</title>
-        <script>
-          // Method 1: Try to open in new tab with about:blank
-          try {
-            const w = window.open('about:blank', '_blank');
-            if (w) {
-              // Set target URL after blank tab opens
-              setTimeout(() => {
-                w.location.href = '${targetUrl}';
-                // Close this window quickly
-                setTimeout(() => window.close(), 200);
-              }, 50);
-            } else {
-              // Fallback: direct redirect
-              window.location.href = '${targetUrl}';
-            }
-          } catch(e) {
-            // Direct redirect on error
-            window.location.href = '${targetUrl}';
-          }
-        </script>
-      </head>
-      <body style="margin:0;padding:0;background:#f0f0f0;">
-        <!-- Empty page -->
-      </body>
-      </html>
-    `);
-    
-  } catch (error) {
-    res.send(`
-      <script>
-        alert("Invalid link!");
-        window.location.href = "https://t.me/MythoSerialBot";
-      </script>
+<script>
+alert("Invalid link!");
+location.replace("https://t.me/MythoSerialBot");
+</script>
     `);
   }
 });
 
-// 🔹 Simple API to generate masked URLs (for Python bot)
+
+// ================== MASK API ==================
 app.get("/api/mask", (req, res) => {
   const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ error: "Missing url parameter" });
-  }
-  
+  if (!url) return res.status(400).json({ error: "Missing url" });
+
   try {
-    new URL(url); // Validate URL
-    
-    // Encode the URL using base62
-    const encodedUrl = base62_encode(url);
-    
-    // Create masked URL
-    const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
-    
+    new URL(url);
+    const encoded = base62_encode(url);
     res.json({
       success: true,
-      original_url: url,
-      masked_url: maskedUrl,
-      encoded: encodedUrl
+      masked_url: \`https://\${req.hostname}/mask/\${encoded}\`,
+      encoded
     });
-    
-  } catch (error) {
-    res.status(400).json({ error: "Invalid URL format" });
+  } catch {
+    res.status(400).json({ error: "Invalid URL" });
   }
 });
 
+
+// ================== CORE REDIRECT ENGINE ==================
+function minRedirect(targetUrl) {
+  return `
+<script>
+(function(){
+  // --- Anti inspect (best effort) ---
+  document.addEventListener('contextmenu',e=>e.preventDefault());
+  document.addEventListener('keydown',e=>{
+    if(e.keyCode===123|| (e.ctrlKey&&e.shiftKey)||(e.ctrlKey&&e.keyCode===85)) e.preventDefault();
+  });
+
+  var isTG = /Telegram|WebView/i.test(navigator.userAgent);
+
+  // --- Method 1: Telegram WebView / Mobile ---
+  if(isTG){
+    location.replace(${JSON.stringify(targetUrl)});
+    return;
+  }
+
+  // --- Method 2: about:blank new tab ---
+  var w = window.open('about:blank','_blank');
+  if(w){
+    w.location.replace(${JSON.stringify(targetUrl)});
+    window.close();
+    return;
+  }
+
+  // --- Method 3: iframe (popup-proof) ---
+  var f=document.createElement('iframe');
+  f.style.display='none';
+  f.src=${JSON.stringify(targetUrl)};
+  document.body.appendChild(f);
+
+  // --- Method 4: last fallback ---
+  setTimeout(()=>location.replace(${JSON.stringify(targetUrl)}),30);
+})();
+</script>
+  `;
+}
+
+      
 
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
