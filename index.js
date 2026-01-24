@@ -114,13 +114,31 @@ app.get("/link/:hex", (req, res) => {
     const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
     new URL(targetUrl);
     
-    // 🔥 ULTRA FAST REDIRECT
-    res.writeHead(302, { 'Location': targetUrl });
-    res.end();
+    // 🔥 OPEN IN NEW TAB/WINDOW
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title></title>
+        <script>
+          // Open in new tab immediately
+          const newWindow = window.open("${targetUrl}", "_blank");
+          
+          // Close this tab if successful
+          if (newWindow) {
+            window.close();
+          } else {
+            // If popup blocked, redirect in same tab
+            window.location.href = "${targetUrl}";
+          }
+        </script>
+      </head>
+      <body></body>
+      </html>
+    `);
     
   } catch (error) {
-    res.writeHead(302, { 'Location': 'https://t.me/MythoSerialBot' });
-    res.end();
+    res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
@@ -139,22 +157,33 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     
     new URL(targetUrl);
     
-    // Fast async logging (doesn't block redirect)
-    const maskedCollection = client.db("mythobot").collection("masked_links");
-    maskedCollection.insertOne({
-      encoded: encodedUrl,
-      target: targetUrl,
-      clicked_at: new Date(),
-      ip: req.ip
-    }).catch(e => console.error("Logging error:", e));
-    
-    // 🔥 IMMEDIATE REDIRECT
-    res.writeHead(302, { 'Location': targetUrl });
-    res.end();
+    // 🔥 OPEN IN NEW TAB/WINDOW
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title></title>
+        <script>
+          // Try to open in new tab
+          const win = window.open("${targetUrl}", "_blank", "noopener,noreferrer");
+          
+          // Close this tab quickly
+          setTimeout(() => {
+            if (win && !win.closed) {
+              window.close();
+            } else {
+              // Fallback to same tab redirect
+              window.location.href = "${targetUrl}";
+            }
+          }, 50);
+        </script>
+      </head>
+      <body style="display:none;">Loading...</body>
+      </html>
+    `);
     
   } catch (error) {
-    res.writeHead(302, { 'Location': 'https://t.me/MythoSerialBot' });
-    res.end();
+    res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
