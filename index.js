@@ -131,7 +131,6 @@ app.get("/link/:hex", (req, res) => {
   }
 });
 
-// 🔹 URL Masking Endpoint (Hides shortxlink URLs)
 app.get("/mask/:encodedUrl", async (req, res) => {
   const { encodedUrl } = req.params;
   
@@ -153,43 +152,8 @@ app.get("/mask/:encodedUrl", async (req, res) => {
       ip: req.ip
     });
     
-    // Show loading page for 1 second then redirect
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Redirecting...</title>
-        <meta http-equiv="refresh" content="1;url=${targetUrl}">
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            text-align: center; 
-            padding: 50px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-          }
-          .loader {
-            border: 4px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top: 4px solid white;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-          }
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        </style>
-      </head>
-      <body>
-        <h2>🔗 Opening Link...</h2>
-        <div class="loader"></div>
-        <p>Redirecting to destination...</p>
-        <p style="font-size: 12px; margin-top: 20px; opacity: 0.8;">
-          If not redirected, <a href="${targetUrl}" style="color: #ffcc00;">click here</a>
-        </p>
-      </body>
-      </html>
-    `);
+    // 🔥 CHANGE HERE: Redirect immediately (just these 2 lines)
+    res.redirect(302, targetUrl);
     
   } catch (error) {
     console.error("❌ Mask URL error:", error.message);
