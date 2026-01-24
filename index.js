@@ -114,26 +114,30 @@ app.get("/link/:hex", (req, res) => {
     const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
     new URL(targetUrl);
     
-    // 🔥 OPEN IN NEW TAB/WINDOW
+    // 🔥 TRICK: Open about:blank first, then change URL
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title></title>
+        <title>Loading...</title>
         <script>
-          // Open in new tab immediately
-          const newWindow = window.open("${targetUrl}", "_blank");
+          // Open a blank tab first (shows about:blank in address bar)
+          const newWindow = window.open('about:blank', '_blank');
           
-          // Close this tab if successful
           if (newWindow) {
-            window.close();
+            // Change the blank tab's location to target URL
+            newWindow.location.href = '${targetUrl}';
+            // Close this tab immediately
+            setTimeout(() => window.close(), 100);
           } else {
-            // If popup blocked, redirect in same tab
-            window.location.href = "${targetUrl}";
+            // If popup blocked, redirect normally
+            window.location.href = '${targetUrl}';
           }
         </script>
       </head>
-      <body></body>
+      <body style="margin:0;padding:0;background:#f0f0f0;">
+        <div style="display:none;">Opening link...</div>
+      </body>
       </html>
     `);
     
@@ -141,6 +145,7 @@ app.get("/link/:hex", (req, res) => {
     res.redirect('https://t.me/MythoSerialBot');
   }
 });
+
 
 app.get("/mask/:encodedUrl", async (req, res) => {
   const { encodedUrl } = req.params;
@@ -157,36 +162,59 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     
     new URL(targetUrl);
     
-    // 🔥 OPEN IN NEW TAB/WINDOW
+    // Optional: Log without blocking
+    try {
+      const maskedCollection = client.db("mythobot").collection("masked_links");
+      maskedCollection.insertOne({
+        encoded: encodedUrl,
+        target: targetUrl,
+        clicked_at: new Date(),
+        ip: req.ip
+      });
+    } catch(e) {}
+    
+    // 🔥 SAME TRICK: about:blank then redirect
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title></title>
+        <title>Opening...</title>
         <script>
-          // Try to open in new tab
-          const win = window.open("${targetUrl}", "_blank", "noopener,noreferrer");
-          
-          // Close this tab quickly
-          setTimeout(() => {
-            if (win && !win.closed) {
-              window.close();
+          // Method 1: Try to open in new tab with about:blank
+          try {
+            const w = window.open('about:blank', '_blank');
+            if (w) {
+              // Set target URL after blank tab opens
+              setTimeout(() => {
+                w.location.href = '${targetUrl}';
+                // Close this window quickly
+                setTimeout(() => window.close(), 200);
+              }, 50);
             } else {
-              // Fallback to same tab redirect
-              window.location.href = "${targetUrl}";
+              // Fallback: direct redirect
+              window.location.href = '${targetUrl}';
             }
-          }, 50);
+          } catch(e) {
+            // Direct redirect on error
+            window.location.href = '${targetUrl}';
+          }
         </script>
       </head>
-      <body style="display:none;">Loading...</body>
+      <body style="margin:0;padding:0;background:#f0f0f0;">
+        <!-- Empty page -->
+      </body>
       </html>
     `);
     
   } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
+    res.send(`
+      <script>
+        alert("Invalid link!");
+        window.location.href = "https://t.me/MythoSerialBot";
+      </script>
+    `);
   }
 });
-
 
 // 🔹 Simple API to generate masked URLs (for Python bot)
 app.get("/api/mask", (req, res) => {
