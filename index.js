@@ -135,8 +135,21 @@ app.get("/mask/:encodedUrl", async (req, res) => {
   const { encodedUrl } = req.params;
   
   try {
-    // Decode the base62 encoded URL
-    const targetUrl = base62_decode(encodedUrl);
+    // 🔥 FIX HERE: Handle both base64 (from Python) and base62 encoding
+    let targetUrl;
+    
+    // Try base64 decode first (Python uses base64.urlsafe_b64encode)
+    try {
+      // Add padding if needed for base64
+      const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
+      targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
+      
+      // If result doesn't look like a URL, try base62
+      if (!targetUrl.includes('://')) throw new Error('Not a URL');
+    } catch (e) {
+      // Fallback to base62 decode
+      targetUrl = base62_decode(encodedUrl);
+    }
     
     // Validate it's a proper URL
     new URL(targetUrl);
@@ -152,7 +165,7 @@ app.get("/mask/:encodedUrl", async (req, res) => {
       ip: req.ip
     });
     
-    // 🔥 CHANGE HERE: Redirect immediately (just these 2 lines)
+    // Redirect immediately
     res.redirect(302, targetUrl);
     
   } catch (error) {
@@ -172,6 +185,8 @@ app.get("/mask/:encodedUrl", async (req, res) => {
         <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto;">
           <h2 style="color: #dc2626;">❌ Invalid Link</h2>
           <p>This link appears to be corrupted or expired.</p>
+          <p><small>Error: ${error.message}</small></p>
+          <p><small>Encoded: ${encodedUrl.substring(0, 50)}...</small></p>
           <a href="https://t.me/MythoSerialBot" style="
             display: inline-block;
             background: #0088cc;
