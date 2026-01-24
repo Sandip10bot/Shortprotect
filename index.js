@@ -22,6 +22,8 @@ const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
 let downloadsCollection;
+let maskCollection;
+
 
 async function connectDB() {
   await client.connect();
@@ -29,7 +31,10 @@ async function connectDB() {
   doubleCollection = db.collection("double_points");
   urlShortenerCollection = db.collection("url_shortener");
   downloadsCollection = db.collection("youtube_downloads");
+  maskCollection = db.collection("masked_links");
+
   console.log("✅ MongoDB connected");
+  
 }
 
 connectDB();
@@ -101,6 +106,61 @@ function base62_decode(encoded) {
         return Buffer.from(padded, 'base64').toString('utf-8');
     }
 }
+
+// 🔹 Create masked SoftURL
+app.get("/create-mask", async (req, res) => {
+  const { softurl, userId } = req.query;
+
+  if (!softurl || !userId) {
+    return res.status(400).json({ error: "Missing params" });
+  }
+
+  const code = crypto.randomBytes(5).toString("hex");
+
+  await maskCollection.insertOne({
+    code,
+    target_url: softurl,
+    user_id: parseInt(userId),
+    used: false,
+    created_at: new Date(),
+    expires_at: Date.now() + 5 * 60 * 1000 // 5 min
+  });
+
+  res.json({
+    masked_url: `https://${req.hostname}/mask/${code}`
+  });
+});
+
+
+// 🔐 MASKED REDIRECT (SoftURL Hidden)
+app.get("/mask/:code", async (req, res) => {
+  const { code } = req.params;
+
+  const record = await maskCollection.findOne({ code });
+
+  if (!record) {
+    return res.status(404).send("❌ Invalid or expired link");
+  }
+
+  // Optional: one-time use
+  if (record.used) {
+    return res.status(410).send("⛔ Link already used");
+  }
+
+  // Optional: expiry
+  if (Date.now() > record.expires_at) {
+    return res.status(410).send("⏰ Link expired");
+  }
+
+  await maskCollection.updateOne(
+    { code },
+    { $set: { used: true, used_at: new Date() } }
+  );
+
+  // 🚀 REAL REDIRECT (SoftURL never shown in Telegram)
+  return res.redirect(record.target_url);
+});
+
 
 // 🔹 Test Telegram Notification
 app.get("/test-notification", async (req, res) => {
