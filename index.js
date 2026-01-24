@@ -107,27 +107,20 @@ function base62_decode(encoded) {
     }
 }
 
-
-// 🔹 HEX-based redirect (even simpler)
 app.get("/link/:hex", (req, res) => {
   const { hex } = req.params;
   
   try {
-    // Convert hex back to string
     const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
-    
-    // Validate URL
     new URL(targetUrl);
     
-    console.log(`🔗 Hex redirect to: ${targetUrl.substring(0, 80)}...`);
-    res.redirect(targetUrl);
+    // 🔥 ULTRA FAST REDIRECT
+    res.writeHead(302, { 'Location': targetUrl });
+    res.end();
     
   } catch (error) {
-    res.status(400).send(`
-      <h3>❌ Invalid link</h3>
-      <p>Hex: ${hex.substring(0, 50)}...</p>
-      <a href="https://t.me/MythoSerialBot">🤖 Bot</a>
-    `);
+    res.writeHead(302, { 'Location': 'https://t.me/MythoSerialBot' });
+    res.end();
   }
 });
 
@@ -135,76 +128,36 @@ app.get("/mask/:encodedUrl", async (req, res) => {
   const { encodedUrl } = req.params;
   
   try {
-    // 🔥 FIX HERE: Handle both base64 (from Python) and base62 encoding
     let targetUrl;
-    
-    // Try base64 decode first (Python uses base64.urlsafe_b64encode)
     try {
-      // Add padding if needed for base64
       const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
       targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
-      
-      // If result doesn't look like a URL, try base62
       if (!targetUrl.includes('://')) throw new Error('Not a URL');
     } catch (e) {
-      // Fallback to base62 decode
       targetUrl = base62_decode(encodedUrl);
     }
     
-    // Validate it's a proper URL
     new URL(targetUrl);
     
-    console.log(`🔗 Masked redirect: ${targetUrl.substring(0, 80)}...`);
-    
-    // Simple tracking (optional)
+    // Fast async logging (doesn't block redirect)
     const maskedCollection = client.db("mythobot").collection("masked_links");
-    await maskedCollection.insertOne({
+    maskedCollection.insertOne({
       encoded: encodedUrl,
       target: targetUrl,
       clicked_at: new Date(),
       ip: req.ip
-    });
+    }).catch(e => console.error("Logging error:", e));
     
-    const userAgent = req.get('user-agent') || '';
-    if (userAgent.toLowerCase().includes('telegram')) {
-      res.redirect(targetUrl); // For Telegram browser
-    } else {
-      res.send(`<iframe src="${targetUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
-    }    
+    // 🔥 IMMEDIATE REDIRECT
+    res.writeHead(302, { 'Location': targetUrl });
+    res.end();
+    
   } catch (error) {
-    console.error("❌ Mask URL error:", error.message);
-    
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Invalid Link</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
-        </style>
-      </head>
-      <body>
-        <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto;">
-          <h2 style="color: #dc2626;">❌ Invalid Link</h2>
-          <p>This link appears to be corrupted or expired.</p>
-          <p><small>Error: ${error.message}</small></p>
-          <p><small>Encoded: ${encodedUrl.substring(0, 50)}...</small></p>
-          <a href="https://t.me/MythoSerialBot" style="
-            display: inline-block;
-            background: #0088cc;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            text-decoration: none;
-            margin-top: 20px;
-          ">🤖 Go to MythoBot</a>
-        </div>
-      </body>
-      </html>
-    `);
+    res.writeHead(302, { 'Location': 'https://t.me/MythoSerialBot' });
+    res.end();
   }
 });
+
 
 // 🔹 Simple API to generate masked URLs (for Python bot)
 app.get("/api/mask", (req, res) => {
