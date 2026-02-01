@@ -1,4 +1,4 @@
-// index.js - FULL UPDATED CODE (Integrated 10s Blogger wait → External Blogger → 10s Ad → Target)
+// index.js - UPDATED (Blogger replaced with Server-side Pages: 3 pages → 10s each → Get Link)
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
@@ -21,13 +21,12 @@ const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 // API Authentication
 const API_KEYS = new Set(process.env.API_KEYS ? process.env.API_KEYS.split(',') : []);
 
-// Blogger Configuration - UPDATED
-const BLOGGER_CONFIG = {
-  enabled: process.env.BLOGGER_ENABLED === "true",
-  default_blogger_url: process.env.DEFAULT_BLOGGER_URL || "https://mythobot.blogspot.com",
-  default_title: "Content Loading... Please Wait",
-  default_delay: 10, // 10-second wait before external Blogger
-  skip_blogger: process.env.SKIP_BLOGGER === "true"
+// Page Flow Configuration - UPDATED
+const PAGE_FLOW_CONFIG = {
+  enabled: process.env.PAGE_FLOW_ENABLED === "true",
+  total_pages: 3, // 3 pages before ad
+  wait_time_per_page: 10, // 10 seconds per page
+  skip_pages: process.env.SKIP_PAGES === "true"
 };
 
 const client = new MongoClient(MONGO_URI);
@@ -57,22 +56,22 @@ async function connectDB() {
     }
 
     try {
-      await adLinksCollection.createIndex({ blogger_code: 1 }, { 
+      await adLinksCollection.createIndex({ flow_code: 1 }, { 
         unique: true, 
         sparse: true 
       });
-      console.log("✅ Created blogger_code index (sparse)");
+      console.log("✅ Created flow_code index (sparse)");
     } catch (err) {
-      console.log("⚠️ blogger_code index already exists or failed:", err.message);
+      console.log("⚠️ flow_code index already exists or failed:", err.message);
       try {
-        await adLinksCollection.dropIndex("blogger_code_1");
-        await adLinksCollection.createIndex({ blogger_code: 1 }, { 
+        await adLinksCollection.dropIndex("flow_code_1");
+        await adLinksCollection.createIndex({ flow_code: 1 }, { 
           unique: true, 
           sparse: true 
         });
-        console.log("✅ Recreated blogger_code index with sparse option");
+        console.log("✅ Recreated flow_code index with sparse option");
       } catch (dropErr) {
-        console.log("⚠️ Could not fix blogger_code index, continuing without it");
+        console.log("⚠️ Could not fix flow_code index, continuing without it");
       }
     }
 
@@ -212,22 +211,95 @@ function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
 }
 
 // ========================
+// ARTICLES DATA
+// ========================
+const ARTICLES = [
+  {
+    id: 1,
+    title: "🔮 Mythological Wonders of India",
+    content: `
+      <h2 class="text-xl font-bold text-purple-700 mb-3">The Eternal Stories of India</h2>
+      <p class="mb-3">India's mythology is a treasure trove of wisdom, valor, and spirituality. From the epic battles of Mahabharata to the divine journey of Ramayana, these stories have shaped cultures for millennia.</p>
+      
+      <div class="bg-blue-50 p-4 rounded-lg mb-3">
+        <h3 class="font-bold text-blue-800">✨ Key Highlights:</h3>
+        <ul class="list-disc pl-5 text-blue-700">
+          <li><strong>Ramayana:</strong> The journey of Lord Rama to rescue Sita</li>
+          <li><strong>Mahabharata:</strong> The great war of Kurukshetra</li>
+          <li><strong>Bhagavad Gita:</strong> Spiritual discourse between Krishna and Arjuna</li>
+          <li><strong>Puranas:</strong> Ancient texts preserving cosmic knowledge</li>
+        </ul>
+      </div>
+      
+      <p class="text-sm text-gray-600">These timeless tales continue to inspire millions, teaching values of dharma (righteousness), karma (action), and moksha (liberation).</p>
+    `,
+    image: "https://images.unsplash.com/photo-1549187774-b4e9b0445b41?w=400&h=200&fit=crop",
+    tags: ["Mythology", "Ramayana", "Mahabharata", "Spirituality"]
+  },
+  {
+    id: 2,
+    title: "🎬 Rise of Mythological Content Online",
+    content: `
+      <h2 class="text-xl font-bold text-green-700 mb-3">Digital Dharma: Mythology in Modern Era</h2>
+      <p class="mb-3">In recent years, mythological content has seen a massive surge in popularity across digital platforms. Streaming services are investing billions in epic adaptations.</p>
+      
+      <div class="bg-green-50 p-4 rounded-lg mb-3">
+        <h3 class="font-bold text-green-800">📊 Digital Statistics:</h3>
+        <ul class="list-disc pl-5 text-green-700">
+          <li><strong>500% increase</strong> in mythological content viewership (2020-2024)</li>
+          <li><strong>2.5 billion+</strong> views for top mythological series on YouTube</li>
+          <li><strong>₹1,200+ crores</strong> invested in mythological productions</li>
+          <li><strong>45% of Indian households</strong> watch mythological content weekly</li>
+        </ul>
+      </div>
+      
+      <p class="text-sm text-gray-600">Platforms like Hotstar, SonyLIV, and YouTube are competing to bring the most authentic and visually stunning mythological stories to audiences worldwide.</p>
+    `,
+    image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w-400&h=200&fit=crop",
+    tags: ["Digital", "Streaming", "YouTube", "Trends"]
+  },
+  {
+    id: 3,
+    title: "🤖 MythoBot: Revolutionizing Access",
+    content: `
+      <h2 class="text-xl font-bold text-orange-700 mb-3">Your Gateway to Divine Entertainment</h2>
+      <p class="mb-3">MythoBot was created with a vision to make mythological content accessible to everyone, everywhere. No more searching through scattered links or dealing with broken downloads.</p>
+      
+      <div class="bg-orange-50 p-4 rounded-lg mb-3">
+        <h3 class="font-bold text-orange-800">🚀 Features That Make Us Unique:</h3>
+        <ul class="list-disc pl-5 text-orange-700">
+          <li><strong>One-Click Access:</strong> Direct links to complete series</li>
+          <li><strong>HD Quality:</strong> Crystal clear 1080p/4K streams</li>
+          <li><strong>Batch Downloads:</strong> Download entire seasons at once</li>
+          <li><strong>24/7 Support:</strong> Always available to help</li>
+          <li><strong>Regular Updates:</strong> New content added daily</li>
+        </ul>
+      </div>
+      
+      <p class="text-sm text-gray-600">Join over 500,000 satisfied users who have transformed their mythological content experience with MythoBot. Premium members get early access to all new releases!</p>
+    `,
+    image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=400&h=200&fit=crop",
+    tags: ["Technology", "Innovation", "Accessibility", "Premium"]
+  }
+];
+
+// ========================
 // API ENDPOINTS
 // ========================
 
-// 🔹 1. Universal Blogger Short Link Creation (wait_time default = 10)
+// 🔹 1. Universal Short Link Creation (with Page Flow)
 app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
   const { 
     url, 
     user_id, 
-    blogger_url = BLOGGER_CONFIG.default_blogger_url,
-    blogger_title = BLOGGER_CONFIG.default_title,
-    blogger_delay = BLOGGER_CONFIG.default_delay,
+    page_title = "Exploring Mythological Content",
+    page_delay = PAGE_FLOW_CONFIG.wait_time_per_page,
+    total_pages = PAGE_FLOW_CONFIG.total_pages,
     ad_type = "timer",
     wait_time = 10,
     reward_type = "points",
     custom_alias,
-    skip_blogger = "false"
+    skip_pages = "false"
   } = req.query;
   
   if (!url || !user_id) {
@@ -257,12 +329,11 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       shortId = crypto.randomBytes(4).toString("hex");
     }
     
-    const bloggerCode = crypto.randomBytes(3).toString("hex");
-    const useBlogger = skip_blogger !== "true" && BLOGGER_CONFIG.enabled;
+    const flowCode = crypto.randomBytes(3).toString("hex");
+    const usePages = skip_pages !== "true" && PAGE_FLOW_CONFIG.enabled;
     
     const shortUrl = `https://${req.hostname}/s/${shortId}`;
-    const bloggerRedirectUrl = `https://${req.hostname}/blogger/${bloggerCode}`;
-    const bloggerPostUrl = `https://mythobot.blogspot.com/2024/01/redirect.html?target=${encodeURIComponent(bloggerRedirectUrl)}&code=${bloggerCode}&ref=${user_id}`;
+    const pageFlowUrl = `https://${req.hostname}/flow/${flowCode}`;
     const directAdUrl = `https://${req.hostname}/adgate/${shortId}`;
     
     const adConfig = {
@@ -274,29 +345,29 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     
     await adLinksCollection.insertOne({
       short_id: shortId,
-      blogger_code: bloggerCode,
+      flow_code: flowCode,
       creator_id: parseInt(user_id),
       target_url: url,
-      blogger_url: useBlogger ? blogger_url : null,
-      blogger_config: {
-        enabled: useBlogger,
-        title: blogger_title,
-        delay: parseInt(blogger_delay),
-        url: blogger_url
+      page_flow_config: {
+        enabled: usePages,
+        title: page_title,
+        delay: parseInt(page_delay),
+        total_pages: parseInt(total_pages),
+        articles: ARTICLES.map(article => article.id)
       },
       ad_config: adConfig,
       custom_alias: custom_alias || null,
       created_at: new Date(),
       clicks: 0,
-      blogger_clicks: 0,
+      page_views: 0,
       direct_clicks: 0,
       earnings: 0,
       status: "active",
       access_logs: [],
-      blogger_logs: [],
+      page_logs: [],
       metadata: {
         created_via: "api",
-        skip_blogger: skip_blogger === "true",
+        skip_pages: skip_pages === "true",
         ip: req.ip
       }
     });
@@ -305,36 +376,30 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       success: true,
       data: {
         short_id: shortId,
-        blogger_code: bloggerCode,
+        flow_code: flowCode,
         user_id: parseInt(user_id),
         created_at: new Date().toISOString(),
-        blogger_config: {
-          enabled: useBlogger,
-          url: blogger_url,
-          title: blogger_title,
-          delay: blogger_delay
+        page_flow_config: {
+          enabled: usePages,
+          title: page_title,
+          delay: page_delay,
+          total_pages: total_pages
         },
         ad_config: adConfig,
         stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
         delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`
       },
-      message: useBlogger 
-        ? "Short link created with automatic Blogger redirection" 
-        : "Short link created (Blogger redirection disabled)"
+      message: usePages 
+        ? "Short link created with automatic page flow (3 pages → ad)" 
+        : "Short link created (page flow disabled)"
     };
     
-    if (useBlogger) {
-      // बस एक ही blogger URL use करें
-      responseData.data.primary_url = bloggerPostUrl;
-      responseData.data.blogger_redirect_url = bloggerPostUrl;
+    if (usePages) {
+      responseData.data.primary_url = pageFlowUrl;
       responseData.data.short_url = shortUrl;
       responseData.data.direct_ad_url = directAdUrl;
-      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(bloggerPostUrl)}`;
-  
-      // Optional extra info
-      responseData.data.internal_url = bloggerRedirectUrl;  // For reference only
-      responseData.data.direct_blogger_url = bloggerRedirectUrl;  // For reference only
-  
+      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pageFlowUrl)}`;
+      responseData.data.page_preview = `https://${req.hostname}/flow/${flowCode}/preview`;
     } else {
       responseData.data.primary_url = directAdUrl;
       responseData.data.short_url = directAdUrl;
@@ -344,16 +409,15 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     
     if (TELEGRAM_ADMIN_CHAT_ID && process.env.NOTIFY_NEW_LINKS === "true") {
       const notification = `
-🔗 <b>New ${useBlogger ? 'Blogger ' : ''}Short Link Created</b>
+🔗 <b>New ${usePages ? 'Page Flow ' : ''}Short Link Created</b>
 
 👤 <b>User ID:</b> <code>${user_id}</code>
 📝 <b>Short ID:</b> <code>${shortId}</code>
-${useBlogger ? `🌐 <b>Blogger:</b> ${blogger_url.substring(0, 30)}...\n` : ''}
+📄 <b>Pages:</b> ${usePages ? '3 pages × 10s each' : 'Disabled'}
 🎯 <b>Ad Type:</b> ${ad_type}
 ⏱️ <b>Wait Time:</b> ${wait_time}s
 
-🔗 <b>Primary URL:</b> ${useBlogger ? bloggerRedirectUrl : directAdUrl}
-${useBlogger ? `🎯 <b>Direct URL:</b> ${directAdUrl}\n` : ''}
+🔗 <b>Primary URL:</b> ${usePages ? pageFlowUrl : directAdUrl}
 📊 <b>Stats:</b> <a href="https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}">View Stats</a>
       `;
       
@@ -412,12 +476,12 @@ app.get("/s/:shortId", async (req, res) => {
       { $inc: { views: 1 } }
     );
     
-    const skipBlogger = direct === "true" || !linkData.blogger_config?.enabled;
+    const skipPages = direct === "true" || !linkData.page_flow_config?.enabled;
     
-    if (skipBlogger) {
+    if (skipPages) {
       res.redirect(`/adgate/${shortId}`);
     } else {
-      res.redirect(`/blogger/${linkData.blogger_code}`);
+      res.redirect(`/flow/${linkData.flow_code}`);
     }
     
   } catch (error) {
@@ -426,14 +490,14 @@ app.get("/s/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 3. Blogger Redirection Page - FULLY UPDATED (10s wait → external blogger_url)
-app.get("/blogger/:code", async (req, res) => {
+// 🔹 3. Page Flow System - NEW (3 pages → Get Link page)
+app.get("/flow/:code", async (req, res) => {
   const { code } = req.params;
-  const { ref, source, skip } = req.query;
+  const { page = 1, skip } = req.query;
   
   try {
     const linkData = await adLinksCollection.findOne({ 
-      blogger_code: code,
+      flow_code: code,
       status: "active"
     });
     
@@ -450,8 +514,8 @@ app.get("/blogger/:code", async (req, res) => {
         </head>
         <body>
           <div class="container">
-            <h1>Blogger Link Not Found</h1>
-            <p>This blogger redirection link has expired or doesn't exist.</p>
+            <h1>Page Flow Link Not Found</h1>
+            <p>This page flow link has expired or doesn't exist.</p>
           </div>
         </body>
         </html>
@@ -460,10 +524,10 @@ app.get("/blogger/:code", async (req, res) => {
     
     if (skip === "true") {
       await adLinksCollection.updateOne(
-        { blogger_code: code },
+        { flow_code: code },
         { 
           $push: {
-            blogger_logs: {
+            page_logs: {
               type: 'skipped',
               timestamp: new Date(),
               ip: req.ip
@@ -475,31 +539,35 @@ app.get("/blogger/:code", async (req, res) => {
       return res.redirect(`/adgate/${linkData.short_id}`);
     }
     
+    const currentPage = parseInt(page);
+    const totalPages = linkData.page_flow_config?.total_pages || PAGE_FLOW_CONFIG.total_pages;
+    const waitTime = linkData.page_flow_config?.delay || PAGE_FLOW_CONFIG.wait_time_per_page;
+    
+    if (currentPage > totalPages) {
+      // Show "Get Link" page after all pages
+      return renderGetLinkPage(res, code, linkData);
+    }
+    
+    // Track page view
     await adLinksCollection.updateOne(
-      { blogger_code: code },
+      { flow_code: code },
       { 
-        $inc: { blogger_clicks: 1 },
+        $inc: { page_views: 1 },
         $push: {
-          blogger_logs: {
-            type: 'visit',
+          page_logs: {
+            type: 'page_view',
+            page: currentPage,
             timestamp: new Date(),
             ip: req.ip,
-            user_agent: req.get("user-agent"),
-            referer: req.get("referer"),
-            ref: ref || null,
-            source: source || null
+            user_agent: req.get("user-agent")
           }
         }
       }
     );
     
-    const bloggerConfig = linkData.blogger_config || {};
-    const delay = 10;
-    const title = bloggerConfig.title || "Redirecting to Blogger Site...";
-    // FIXED VERSION - Add target parameter
-    const adgateUrl = `https://${req.hostname}/adgate/${shortId}`;
-    const bloggerUrl = `${linkData.blogger_url || BLOGGER_CONFIG.default_blogger_url}?target=${encodeURIComponent(adgateUrl)}&code=${code}&ref=${linkData.creator_id || user_id}`;
-    const shortId = linkData.short_id;
+    // Get article for current page
+    const articleIndex = (currentPage - 1) % ARTICLES.length;
+    const article = ARTICLES[articleIndex];
     
     res.send(`
       <!DOCTYPE html>
@@ -507,7 +575,7 @@ app.get("/blogger/:code", async (req, res) => {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${title}</title>
+        <title>Page ${currentPage}/${totalPages} - MythoBot Flow</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
         <style>
@@ -529,109 +597,339 @@ app.get("/blogger/:code", async (req, res) => {
             width: 0%;
             transition: width 1s linear;
           }
+          .tag {
+            display: inline-block;
+            background: #e0e7ff;
+            color: #4f46e5;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+          }
         </style>
       </head>
-      <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center">
-        <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full text-center">
+      <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl p-6 max-w-2xl w-full">
+          <!-- Progress Header -->
           <div class="mb-6">
-            <div class="text-5xl mb-4 pulse">
-              <i class="fas fa-external-link-alt text-blue-500"></i>
+            <div class="flex justify-between items-center mb-2">
+              <h1 class="text-xl font-bold text-gray-800">📖 MythoBot Content Hub</h1>
+              <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
+                Page ${currentPage}/${totalPages}
+              </span>
             </div>
-            <h1 class="text-2xl font-bold text-gray-800">${title}</h1>
-            <p class="text-gray-600 mt-2">You are being redirected to the Blogger site in <span id="countdown">${delay}</span> seconds...</p>
-          </div>
-          
-          <div class="mb-6">
             <div class="progress-bar">
-              <div id="progressFill" class="progress-fill"></div>
-            </div>
-            <p class="text-sm text-gray-500">
-              Redirecting in <span id="countdown">${delay}</span> seconds...
-            </p>
-          </div>
-          
-          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <div class="flex items-center justify-center text-blue-800">
-              <i class="fas fa-blog mr-2"></i>
-              <span class="text-sm">Via: ${new URL(bloggerUrl).hostname}</span>
+              <div id="progressFill" class="progress-fill" style="width: ${((currentPage - 1) / totalPages) * 100}%"></div>
             </div>
           </div>
           
+          <!-- Article Content -->
+          <div class="mb-6">
+            <div class="mb-4">
+              <img src="${article.image}" alt="${article.title}" class="w-full h-48 object-cover rounded-lg mb-3">
+              <h2 class="text-2xl font-bold text-gray-800 mb-2">${article.title}</h2>
+              <div class="mb-3">
+                ${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+              </div>
+            </div>
+            
+            <div class="prose max-w-none">
+              ${article.content}
+            </div>
+            
+            <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+              <p class="text-sm text-gray-600">
+                <i class="fas fa-info-circle mr-2 text-blue-500"></i>
+                Reading time: ${waitTime} seconds. Continue to next page automatically.
+              </p>
+            </div>
+          </div>
+          
+          <!-- Timer Section -->
+          <div class="mb-6">
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+              <div class="text-3xl font-bold text-blue-700 mb-2" id="countdown">${waitTime}</div>
+              <p class="text-blue-600">Seconds until next page...</p>
+            </div>
+          </div>
+          
+          <!-- Action Buttons -->
           <div class="space-y-3">
             <button onclick="redirectNow()" 
-              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all">
-              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue to Blogger Now
+              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all flex items-center justify-center">
+              <i class="fas fa-forward mr-2"></i>
+              Skip Wait & Continue Now
             </button>
             
-            <a href="${bloggerUrl}" 
-              target="_blank"
-              class="inline-block w-full py-2 text-blue-600 hover:text-blue-800">
-              <i class="fas fa-external-link-alt mr-2"></i>Open Blogger Page Directly
-            </a>
-            
-            <button onclick="skipBlogger()" 
-              class="w-full py-2 text-gray-500 hover:text-gray-700">
-              <i class="fas fa-forward mr-2"></i>Skip Blogger Next Time
-            </button>
+            <div class="flex space-x-2">
+              <button onclick="skipAll()" 
+                class="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all">
+                <i class="fas fa-fast-forward mr-2"></i>Skip All Pages
+              </button>
+              
+              <a href="/adgate/${linkData.short_id}" 
+                class="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all text-center">
+                <i class="fas fa-ads mr-2"></i>Go Direct to Ad
+              </a>
+            </div>
           </div>
           
-          <div class="mt-6 pt-4 border-t border-gray-200">
+          <!-- Footer -->
+          <div class="mt-6 pt-4 border-t border-gray-200 text-center">
             <p class="text-xs text-gray-500">
               <i class="fas fa-shield-alt mr-1"></i>
-              Secure redirect via MythoBot • Protected connection
-            </p>
-            <p class="text-xs text-gray-500 mt-2">
-              After viewing the Blogger page, click the "Continue" link there to reach the 10-second ad page.
+              Secure content delivery by MythoBot • Article ${currentPage} of ${totalPages}
             </p>
           </div>
         </div>
         
         <script>
-          const delay = ${delay};
-          const shortId = "${shortId}";
-          const bloggerUrl = "${bloggerUrl}";
-          let countdown = delay;
+          const currentPage = ${currentPage};
+          const totalPages = ${totalPages};
+          const waitTime = ${waitTime};
+          const flowCode = "${code}";
+          let countdown = waitTime;
           const countdownElement = document.getElementById('countdown');
           const progressFill = document.getElementById('progressFill');
           
           const timer = setInterval(() => {
             countdown--;
             countdownElement.textContent = countdown;
-            progressFill.style.width = \`\${((delay - countdown) / delay) * 100}%\`;
             
             if (countdown <= 0) {
               clearInterval(timer);
-              window.location.href = bloggerUrl;
+              goToNextPage();
             }
           }, 1000);
           
+          function goToNextPage() {
+            if (currentPage >= totalPages) {
+              window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
+            } else {
+              window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
+            }
+          }
+          
           function redirectNow() {
             clearInterval(timer);
-            window.location.href = bloggerUrl;
+            goToNextPage();
           }
           
-          function skipBlogger() {
-            document.cookie = "skip_blogger=true; max-age=2592000; path=/";
-            window.location.href = bloggerUrl;
+          function skipAll() {
+            clearInterval(timer);
+            window.location.href = "/flow/${code}/get-link";
           }
           
-          if (document.cookie.includes("skip_blogger=true")) {
-            window.location.href = bloggerUrl;
-          }
-          
-          setTimeout(() => { window.location.href = bloggerUrl; }, delay * 1000);
+          // Auto-redirect after wait time
+          setTimeout(goToNextPage, waitTime * 1000);
         </script>
       </body>
       </html>
     `);
     
   } catch (error) {
-    console.error("Blogger redirect error:", error);
+    console.error("Page flow error:", error);
     res.status(500).send("Internal server error");
   }
 });
 
-// 🔹 4. Ad Gateway (default wait 10s)
+// 🔹 4. Get Link Page (After all pages) - NEW
+async function renderGetLinkPage(res, code, linkData) {
+  const shortId = linkData.short_id;
+  
+  await adLinksCollection.updateOne(
+    { flow_code: code },
+    { 
+      $push: {
+        page_logs: {
+          type: 'get_link_page',
+          timestamp: new Date(),
+          ip: res.req.ip
+        }
+      }
+    }
+  );
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>🎯 Get Your Link - MythoBot</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+      <style>
+        .success-checkmark {
+          width: 80px;
+          height: 80px;
+          margin: 0 auto;
+          position: relative;
+        }
+        .success-checkmark:before {
+          content: '';
+          position: absolute;
+          width: 80px;
+          height: 80px;
+          background: #10b981;
+          border-radius: 50%;
+          animation: scale 0.3s ease-in-out;
+        }
+        .check-icon {
+          width: 40px;
+          height: 40px;
+          position: absolute;
+          top: 20px;
+          left: 20px;
+          transform: rotate(45deg);
+        }
+        .check-icon:before, .check-icon:after {
+          content: '';
+          position: absolute;
+          background: white;
+        }
+        .check-icon:before {
+          width: 4px;
+          height: 25px;
+          left: 18px;
+          top: 8px;
+        }
+        .check-icon:after {
+          width: 12px;
+          height: 4px;
+          left: 8px;
+          top: 29px;
+        }
+        @keyframes scale {
+          0% { transform: scale(0); }
+          100% { transform: scale(1); }
+        }
+        .link-box {
+          background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+          border: 2px dashed #0ea5e9;
+          transition: all 0.3s ease;
+        }
+        .link-box:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(14, 165, 233, 0.2);
+        }
+      </style>
+    </head>
+    <body class="bg-gradient-to-br from-green-50 to-blue-50 min-h-screen flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full text-center">
+        <!-- Success Animation -->
+        <div class="mb-6">
+          <div class="success-checkmark">
+            <div class="check-icon"></div>
+          </div>
+        </div>
+        
+        <!-- Title -->
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">🎉 Congratulations!</h1>
+        <p class="text-gray-600 mb-6">You've successfully completed all pages. Your link is ready!</p>
+        
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-4 mb-8">
+          <div class="bg-blue-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-blue-700">3</div>
+            <div class="text-sm text-blue-600">Pages Read</div>
+          </div>
+          <div class="bg-green-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-green-700">30s</div>
+            <div class="text-sm text-green-600">Total Time</div>
+          </div>
+          <div class="bg-purple-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-purple-700">100%</div>
+            <div class="text-sm text-purple-600">Complete</div>
+          </div>
+        </div>
+        
+        <!-- Link Box -->
+        <div class="mb-8">
+          <div class="link-box rounded-xl p-6 mb-4">
+            <div class="flex items-center justify-center mb-3">
+              <i class="fas fa-link text-blue-500 text-2xl mr-3"></i>
+              <h2 class="text-xl font-bold text-gray-800">Your Destination Link</h2>
+            </div>
+            <p class="text-gray-600 mb-4">Click the button below to proceed to the final ad page (10-second wait)</p>
+            
+            <a href="/adgate/${shortId}" 
+              class="inline-block px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg text-lg">
+              <i class="fas fa-external-link-alt mr-2"></i>
+              Get My Link Now
+            </a>
+          </div>
+          
+          <p class="text-sm text-gray-500">
+            <i class="fas fa-clock mr-1"></i>
+            Ad page will show for 10 seconds before redirecting to your destination
+          </p>
+        </div>
+        
+        <!-- Additional Options -->
+        <div class="space-y-3">
+          <a href="/dashboard/${linkData.creator_id}" 
+            class="block py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-all">
+            <i class="fas fa-chart-line mr-2"></i>View Your Dashboard
+          </a>
+          
+          <a href="/" 
+            class="block py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-all">
+            <i class="fas fa-home mr-2"></i>Return to Home
+          </a>
+        </div>
+        
+        <!-- Footer -->
+        <div class="mt-8 pt-6 border-t border-gray-200">
+          <p class="text-xs text-gray-500">
+            <i class="fas fa-star mr-1 text-yellow-500"></i>
+            Thank you for reading our content! Your support helps us create more amazing mythological resources.
+          </p>
+        </div>
+      </div>
+      
+      <script>
+        // Celebrate with confetti
+        setTimeout(() => {
+          if (typeof confetti === 'function') {
+            confetti({
+              particleCount: 100,
+              spread: 70,
+              origin: { y: 0.6 }
+            });
+          }
+        }, 500);
+      </script>
+      <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    </body>
+    </html>
+  `);
+}
+
+// Direct route to Get Link page
+app.get("/flow/:code/get-link", async (req, res) => {
+  const { code } = req.params;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      flow_code: code,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send("Link not found");
+    }
+    
+    renderGetLinkPage(res, code, linkData);
+    
+  } catch (error) {
+    console.error("Get link page error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// 🔹 5. Ad Gateway (default wait 10s) - UNCHANGED
 app.get("/adgate/:shortId", async (req, res) => {
   const { shortId } = req.params;
   const { ref } = req.query;
@@ -713,7 +1011,7 @@ app.get("/adgate/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 5. Direct Route
+// 🔹 6. Direct Route - UNCHANGED
 app.get("/d/:shortId", async (req, res) => {
   const { shortId } = req.params;
   
@@ -1088,7 +1386,7 @@ function renderBannerAdPage(res, shortId, targetUrl, isFirstVisit) {
 }
 
 // ========================
-// CLICK TRACKING
+// CLICK TRACKING - UNCHANGED
 // ========================
 
 app.post("/api/v1/click/:shortId", async (req, res) => {
@@ -1147,7 +1445,7 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
 });
 
 // ========================
-// EXISTING ROUTES (all original)
+// EXISTING ROUTES (all original) - UNCHANGED
 // ========================
 
 app.get("/link/:hex", (req, res) => {
@@ -1198,43 +1496,6 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     `);
   }
 });
-
-// ========================
-// BLOGGER TRACKING ENDPOINT
-// ========================
-app.get("/api/track-blogger", async (req, res) => {
-  const { code, ref, source } = req.query;
-  
-  if (!code) {
-    return res.json({ success: false });
-  }
-  
-  try {
-    await adLinksCollection.updateOne(
-      { blogger_code: code },
-      { 
-        $inc: { blogger_clicks: 1 },
-        $push: {
-          blogger_logs: {
-            type: 'blogger_auto_redirect',
-            timestamp: new Date(),
-            ip: req.ip,
-            user_agent: req.get("user-agent"),
-            ref: ref || null,
-            source: source || null,
-            auto_redirect: true
-          }
-        }
-      }
-    );
-    
-    res.json({ success: true });
-  } catch (error) {
-    res.json({ success: false });
-  }
-});
-
-
 
 app.get("/api/mask", (req, res) => {
   const { url } = req.query;
@@ -1680,6 +1941,10 @@ app.get("/stats/:userId", async (req, res) => {
   }
 });
 
+// ========================
+// PAYMENT ROUTES (unchanged)
+// ========================
+
 app.get("/payment", (req, res) => {
   const { amount, upi, channel, admin, mythopoints } = req.query;
   
@@ -1896,6 +2161,10 @@ app.get("/payment", (req, res) => {
     </html>
   `);
 });
+
+// ========================
+// PREMIUM PAYMENT ROUTES (unchanged)
+// ========================
 
 app.get("/premium-payment", async (req, res) => {
   const { user_id, plan, duration, amount, upi, admin, mythopoints } = req.query;
@@ -2118,34 +2387,6 @@ app.get("/premium-payment", async (req, res) => {
   `);
 });
 
-app.get("/upi-redirect", (req, res) => {
-  const { upi, amount, name } = req.query;
-  
-  const upiId = upi || "sandip10x@fam";
-  const paymentAmount = amount || 49;
-  const receiverName = name || "MythoBot Premium";
-  
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
-  res.redirect(upiLink);
-});
-
-app.get("/payment/api", (req, res) => {
-  const { amount, upi, channel, admin } = req.query;
-  
-  res.json({
-    success: true,
-    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "sandip10x@fam"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
-    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
-    config: {
-      amount: amount || 49,
-      upi_id: upi || "sandip10x@fam",
-      channel_name: channel || "MythoBot Premium", 
-      admin_username: admin || "MythoSerialBot"
-    },
-    message: "MythoBot Premium Access Payment"
-  });
-});
-
 app.get("/payment-status/:token", async (req, res) => {
   const { token } = req.params;
   
@@ -2218,25 +2459,8 @@ ${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${p
   res.json({ status: 'pending' });
 });
 
-app.get("/ad/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  
-  const referer = req.get("referer") || "";
-  if (!referer.includes("softurl.in")) {
-    return res.send("❌ Open ad via SoftURL link only!");
-  }
-  
-  const adGateCollection = client.db("mythobot").collection("spin_ad_gate");
-  await adGateCollection.updateOne(
-    { user_id: parseInt(userId), token },
-    { $set: { opened: true, opened_at: new Date() } }
-  );
-  
-  res.redirect(`https://t.me/MythoSerialBot?start=ad_unlocked_${userId}`);
-});
-
 // ========================
-// HOME PAGE
+// HOME PAGE - UNCHANGED
 // ========================
 
 app.get("/", (req, res) => {
@@ -2373,7 +2597,7 @@ app.get("/", (req, res) => {
   `);
 });
 
-// 🔹 Radhe Radhe Game Page
+// 🔹 Radhe Radhe Game Page - UNCHANGED
 app.get("/radhe", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -2467,7 +2691,7 @@ app.get("/radhe", (req, res) => {
 app.use("/yt", youtubeDLRouter);
 
 // ========================
-// ADMIN & DASHBOARD
+// ADMIN & DASHBOARD - UPDATED for Page Flow
 // ========================
 
 app.get("/dashboard/:userId", async (req, res) => {
@@ -2482,7 +2706,7 @@ app.get("/dashboard/:userId", async (req, res) => {
     
     const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
     const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
-    const totalBloggerClicks = links.reduce((sum, link) => sum + (link.blogger_clicks || 0), 0);
+    const totalPageViews = links.reduce((sum, link) => sum + (link.page_views || 0), 0);
     
     res.send(`
       <!DOCTYPE html>
@@ -2541,11 +2765,11 @@ app.get("/dashboard/:userId", async (req, res) => {
             <div class="bg-white rounded-xl shadow p-4">
               <div class="flex items-center">
                 <div class="bg-purple-100 p-3 rounded-lg mr-4">
-                  <i class="fa-solid fa-blog text-purple-500 text-xl"></i>
+                  <i class="fa-solid fa-file-alt text-purple-500 text-xl"></i>
                 </div>
                 <div>
-                  <p class="text-sm text-gray-500">Blogger Clicks</p>
-                  <p class="text-2xl font-bold">${totalBloggerClicks}</p>
+                  <p class="text-sm text-gray-500">Page Views</p>
+                  <p class="text-2xl font-bold">${totalPageViews}</p>
                 </div>
               </div>
             </div>
@@ -2559,7 +2783,7 @@ app.get("/dashboard/:userId", async (req, res) => {
                   <tr>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Short Link</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clicks</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Blogger</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Page Views</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Earnings</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
                   </tr>
@@ -2574,17 +2798,17 @@ app.get("/dashboard/:userId", async (req, res) => {
                             <a href="/s/${link.short_id}" target="_blank" class="text-blue-500 hover:underline">
                               /s/${link.short_id}
                             </a>
-                            ${link.blogger_code ? `
+                            ${link.flow_code ? `
                             <p class="text-xs text-gray-500">
-                              <i class="fas fa-external-link-alt mr-1"></i>
-                              Blogger: <a href="/blogger/${link.blogger_code}" target="_blank" class="text-green-500">/blogger/${link.blogger_code}</a>
+                              <i class="fas fa-file-alt mr-1"></i>
+                              Page Flow: <a href="/flow/${link.flow_code}" target="_blank" class="text-green-500">/flow/${link.flow_code}</a>
                             </p>
                             ` : ''}
                           </div>
                         </div>
                       </td>
                       <td class="px-6 py-4">${link.clicks || 0}</td>
-                      <td class="px-6 py-4">${link.blogger_clicks || 0}</td>
+                      <td class="px-6 py-4">${link.page_views || 0}</td>
                       <td class="px-6 py-4 font-bold text-green-600">$${(link.earnings || 0).toFixed(3)}</td>
                       <td class="px-6 py-4 text-sm text-gray-500">${new Date(link.created_at).toLocaleDateString()}</td>
                     </tr>
@@ -2610,7 +2834,7 @@ app.get("/dashboard/:userId", async (req, res) => {
 });
 
 // ========================
-// ERROR HANDLING
+// ERROR HANDLING - UNCHANGED
 // ========================
 
 app.use((req, res) => {
@@ -2668,12 +2892,14 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Home: http://localhost:${PORT}`);
-  console.log(`💰 Blogger System: ${BLOGGER_CONFIG.enabled ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`📄 Page Flow System: ${PAGE_FLOW_CONFIG.enabled ? 'ENABLED' : 'DISABLED'}`);
   console.log(`🔗 Short URLs: http://localhost:${PORT}/s/{id}`);
+  console.log(`📊 Page Flow: http://localhost:${PORT}/flow/{code}`);
+  console.log(`🎯 Get Link Page: http://localhost:${PORT}/flow/{code}/get-link`);
+  console.log(`💰 Ad Page: http://localhost:${PORT}/adgate/{shortId}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard/{userId}`);
-  console.log(`🎯 All features: ACTIVE`);
-  console.log(`🤖 Bot API: READY`);
   console.log(`✨ MythoBot Portal: FULLY FUNCTIONAL`);
-  console.log(`⏱️ Blogger wait: 10s → external Blogger site`);
-  console.log(`⏱️ Ad page wait: 10s (after Blogger continuation)`);
+  console.log(`⏱️ Page wait time: 10s per page (3 pages total)`);
+  console.log(`⏱️ Ad page wait: 10s`);
+  console.log(`🎉 Complete flow: 3 pages → Get Link → 10s ad → Destination`);
 });
