@@ -324,12 +324,17 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     };
     
     if (useBlogger) {
-      responseData.data.primary_url = bloggerPageUrl;
-      responseData.data.blogger_page_url = bloggerPageUrl;
-      responseData.data.blogger_redirect_url = bloggerRedirectUrl;
+      // बस एक ही blogger URL use करें
+      responseData.data.primary_url = bloggerPostUrl;
+      responseData.data.blogger_redirect_url = bloggerPostUrl;
       responseData.data.short_url = shortUrl;
       responseData.data.direct_ad_url = directAdUrl;
-      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(bloggerRedirectUrl)}`;
+      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(bloggerPostUrl)}`;
+  
+      // Optional extra info
+      responseData.data.internal_url = bloggerRedirectUrl;  // For reference only
+      responseData.data.direct_blogger_url = bloggerRedirectUrl;  // For reference only
+  
     } else {
       responseData.data.primary_url = directAdUrl;
       responseData.data.short_url = directAdUrl;
