@@ -1,4 +1,4 @@
-// index.js - UPDATED (Blogger replaced with Server-side Pages: 3 pages → 10s each → Get Link)
+// index.js - FULL UPDATED CODE (Without Skip Buttons)
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
@@ -255,7 +255,7 @@ const ARTICLES = [
       
       <p class="text-sm text-gray-600">Platforms like Hotstar, SonyLIV, and YouTube are competing to bring the most authentic and visually stunning mythological stories to audiences worldwide.</p>
     `,
-    image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w-400&h=200&fit=crop",
+    image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400&h=200&fit=crop",
     tags: ["Digital", "Streaming", "YouTube", "Trends"]
   },
   {
@@ -490,10 +490,10 @@ app.get("/s/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 3. Page Flow System - NEW (3 pages → Get Link page)
+// 🔹 3. Page Flow System - WITHOUT SKIP BUTTONS
 app.get("/flow/:code", async (req, res) => {
   const { code } = req.params;
-  const { page = 1, skip } = req.query;
+  const { page = 1 } = req.query;
   
   try {
     const linkData = await adLinksCollection.findOne({ 
@@ -520,23 +520,6 @@ app.get("/flow/:code", async (req, res) => {
         </body>
         </html>
       `);
-    }
-    
-    if (skip === "true") {
-      await adLinksCollection.updateOne(
-        { flow_code: code },
-        { 
-          $push: {
-            page_logs: {
-              type: 'skipped',
-              timestamp: new Date(),
-              ip: req.ip
-            }
-          }
-        }
-      );
-      
-      return res.redirect(`/adgate/${linkData.short_id}`);
     }
     
     const currentPage = parseInt(page);
@@ -641,7 +624,7 @@ app.get("/flow/:code", async (req, res) => {
             <div class="mt-4 p-4 bg-gray-50 rounded-lg">
               <p class="text-sm text-gray-600">
                 <i class="fas fa-info-circle mr-2 text-blue-500"></i>
-                Reading time: ${waitTime} seconds. Continue to next page automatically.
+                Reading time: ${waitTime} seconds. Next page loads automatically.
               </p>
             </div>
           </div>
@@ -650,11 +633,16 @@ app.get("/flow/:code", async (req, res) => {
           <div class="mb-6">
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
               <div class="text-3xl font-bold text-blue-700 mb-2" id="countdown">${waitTime}</div>
-              <p class="text-blue-600">Seconds until next page...</p>
+              <p class="text-blue-600">Seconds until next page</p>
             </div>
           </div>
           
-          
+          <!-- Continue Button (Disabled until timer ends) -->
+          <button id="continueBtn" disabled
+            class="w-full py-3 bg-gray-200 text-gray-500 rounded-lg font-bold cursor-not-allowed">
+            <i class="fas fa-clock mr-2"></i>
+            Please Wait (<span id="btnTimer">${waitTime}</span>s)
+          </button>
           
           <!-- Footer -->
           <div class="mt-6 pt-4 border-t border-gray-200 text-center">
@@ -669,33 +657,43 @@ app.get("/flow/:code", async (req, res) => {
           const currentPage = ${currentPage};
           const totalPages = ${totalPages};
           const waitTime = ${waitTime};
-          const flowCode = "${code}";
-          let countdown = waitTime;
+          let timeLeft = waitTime;
           const countdownElement = document.getElementById('countdown');
+          const btnTimerElement = document.getElementById('btnTimer');
           const progressFill = document.getElementById('progressFill');
+          const continueBtn = document.getElementById('continueBtn');
           
           const timer = setInterval(() => {
-            countdown--;
-            countdownElement.textContent = countdown;
+            timeLeft--;
+            countdownElement.textContent = timeLeft;
+            btnTimerElement.textContent = timeLeft;
             
-            if (countdown <= 0) {
+            if (timeLeft <= 0) {
               clearInterval(timer);
-              goToNextPage();
+              continueBtn.disabled = false;
+              continueBtn.classList.remove('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
+              continueBtn.classList.add('bg-gradient-to-r', 'from-blue-500', 'to-purple-600', 'text-white', 'hover:from-blue-600', 'hover:to-purple-700', 'cursor-pointer');
+              continueBtn.innerHTML = '<i class="fas fa-forward mr-2"></i>Continue to Next Page';
+              
+              // Enable button click
+              continueBtn.onclick = function() {
+                if (currentPage >= totalPages) {
+                  window.location.href = "/flow/${code}/get-link";
+                } else {
+                  window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
+                }
+              };
             }
           }, 1000);
           
-          function goToNextPage() {
+          // Auto-redirect after wait time
+          setTimeout(function() {
             if (currentPage >= totalPages) {
-              window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
+              window.location.href = "/flow/${code}/get-link";
             } else {
               window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
             }
-          }
-          
-          
-          
-          // Auto-redirect after wait time
-          setTimeout(goToNextPage, waitTime * 1000);
+          }, waitTime * 1000);
         </script>
       </body>
       </html>
@@ -707,7 +705,7 @@ app.get("/flow/:code", async (req, res) => {
   }
 });
 
-// 🔹 4. Get Link Page (After all pages) - NEW
+// 🔹 4. Get Link Page (After all pages)
 async function renderGetLinkPage(res, code, linkData) {
   const shortId = linkData.short_id;
   
@@ -840,19 +838,6 @@ async function renderGetLinkPage(res, code, linkData) {
           </p>
         </div>
         
-        <!-- Additional Options -->
-        <div class="space-y-3">
-          <a href="/dashboard/${linkData.creator_id}" 
-            class="block py-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-all">
-            <i class="fas fa-chart-line mr-2"></i>View Your Dashboard
-          </a>
-          
-          <a href="/" 
-            class="block py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-all">
-            <i class="fas fa-home mr-2"></i>Return to Home
-          </a>
-        </div>
-        
         <!-- Footer -->
         <div class="mt-8 pt-6 border-t border-gray-200">
           <p class="text-xs text-gray-500">
@@ -902,7 +887,7 @@ app.get("/flow/:code/get-link", async (req, res) => {
   }
 });
 
-// 🔹 5. Ad Gateway (default wait 10s) - UNCHANGED
+// 🔹 5. Ad Gateway (default wait 10s)
 app.get("/adgate/:shortId", async (req, res) => {
   const { shortId } = req.params;
   const { ref } = req.query;
@@ -984,7 +969,7 @@ app.get("/adgate/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 6. Direct Route - UNCHANGED
+// 🔹 6. Direct Route
 app.get("/d/:shortId", async (req, res) => {
   const { shortId } = req.params;
   
@@ -1359,7 +1344,7 @@ function renderBannerAdPage(res, shortId, targetUrl, isFirstVisit) {
 }
 
 // ========================
-// CLICK TRACKING - UNCHANGED
+// CLICK TRACKING
 // ========================
 
 app.post("/api/v1/click/:shortId", async (req, res) => {
@@ -1418,7 +1403,7 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
 });
 
 // ========================
-// EXISTING ROUTES (all original) - UNCHANGED
+// EXISTING ROUTES (all original)
 // ========================
 
 app.get("/link/:hex", (req, res) => {
@@ -2433,7 +2418,7 @@ ${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${p
 });
 
 // ========================
-// HOME PAGE - UNCHANGED
+// HOME PAGE
 // ========================
 
 app.get("/", (req, res) => {
@@ -2570,7 +2555,7 @@ app.get("/", (req, res) => {
   `);
 });
 
-// 🔹 Radhe Radhe Game Page - UNCHANGED
+// 🔹 Radhe Radhe Game Page
 app.get("/radhe", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -2807,7 +2792,7 @@ app.get("/dashboard/:userId", async (req, res) => {
 });
 
 // ========================
-// ERROR HANDLING - UNCHANGED
+// ERROR HANDLING
 // ========================
 
 app.use((req, res) => {
@@ -2874,5 +2859,6 @@ app.listen(PORT, () => {
   console.log(`✨ MythoBot Portal: FULLY FUNCTIONAL`);
   console.log(`⏱️ Page wait time: 10s per page (3 pages total)`);
   console.log(`⏱️ Ad page wait: 10s`);
+  console.log(`🚫 Skip buttons: REMOVED - Users must wait full time`);
   console.log(`🎉 Complete flow: 3 pages → Get Link → 10s ad → Destination`);
 });
