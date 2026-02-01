@@ -262,6 +262,7 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     
     const shortUrl = `https://${req.hostname}/s/${shortId}`;
     const bloggerRedirectUrl = `https://${req.hostname}/blogger/${bloggerCode}`;
+    const bloggerPageUrl = `${blogger_url}?target=${encodeURIComponent(bloggerRedirectUrl)}&code=${bloggerCode}&ref=${user_id}`;
     const directAdUrl = `https://${req.hostname}/adgate/${shortId}`;
     
     const adConfig = {
