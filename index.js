@@ -254,6 +254,281 @@ app.get("/api/v1/blogger/shorten", authenticateAPI, async (req, res) => {
   }
 });
 
+// Add this after other routes but before app.listen()
+
+// 🔹 Generate Your Own API Key
+app.get("/generate-api-key", (req, res) => {
+  const { user_id } = req.query;
+  
+  if (!user_id) {
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Generate API Key</title>
+        <style>
+          body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
+          .form-group { margin: 15px 0; }
+          label { display: block; margin-bottom: 5px; font-weight: bold; }
+          input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+          button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+          .api-key { background: #f4f4f4; padding: 15px; border-radius: 5px; font-family: monospace; margin: 15px 0; }
+        </style>
+      </head>
+      <body>
+        <h1>🔑 Generate API Key</h1>
+        <form method="GET" action="/create-api-key">
+          <div class="form-group">
+            <label for="user_id">Your User ID:</label>
+            <input type="number" id="user_id" name="user_id" required placeholder="5189870730">
+          </div>
+          <div class="form-group">
+            <label for="email">Email (optional):</label>
+            <input type="email" id="email" name="email" placeholder="your@email.com">
+          </div>
+          <button type="submit">Generate API Key</button>
+        </form>
+      </body>
+      </html>
+    `);
+  }
+  
+  // Generate API key
+  const apiKey = crypto.randomBytes(32).toString('hex');
+  
+  // Store in database
+  const apiKeysCollection = client.db("mythobot").collection("api_keys");
+  apiKeysCollection.insertOne({
+    api_key: apiKey,
+    user_id: parseInt(user_id),
+    created_at: new Date(),
+    is_active: true,
+    requests: 0
+  });
+  
+  // Also add to environment variable (temporary)
+  API_KEYS.add(apiKey);
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>API Key Generated</title>
+      <style>
+        body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
+        .success { color: green; font-size: 24px; }
+        .api-key { background: #f4f4f4; padding: 15px; border-radius: 5px; font-family: monospace; margin: 15px 0; word-break: break-all; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 15px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="success">✅ API Key Generated Successfully!</div>
+      
+      <h2>Your API Key:</h2>
+      <div class="api-key">${apiKey}</div>
+      
+      <div class="warning">
+        ⚠️ <strong>Important:</strong> Save this key now! It won't be shown again.
+      </div>
+      
+      <h3>Usage Examples:</h3>
+      <pre>
+https://your-domain.com/api/v1/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}
+
+https://your-domain.com/api/v1/blogger/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}&blogger_url=https://your-blog.com
+      </pre>
+      
+      <a href="/dashboard/${user_id}">Go to Dashboard</a>
+    </body>
+    </html>
+  `);
+});
+
+// 🔹 Create API Key Endpoint
+app.get("/create-api-key", async (req, res) => {
+  const { user_id, email } = req.query;
+  
+  if (!user_id) {
+    return res.redirect("/generate-api-key");
+  }
+  
+  // Generate API key
+  const apiKey = `mythobot_${crypto.randomBytes(16).toString('hex')}`;
+  
+  // Store in database
+  const apiKeysCollection = client.db("mythobot").collection("api_keys");
+  await apiKeysCollection.insertOne({
+    api_key: apiKey,
+    user_id: parseInt(user_id),
+    email: email || null,
+    created_at: new Date(),
+    is_active: true,
+    requests: 0,
+    last_used: null
+  });
+  
+  // Add to current session
+  API_KEYS.add(apiKey);
+  
+  // Send to Telegram bot if configured
+  if (TELEGRAM_ADMIN_CHAT_ID) {
+    const message = `
+🔑 <b>NEW API KEY GENERATED</b>
+
+👤 <b>User ID:</b> <code>${user_id}</code>
+📧 <b>Email:</b> ${email || 'Not provided'}
+🕒 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+🔑 <b>Key:</b> <code>${apiKey.substring(0, 20)}...</code>
+
+⚠️ <i>Stored in database</i>
+    `;
+    
+    await sendTelegramNotification(message);
+  }
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>API Key Created</title>
+      <style>
+        body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .key-box { 
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+          color: white; 
+          padding: 20px; 
+          border-radius: 10px; 
+          margin: 20px 0;
+          font-family: monospace;
+          word-break: break-all;
+        }
+        .example { 
+          background: #f8f9fa; 
+          padding: 15px; 
+          border-radius: 5px; 
+          margin: 15px 0;
+          overflow-x: auto;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>🎉 API Key Created Successfully!</h1>
+      
+      <div class="key-box">
+        <strong>Your API Key:</strong><br>
+        ${apiKey}
+      </div>
+      
+      <h2>📋 How to Use:</h2>
+      
+      <h3>1. Create Regular Short Link:</h3>
+      <div class="example">
+        <code>
+https://${req.hostname}/api/v1/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}
+        </code>
+      </div>
+      
+      <h3>2. Create Blogger Short Link:</h3>
+      <div class="example">
+        <code>
+https://${req.hostname}/api/v1/blogger/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}&blogger_url=https://your-blog.com
+        </code>
+      </div>
+      
+      <h3>3. Test in Browser:</h3>
+      <p>Copy this URL and paste in browser:</p>
+      <div class="example">
+        <code>
+https://${req.hostname}/api/v1/shorten?api_key=${apiKey}&url=https://google.com&user_id=${user_id}
+        </code>
+      </div>
+      
+      <div style="margin-top: 30px; padding: 15px; background: #d4edda; border-radius: 5px;">
+        <strong>✅ Key has been saved to database.</strong><br>
+        You can now use it with your bot or scripts.
+      </div>
+      
+      <div style="margin-top: 20px;">
+        <a href="/dashboard/${user_id}" style="display: inline-block; padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px;">
+          📊 Go to Dashboard
+        </a>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// 🔹 List Your API Keys
+app.get("/my-api-keys/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+  
+  const apiKeysCollection = client.db("mythobot").collection("api_keys");
+  const keys = await apiKeysCollection
+    .find({ user_id: parseInt(user_id) })
+    .sort({ created_at: -1 })
+    .toArray();
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>My API Keys</title>
+      <style>
+        body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; }
+        .key-cell { font-family: monospace; word-break: break-all; }
+        .active { color: green; }
+        .inactive { color: red; }
+      </style>
+    </head>
+    <body>
+      <h1>🔑 My API Keys</h1>
+      <p>User ID: ${user_id}</p>
+      
+      ${keys.length === 0 ? `
+        <p>No API keys found. <a href="/generate-api-key?user_id=${user_id}">Generate one now</a></p>
+      ` : `
+        <table>
+          <thead>
+            <tr>
+              <th>API Key</th>
+              <th>Created</th>
+              <th>Requests</th>
+              <th>Status</th>
+              <th>Last Used</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${keys.map(key => `
+              <tr>
+                <td class="key-cell">${key.api_key}</td>
+                <td>${new Date(key.created_at).toLocaleDateString()}</td>
+                <td>${key.requests || 0}</td>
+                <td class="${key.is_active ? 'active' : 'inactive'}">
+                  ${key.is_active ? '✅ Active' : '❌ Inactive'}
+                </td>
+                <td>${key.last_used ? new Date(key.last_used).toLocaleString() : 'Never'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+      
+      <div style="margin-top: 20px;">
+        <a href="/generate-api-key?user_id=${user_id}" style="display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px;">
+          🔑 Generate New Key
+        </a>
+        <a href="/dashboard/${user_id}" style="display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px;">
+          📊 Dashboard
+        </a>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
 // 🔹 2. Blogger Redirection Page
 app.get("/blogger/:code", async (req, res) => {
   const { code } = req.params;
