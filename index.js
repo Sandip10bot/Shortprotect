@@ -1,4 +1,4 @@
-// index.js
+// index.js - FULL UPDATED CODE (Integrated 10s Blogger wait → External Blogger → 10s Ad → Target)
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
@@ -21,12 +21,12 @@ const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 // API Authentication
 const API_KEYS = new Set(process.env.API_KEYS ? process.env.API_KEYS.split(',') : []);
 
-// Blogger Configuration
+// Blogger Configuration - UPDATED
 const BLOGGER_CONFIG = {
   enabled: process.env.BLOGGER_ENABLED === "true",
   default_blogger_url: process.env.DEFAULT_BLOGGER_URL || "https://mythobot.blogspot.com",
   default_title: "Content Loading... Please Wait",
-  default_delay: 3,
+  default_delay: 10, // 10-second wait before external Blogger
   skip_blogger: process.env.SKIP_BLOGGER === "true"
 };
 
@@ -49,9 +49,7 @@ async function connectDB() {
 
     console.log("✅ MongoDB connected");
 
-    // Try to create indexes, but don't crash if they fail
     try {
-      // Create short_id index
       await adLinksCollection.createIndex({ short_id: 1 }, { unique: true });
       console.log("✅ Created short_id index");
     } catch (err) {
@@ -59,7 +57,6 @@ async function connectDB() {
     }
 
     try {
-      // Create blogger_code index with sparse option to allow nulls
       await adLinksCollection.createIndex({ blogger_code: 1 }, { 
         unique: true, 
         sparse: true 
@@ -67,13 +64,8 @@ async function connectDB() {
       console.log("✅ Created blogger_code index (sparse)");
     } catch (err) {
       console.log("⚠️ blogger_code index already exists or failed:", err.message);
-      
-      // If index creation fails, drop it first
       try {
         await adLinksCollection.dropIndex("blogger_code_1");
-        console.log("✅ Dropped old blogger_code index");
-        
-        // Create new sparse index
         await adLinksCollection.createIndex({ blogger_code: 1 }, { 
           unique: true, 
           sparse: true 
@@ -85,7 +77,6 @@ async function connectDB() {
     }
 
     try {
-      // Create other indexes
       await adLinksCollection.createIndex({ creator_id: 1 });
       await adLinksCollection.createIndex({ created_at: -1 });
       console.log("✅ Created other indexes");
@@ -95,7 +86,6 @@ async function connectDB() {
 
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
-    // Don't exit - continue without indexes
     console.log("⚠️ Continuing without database indexes...");
   }
 }
@@ -225,7 +215,7 @@ function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
 // API ENDPOINTS
 // ========================
 
-// 🔹 1. Universal Blogger Short Link Creation
+// 🔹 1. Universal Blogger Short Link Creation (wait_time default = 10)
 app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
   const { 
     url, 
@@ -234,7 +224,7 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     blogger_title = BLOGGER_CONFIG.default_title,
     blogger_delay = BLOGGER_CONFIG.default_delay,
     ad_type = "timer",
-    wait_time = 5,
+    wait_time = 10,
     reward_type = "points",
     custom_alias,
     skip_blogger = "false"
@@ -374,7 +364,7 @@ ${useBlogger ? `🎯 <b>Direct URL:</b> ${directAdUrl}\n` : ''}
   }
 });
 
-// 🔹 2. Short URL Redirect (Auto-redirects to Blogger)
+// 🔹 2. Short URL Redirect
 app.get("/s/:shortId", async (req, res) => {
   const { shortId } = req.params;
   const { direct } = req.query;
@@ -429,7 +419,7 @@ app.get("/s/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 3. Blogger Redirection Page
+// 🔹 3. Blogger Redirection Page - FULLY UPDATED (10s wait → external blogger_url)
 app.get("/blogger/:code", async (req, res) => {
   const { code } = req.params;
   const { ref, source, skip } = req.query;
@@ -497,9 +487,10 @@ app.get("/blogger/:code", async (req, res) => {
     );
     
     const bloggerConfig = linkData.blogger_config || {};
-    const delay = bloggerConfig.delay || 3;
-    const title = bloggerConfig.title || "Redirecting...";
+    const delay = 10;
+    const title = bloggerConfig.title || "Redirecting to Blogger Site...";
     const bloggerUrl = linkData.blogger_url || BLOGGER_CONFIG.default_blogger_url;
+    const shortId = linkData.short_id;
     
     res.send(`
       <!DOCTYPE html>
@@ -538,7 +529,7 @@ app.get("/blogger/:code", async (req, res) => {
               <i class="fas fa-external-link-alt text-blue-500"></i>
             </div>
             <h1 class="text-2xl font-bold text-gray-800">${title}</h1>
-            <p class="text-gray-600 mt-2">You are being redirected to the content...</p>
+            <p class="text-gray-600 mt-2">You are being redirected to the Blogger site in <span id="countdown">${delay}</span> seconds...</p>
           </div>
           
           <div class="mb-6">
@@ -560,13 +551,13 @@ app.get("/blogger/:code", async (req, res) => {
           <div class="space-y-3">
             <button onclick="redirectNow()" 
               class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all">
-              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue Now
+              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue to Blogger Now
             </button>
             
             <a href="${bloggerUrl}" 
               target="_blank"
               class="inline-block w-full py-2 text-blue-600 hover:text-blue-800">
-              <i class="fas fa-external-link-alt mr-2"></i>Visit Blogger Page
+              <i class="fas fa-external-link-alt mr-2"></i>Open Blogger Page Directly
             </a>
             
             <button onclick="skipBlogger()" 
@@ -580,12 +571,16 @@ app.get("/blogger/:code", async (req, res) => {
               <i class="fas fa-shield-alt mr-1"></i>
               Secure redirect via MythoBot • Protected connection
             </p>
+            <p class="text-xs text-gray-500 mt-2">
+              After viewing the Blogger page, click the "Continue" link there to reach the 10-second ad page.
+            </p>
           </div>
         </div>
         
         <script>
           const delay = ${delay};
-          const shortId = "${linkData.short_id}";
+          const shortId = "${shortId}";
+          const bloggerUrl = "${bloggerUrl}";
           let countdown = delay;
           const countdownElement = document.getElementById('countdown');
           const progressFill = document.getElementById('progressFill');
@@ -597,29 +592,25 @@ app.get("/blogger/:code", async (req, res) => {
             
             if (countdown <= 0) {
               clearInterval(timer);
-              redirectToAd();
+              window.location.href = bloggerUrl;
             }
           }, 1000);
           
           function redirectNow() {
             clearInterval(timer);
-            redirectToAd();
-          }
-          
-          function redirectToAd() {
-            window.location.href = \`/adgate/\${shortId}\`;
+            window.location.href = bloggerUrl;
           }
           
           function skipBlogger() {
             document.cookie = "skip_blogger=true; max-age=2592000; path=/";
-            redirectToAd();
+            window.location.href = bloggerUrl;
           }
           
           if (document.cookie.includes("skip_blogger=true")) {
-            skipBlogger();
+            window.location.href = bloggerUrl;
           }
           
-          setTimeout(redirectToAd, delay * 1000);
+          setTimeout(() => { window.location.href = bloggerUrl; }, delay * 1000);
         </script>
       </body>
       </html>
@@ -631,7 +622,7 @@ app.get("/blogger/:code", async (req, res) => {
   }
 });
 
-// 🔹 4. Ad Gateway
+// 🔹 4. Ad Gateway (default wait 10s)
 app.get("/adgate/:shortId", async (req, res) => {
   const { shortId } = req.params;
   const { ref } = req.query;
@@ -691,7 +682,7 @@ app.get("/adgate/:shortId", async (req, res) => {
     );
     
     const adType = linkData.ad_config?.type || "timer";
-    const waitTime = linkData.ad_config?.wait_time || 5;
+    const waitTime = linkData.ad_config?.wait_time || 10;
     
     switch (adType) {
       case "timer":
@@ -713,7 +704,7 @@ app.get("/adgate/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 5. Direct Route (Skip blogger completely)
+// 🔹 5. Direct Route
 app.get("/d/:shortId", async (req, res) => {
   const { shortId } = req.params;
   
@@ -753,7 +744,7 @@ app.get("/d/:shortId", async (req, res) => {
 });
 
 // ========================
-// AD PAGE RENDER FUNCTIONS
+// AD PAGE RENDER FUNCTIONS (unchanged)
 // ========================
 
 function renderTimerAdPage(res, shortId, targetUrl, waitTime, isFirstVisit) {
@@ -1147,7 +1138,7 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
 });
 
 // ========================
-// EXISTING ROUTES (KEEP ALL YOUR FEATURES)
+// EXISTING ROUTES (all original)
 // ========================
 
 app.get("/link/:hex", (req, res) => {
@@ -2127,7 +2118,7 @@ app.get("/payment-status/:token", async (req, res) => {
     return res.json({ status: 'failed', message: 'Payment verification failed' });
   }
   
-  const isPaymentVerified = false; // You need to implement actual UPI verification
+  const isPaymentVerified = false; // Implement actual verification
   
   if (isPaymentVerified) {
     await paymentCollection.updateOne(
@@ -2576,7 +2567,6 @@ app.get("/dashboard/:userId", async (req, res) => {
 // ERROR HANDLING
 // ========================
 
-// 404 Error Handler
 app.use((req, res) => {
   res.status(404).send(`
     <!DOCTYPE html>
@@ -2602,7 +2592,6 @@ app.use((req, res) => {
   `);
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
   res.status(500).send(`
@@ -2639,4 +2628,6 @@ app.listen(PORT, () => {
   console.log(`🎯 All features: ACTIVE`);
   console.log(`🤖 Bot API: READY`);
   console.log(`✨ MythoBot Portal: FULLY FUNCTIONAL`);
+  console.log(`⏱️ Blogger wait: 10s → external Blogger site`);
+  console.log(`⏱️ Ad page wait: 10s (after Blogger continuation)`);
 });
