@@ -654,26 +654,7 @@ app.get("/flow/:code", async (req, res) => {
             </div>
           </div>
           
-          <!-- Action Buttons -->
-          <div class="space-y-3">
-            <button onclick="redirectNow()" 
-              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all flex items-center justify-center">
-              <i class="fas fa-forward mr-2"></i>
-              Skip Wait & Continue Now
-            </button>
-            
-            <div class="flex space-x-2">
-              <button onclick="skipAll()" 
-                class="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all">
-                <i class="fas fa-fast-forward mr-2"></i>Skip All Pages
-              </button>
-              
-              <a href="/adgate/${linkData.short_id}" 
-                class="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all text-center">
-                <i class="fas fa-ads mr-2"></i>Go Direct to Ad
-              </a>
-            </div>
-          </div>
+          
           
           <!-- Footer -->
           <div class="mt-6 pt-4 border-t border-gray-200 text-center">
@@ -711,15 +692,7 @@ app.get("/flow/:code", async (req, res) => {
             }
           }
           
-          function redirectNow() {
-            clearInterval(timer);
-            goToNextPage();
-          }
           
-          function skipAll() {
-            clearInterval(timer);
-            window.location.href = "/flow/${code}/get-link";
-          }
           
           // Auto-redirect after wait time
           setTimeout(goToNextPage, waitTime * 1000);
