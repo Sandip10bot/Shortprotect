@@ -324,7 +324,8 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     };
     
     if (useBlogger) {
-      responseData.data.primary_url = bloggerRedirectUrl;
+      responseData.data.primary_url = bloggerPageUrl;
+      responseData.data.blogger_page_url = bloggerPageUrl;
       responseData.data.blogger_redirect_url = bloggerRedirectUrl;
       responseData.data.short_url = shortUrl;
       responseData.data.direct_ad_url = directAdUrl;
