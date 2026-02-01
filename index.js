@@ -496,7 +496,9 @@ app.get("/blogger/:code", async (req, res) => {
     const bloggerConfig = linkData.blogger_config || {};
     const delay = 10;
     const title = bloggerConfig.title || "Redirecting to Blogger Site...";
-    const bloggerUrl = linkData.blogger_url || BLOGGER_CONFIG.default_blogger_url;
+    // FIXED VERSION - Add target parameter
+    const adgateUrl = `https://${req.hostname}/adgate/${shortId}`;
+    const bloggerUrl = `${linkData.blogger_url || BLOGGER_CONFIG.default_blogger_url}?target=${encodeURIComponent(adgateUrl)}&code=${code}&ref=${linkData.creator_id || user_id}`;
     const shortId = linkData.short_id;
     
     res.send(`
