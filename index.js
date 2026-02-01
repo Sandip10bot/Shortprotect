@@ -18,12 +18,15 @@ if (!MONGO_URI) {
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
+// API Authentication
+const API_KEYS = new Set(process.env.API_KEYS ? process.env.API_KEYS.split(',') : []);
+
 const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
 let downloadsCollection;
 let maskCollection;
-
+let adLinksCollection;
 
 async function connectDB() {
   await client.connect();
@@ -32,25 +35,39 @@ async function connectDB() {
   urlShortenerCollection = db.collection("url_shortener");
   downloadsCollection = db.collection("youtube_downloads");
   maskCollection = db.collection("masked_links");
+  adLinksCollection = db.collection("ad_links");
 
   console.log("✅ MongoDB connected");
-  
 }
 
 connectDB();
+
+// ========================
+// API Authentication Middleware
+// ========================
+function authenticateAPI(req, res, next) {
+  const apiKey = req.headers['x-api-key'] || req.query.api_key;
+  
+  if (!apiKey || !API_KEYS.has(apiKey)) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or missing API key"
+    });
+  }
+  
+  next();
+}
 
 // Simple Base62 Encoding/Decoding functions
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function base62_encode(data) {
     try {
-        // Convert string to bytes
         const buffer = Buffer.from(data, 'utf-8');
         const hex = buffer.toString('hex');
         let num = BigInt('0x' + hex);
         let encoded = '';
         
-        // Handle zero case
         if (num === 0n) {
             return '0';
         }
@@ -64,7 +81,6 @@ function base62_encode(data) {
         return encoded;
     } catch (error) {
         console.error("Base62 encode error:", error);
-        // Fallback to URL-safe base64
         return Buffer.from(data, 'utf-8')
             .toString('base64')
             .replace(/\+/g, '-')
@@ -86,9 +102,7 @@ function base62_decode(encoded) {
             num = num * 62n + BigInt(value);
         }
         
-        // Convert BigInt to hex string
         let hex = num.toString(16);
-        // Ensure even length for Buffer
         if (hex.length % 2 !== 0) {
             hex = '0' + hex;
         }
@@ -97,7 +111,6 @@ function base62_decode(encoded) {
         return buffer.toString('utf-8');
     } catch (error) {
         console.error("Base62 decode error:", error);
-        // Fallback to URL-safe base64 decode
         let padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
         const padding = 4 - (padded.length % 4);
         if (padding !== 4) {
@@ -107,112 +120,7 @@ function base62_decode(encoded) {
     }
 }
 
-app.get("/link/:hex", (req, res) => {
-  const { hex } = req.params;
-  
-  try {
-    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
-    new URL(targetUrl);
-    
-    // 🔥 TRICK: Open about:blank first, then change URL
-    res.redirect(302, targetUrl);
-
-    
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
-  }
-});
-
-
-app.get("/mask/:encodedUrl", async (req, res) => {
-  const { encodedUrl } = req.params;
-  
-  try {
-    let targetUrl;
-    try {
-      const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
-      targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
-      if (!targetUrl.includes('://')) throw new Error('Not a URL');
-    } catch (e) {
-      targetUrl = base62_decode(encodedUrl);
-    }
-    
-    new URL(targetUrl);
-    
-    // Optional: Log without blocking
-    try {
-      const maskedCollection = client.db("mythobot").collection("masked_links");
-      maskedCollection.insertOne({
-        encoded: encodedUrl,
-        target: targetUrl,
-        clicked_at: new Date(),
-        ip: req.ip
-      });
-    } catch(e) {}
-    
-    // 🔥 SAME TRICK: about:blank then redirect
-    res.redirect(302, targetUrl);
-
-    
-  } catch (error) {
-    res.send(`
-      <script>
-        alert("Invalid link!");
-        window.location.href = "https://t.me/MythoSerialBot";
-      </script>
-    `);
-  }
-});
-
-// 🔹 Simple API to generate masked URLs (for Python bot)
-app.get("/api/mask", (req, res) => {
-  const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ error: "Missing url parameter" });
-  }
-  
-  try {
-    new URL(url); // Validate URL
-    
-    // Encode the URL using base62
-    const encodedUrl = base62_encode(url);
-    
-    // Create masked URL
-    const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
-    
-    res.json({
-      success: true,
-      original_url: url,
-      masked_url: maskedUrl,
-      encoded: encodedUrl
-    });
-    
-  } catch (error) {
-    res.status(400).json({ error: "Invalid URL format" });
-  }
-});
-
-
-// 🔹 Test Telegram Notification
-app.get("/test-notification", async (req, res) => {
-  const testMessage = `
-🔔 <b>TEST NOTIFICATION</b>
-
-👤 <b>User ID:</b> <code>5189870730</code>
-📦 <b>Plan:</b> silver
-💵 <b>Amount:</b> ₹55
-🎯 <b>MythoPoints Discount:</b> ₹24 (30% off)
-⏰ <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-
-✅ <b>Status:</b> Test Successful!
-  `;
-  
-  await sendTelegramNotification(testMessage);
-  res.send('✅ Test notification sent! Check your Telegram.');
-});
-
-// 🔹 Send Telegram Notification
+// 🔹 Telegram Notification Function
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
     console.log("🔔 Telegram notification (simulated):", message);
@@ -245,16 +153,1321 @@ async function sendTelegramNotification(message) {
   }
 }
 
-// 🔹 Calculate discounted price with MythoPoints
+// ========================
+// BLOGGER REDIRECTION SYSTEM
+// ========================
+
+// 🔹 1. Create Blogger-Friendly Short Link API
+app.get("/api/v1/blogger/shorten", authenticateAPI, async (req, res) => {
+  const { 
+    url, 
+    user_id, 
+    blogger_url,
+    blogger_title = "Click to Continue",
+    blogger_delay = 3,
+    ad_type = "timer",
+    wait_time = 5,
+    reward_type = "points"
+  } = req.query;
+  
+  // Required parameters validation
+  if (!url || !user_id || !blogger_url) {
+    return res.json({
+      success: false,
+      error: "Missing required parameters: url, user_id, blogger_url"
+    });
+  }
+  
+  try {
+    // Validate URLs
+    new URL(url);
+    new URL(blogger_url);
+    
+    // Generate unique IDs
+    const shortId = crypto.randomBytes(4).toString("hex");
+    const bloggerCode = crypto.randomBytes(3).toString("hex");
+    
+    // Ad configuration
+    const adConfig = {
+      type: ad_type,
+      wait_time: parseInt(wait_time),
+      reward_type: reward_type,
+      earnings_per_click: 0.001,
+      blogger: {
+        url: blogger_url,
+        title: blogger_title,
+        delay: parseInt(blogger_delay)
+      }
+    };
+    
+    // Create URLs
+    const shortUrl = `https://${req.hostname}/s/${shortId}`;
+    const bloggerRedirectUrl = `https://${req.hostname}/blogger/${bloggerCode}`;
+    const directUrl = `https://${req.hostname}/adgate/${shortId}`;
+    
+    // Store in database
+    await adLinksCollection.insertOne({
+      short_id: shortId,
+      blogger_code: bloggerCode,
+      creator_id: parseInt(user_id),
+      target_url: url,
+      blogger_url: blogger_url,
+      ad_config: adConfig,
+      created_at: new Date(),
+      clicks: 0,
+      blogger_clicks: 0,
+      earnings: 0,
+      status: "active",
+      access_logs: [],
+      blogger_logs: [],
+      metadata: {
+        created_via: "blogger_api",
+        blogger_title: blogger_title,
+        blogger_delay: blogger_delay
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        short_id: shortId,
+        blogger_code: bloggerCode,
+        short_url: shortUrl,
+        blogger_redirect_url: bloggerRedirectUrl,
+        direct_ad_url: directUrl,
+        blogger_config: adConfig.blogger,
+        ad_config: adConfig,
+        user_id: parseInt(user_id),
+        created_at: new Date().toISOString(),
+        stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
+        blogger_stats_url: `https://${req.hostname}/api/v1/blogger/stats/${bloggerCode}?api_key=${req.query.api_key}`
+      },
+      message: "Blogger short link created successfully"
+    });
+    
+  } catch (error) {
+    console.error("Blogger API shorten error:", error);
+    res.json({
+      success: false,
+      error: error.code === 'ERR_INVALID_URL' ? 'Invalid URL format' : 'Internal server error'
+    });
+  }
+});
+
+// 🔹 2. Blogger Redirection Page
+app.get("/blogger/:code", async (req, res) => {
+  const { code } = req.params;
+  const { ref, source } = req.query;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      blogger_code: code,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Link Not Found</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .container { max-width: 600px; margin: 0 auto; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Link Not Found</h1>
+            <p>This blogger redirection link has expired or doesn't exist.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Track blogger visit
+    await adLinksCollection.updateOne(
+      { blogger_code: code },
+      { 
+        $inc: { blogger_clicks: 1 },
+        $push: {
+          blogger_logs: {
+            type: 'visit',
+            timestamp: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            referer: req.get("referer"),
+            ref: ref || null,
+            source: source || null
+          }
+        }
+      }
+    );
+    
+    // Blogger page configuration
+    const bloggerConfig = linkData.ad_config?.blogger || {};
+    const delay = bloggerConfig.delay || 3;
+    const title = bloggerConfig.title || "Redirecting...";
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+        <style>
+          .pulse {
+            animation: pulse 2s infinite;
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+          }
+        </style>
+      </head>
+      <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full text-center">
+          <div class="mb-6">
+            <div class="text-5xl mb-4 pulse">
+              <i class="fas fa-external-link-alt text-blue-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800">${title}</h1>
+            <p class="text-gray-600 mt-2">You are being redirected to the content...</p>
+          </div>
+          
+          <div class="mb-6">
+            <div class="flex items-center justify-center mb-4">
+              <div class="w-full bg-gray-200 rounded-full h-2.5">
+                <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500">
+              Redirecting in <span id="countdown">${delay}</span> seconds...
+            </p>
+          </div>
+          
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-center text-blue-800">
+              <i class="fas fa-shield-alt mr-2"></i>
+              <span class="text-sm">Secure Connection • Safe Redirect</span>
+            </div>
+          </div>
+          
+          <div class="space-y-3">
+            <button onclick="redirectNow()" 
+              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all">
+              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue Now
+            </button>
+            
+            <a href="${linkData.blogger_url}" 
+              target="_blank"
+              class="inline-block w-full py-2 text-blue-600 hover:text-blue-800">
+              <i class="fas fa-external-link-alt mr-2"></i>Visit Blogger Page Instead
+            </a>
+          </div>
+        </div>
+        
+        <script>
+          const delay = ${delay};
+          const shortUrl = "https://${req.hostname}/s/${linkData.short_id}";
+          let countdown = delay;
+          const countdownElement = document.getElementById('countdown');
+          const progressBar = document.getElementById('progressBar');
+          
+          const timer = setInterval(() => {
+            countdown--;
+            countdownElement.textContent = countdown;
+            progressBar.style.width = \`\${((delay - countdown) / delay) * 100}%\`;
+            
+            if (countdown <= 0) {
+              clearInterval(timer);
+              window.location.href = shortUrl;
+            }
+          }, 1000);
+          
+          function redirectNow() {
+            clearInterval(timer);
+            window.location.href = shortUrl;
+          }
+          
+          // Auto-redirect
+          setTimeout(redirectNow, delay * 1000);
+        </script>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error("Blogger redirect error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// 🔹 3. Blogger Link Statistics API
+app.get("/api/v1/blogger/stats/:bloggerCode", authenticateAPI, async (req, res) => {
+  const { bloggerCode } = req.params;
+  const { user_id } = req.query;
+  
+  try {
+    const query = { blogger_code: bloggerCode };
+    if (user_id) {
+      query.creator_id = parseInt(user_id);
+    }
+    
+    const linkData = await adLinksCollection.findOne(query);
+    
+    if (!linkData) {
+      return res.json({
+        success: false,
+        error: "Blogger link not found or access denied"
+      });
+    }
+    
+    // Calculate stats
+    const totalBloggerClicks = linkData.blogger_clicks || 0;
+    const totalAdClicks = linkData.clicks || 0;
+    const conversionRate = totalBloggerClicks > 0 
+      ? ((totalAdClicks / totalBloggerClicks) * 100).toFixed(2) 
+      : 0;
+    
+    res.json({
+      success: true,
+      data: {
+        blogger_code: bloggerCode,
+        short_id: linkData.short_id,
+        blogger_url: linkData.blogger_url,
+        target_url: linkData.target_url,
+        created_at: linkData.created_at,
+        total_blogger_clicks: totalBloggerClicks,
+        total_ad_clicks: totalAdClicks,
+        conversion_rate: `${conversionRate}%`,
+        earnings: parseFloat((linkData.earnings || 0).toFixed(3)),
+        blogger_config: linkData.ad_config?.blogger,
+        blogger_logs: linkData.blogger_logs?.slice(0, 20) || [],
+        short_url: `https://${req.hostname}/s/${linkData.short_id}`,
+        blogger_redirect_url: `https://${req.hostname}/blogger/${bloggerCode}`
+      }
+    });
+    
+  } catch (error) {
+    console.error("Blogger stats error:", error);
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// ========================
+// BOT API ENDPOINTS
+// ========================
+
+// 🔹 1. Generate Ad Short Link API (for bot)
+app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
+  const { 
+    url, 
+    user_id, 
+    ad_type = "timer",
+    wait_time = 5,
+    reward_type = "points",
+    custom_alias,
+    campaign_name,
+    title,
+    description
+  } = req.query;
+  
+  if (!url || !user_id) {
+    return res.json({
+      success: false,
+      error: "Missing required parameters: url and user_id"
+    });
+  }
+  
+  try {
+    new URL(url);
+    
+    let shortId;
+    if (custom_alias && /^[a-zA-Z0-9_-]{3,20}$/.test(custom_alias)) {
+      const existing = await adLinksCollection.findOne({ 
+        short_id: custom_alias 
+      });
+      
+      if (existing) {
+        return res.json({
+          success: false,
+          error: "Custom alias already exists"
+        });
+      }
+      shortId = custom_alias;
+    } else {
+      shortId = crypto.randomBytes(4).toString("hex");
+    }
+    
+    const adConfig = {
+      type: ad_type,
+      wait_time: parseInt(wait_time),
+      reward_type: reward_type,
+      earnings_per_click: 0.001,
+      campaign: campaign_name || null,
+      title: title || null,
+      description: description || null
+    };
+    
+    const shortUrl = `https://${req.hostname}/s/${shortId}`;
+    const directUrl = `https://${req.hostname}/adgate/${shortId}`;
+    const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shortUrl)}`;
+    
+    await adLinksCollection.insertOne({
+      short_id: shortId,
+      creator_id: parseInt(user_id),
+      target_url: url,
+      ad_config: adConfig,
+      custom_alias: custom_alias || null,
+      created_at: new Date(),
+      clicks: 0,
+      views: 0,
+      earnings: 0,
+      status: "active",
+      total_earnings: 0,
+      today_clicks: 0,
+      access_logs: [],
+      metadata: {
+        user_agent: req.get("user-agent"),
+        ip: req.ip,
+        created_via: "api",
+        api_key: req.query.api_key
+      }
+    });
+    
+    if (TELEGRAM_ADMIN_CHAT_ID && process.env.NOTIFY_NEW_LINKS === "true") {
+      const notification = `
+🔗 <b>New Short Link Created via API</b>
+
+👤 <b>User ID:</b> <code>${user_id}</code>
+📝 <b>Short ID:</b> <code>${shortId}</code>
+🎯 <b>Ad Type:</b> ${ad_type}
+⏱️ <b>Wait Time:</b> ${wait_time}s
+💰 <b>Reward Type:</b> ${reward_type}
+
+🔗 <b>Short URL:</b> ${shortUrl}
+🎯 <b>Target URL:</b> ${url.substring(0, 50)}...
+
+📊 <b>Stats:</b> <a href="https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}">View Stats</a>
+      `;
+      
+      await sendTelegramNotification(notification);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        short_id: shortId,
+        short_url: shortUrl,
+        direct_url: directUrl,
+        telegram_share_url: telegramUrl,
+        qr_code: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shortUrl)}`,
+        ad_config: adConfig,
+        user_id: parseInt(user_id),
+        created_at: new Date().toISOString(),
+        stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
+        delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`,
+        preview_url: `https://${req.hostname}/api/v1/preview/${shortId}`
+      },
+      message: "Short link created successfully"
+    });
+    
+  } catch (error) {
+    console.error("API shorten error:", error);
+    res.json({
+      success: false,
+      error: error.code === 'ERR_INVALID_URL' ? 'Invalid URL format' : 'Internal server error'
+    });
+  }
+});
+
+// 🔹 2. Get Link Statistics API
+app.get("/api/v1/stats/:shortId", authenticateAPI, async (req, res) => {
+  const { shortId } = req.params;
+  const { user_id, days = 7 } = req.query;
+  
+  try {
+    const query = { short_id: shortId };
+    if (user_id) {
+      query.creator_id = parseInt(user_id);
+    }
+    
+    const linkData = await adLinksCollection.findOne(query);
+    
+    if (!linkData) {
+      return res.json({
+        success: false,
+        error: "Link not found or access denied"
+      });
+    }
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayClicks = linkData.access_logs?.filter(log => 
+      log.type === 'click' && new Date(log.timestamp) >= today
+    ).length || 0;
+    
+    const earningsByDay = {};
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
+    for (let i = 0; i < parseInt(days); i++) {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + i);
+      const dateStr = date.toISOString().split('T')[0];
+      earningsByDay[dateStr] = 0;
+    }
+    
+    if (linkData.access_logs) {
+      linkData.access_logs.forEach(log => {
+        if (log.earned) {
+          const logDate = new Date(log.timestamp).toISOString().split('T')[0];
+          if (earningsByDay[logDate] !== undefined) {
+            earningsByDay[logDate] += 0.001;
+          }
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        short_id: shortId,
+        target_url: linkData.target_url,
+        created_at: linkData.created_at,
+        total_clicks: linkData.clicks || 0,
+        total_views: linkData.views || 0,
+        total_earnings: parseFloat((linkData.earnings || 0).toFixed(3)),
+        today_clicks: todayClicks,
+        today_earnings: parseFloat((todayClicks * 0.001).toFixed(3)),
+        ad_config: linkData.ad_config,
+        status: linkData.status,
+        earnings_by_day: earningsByDay,
+        blogger_clicks: linkData.blogger_clicks || 0,
+        blogger_url: linkData.blogger_url || null,
+        recent_clicks: linkData.access_logs?.slice(0, 10).map(log => ({
+          timestamp: log.timestamp,
+          ip: log.ip,
+          earned: log.earned,
+          user_agent: log.user_agent
+        })) || []
+      }
+    });
+    
+  } catch (error) {
+    console.error("Stats error:", error);
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// 🔹 3. Delete Link API
+app.delete("/api/v1/delete/:shortId", authenticateAPI, async (req, res) => {
+  const { shortId } = req.params;
+  const { user_id } = req.query;
+  
+  try {
+    const query = { short_id: shortId };
+    if (user_id) {
+      query.creator_id = parseInt(user_id);
+    }
+    
+    const result = await adLinksCollection.deleteOne(query);
+    
+    if (result.deletedCount === 0) {
+      return res.json({
+        success: false,
+        error: "Link not found or access denied"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Link deleted successfully"
+    });
+    
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// 🔹 4. List User Links API
+app.get("/api/v1/user/:userId/links", authenticateAPI, async (req, res) => {
+  const { userId } = req.params;
+  const { page = 1, limit = 20, status = "active" } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  
+  try {
+    const query = { creator_id: parseInt(userId) };
+    if (status !== "all") {
+      query.status = status;
+    }
+    
+    const links = await adLinksCollection
+      .find(query)
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+    
+    const total = await adLinksCollection.countDocuments(query);
+    
+    const formattedLinks = links.map(link => ({
+      short_id: link.short_id,
+      blogger_code: link.blogger_code,
+      short_url: `https://${req.hostname}/s/${link.short_id}`,
+      blogger_url: link.blogger_url ? `https://${req.hostname}/blogger/${link.blogger_code}` : null,
+      target_url: link.target_url,
+      created_at: link.created_at,
+      clicks: link.clicks || 0,
+      blogger_clicks: link.blogger_clicks || 0,
+      earnings: parseFloat((link.earnings || 0).toFixed(3)),
+      ad_type: link.ad_config?.type,
+      status: link.status,
+      custom_alias: link.custom_alias
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        links: formattedLinks,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error("User links error:", error);
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// 🔹 5. Get User Earnings Summary
+app.get("/api/v1/user/:userId/earnings", authenticateAPI, async (req, res) => {
+  const { userId } = req.params;
+  
+  try {
+    const links = await adLinksCollection.find({ 
+      creator_id: parseInt(userId) 
+    }).toArray();
+    
+    const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
+    const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
+    const totalBloggerClicks = links.reduce((sum, link) => sum + (link.blogger_clicks || 0), 0);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let todayEarnings = 0;
+    let todayClicks = 0;
+    
+    links.forEach(link => {
+      if (link.access_logs) {
+        link.access_logs.forEach(log => {
+          if (log.type === 'click' && new Date(log.timestamp) >= today) {
+            todayClicks++;
+            if (log.earned) {
+              todayEarnings += 0.001;
+            }
+          }
+        });
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        user_id: parseInt(userId),
+        total_links: links.length,
+        total_clicks: totalClicks,
+        total_blogger_clicks: totalBloggerClicks,
+        total_earnings: parseFloat(totalEarnings.toFixed(3)),
+        today_clicks: todayClicks,
+        today_earnings: parseFloat(todayEarnings.toFixed(3)),
+        average_cpc: totalClicks > 0 ? parseFloat((totalEarnings / totalClicks).toFixed(3)) : 0,
+        links_summary: links.map(link => ({
+          short_id: link.short_id,
+          clicks: link.clicks || 0,
+          blogger_clicks: link.blogger_clicks || 0,
+          earnings: parseFloat((link.earnings || 0).toFixed(3)),
+          status: link.status,
+          created_at: link.created_at
+        }))
+      }
+    });
+    
+  } catch (error) {
+    console.error("Earnings error:", error);
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// ========================
+// AD LINKFLY SYSTEM
+// ========================
+
+// 🔹 Short URL Redirect
+app.get("/s/:shortId", async (req, res) => {
+  const { shortId } = req.params;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      short_id: shortId,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Link Not Found - MythoBot</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+            .container { max-width: 600px; margin: 0 auto; }
+            .error { color: #dc3545; font-size: 48px; margin: 20px 0; }
+            .btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="error">🔗❌</div>
+            <h1>Short Link Not Found</h1>
+            <p>The requested link doesn't exist or has been disabled.</p>
+            <a href="/" class="btn">Return to Home</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Increment view count
+    await adLinksCollection.updateOne(
+      { short_id: shortId },
+      { $inc: { views: 1 } }
+    );
+    
+    // Redirect to ad gateway
+    res.redirect(`/adgate/${shortId}`);
+    
+  } catch (error) {
+    res.status(500).send("Internal server error");
+  }
+});
+
+// 🔹 Ad Gateway
+app.get("/adgate/:shortId", async (req, res) => {
+  const { shortId } = req.params;
+  const { ref } = req.query;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      short_id: shortId,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send("Link not found or disabled");
+    }
+    
+    // Check if user has already visited today
+    const userIP = req.ip;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const existingVisit = await adLinksCollection.findOne({
+      short_id: shortId,
+      "access_logs.ip": userIP,
+      "access_logs.timestamp": { $gte: today }
+    });
+    
+    const isFirstVisitToday = !existingVisit;
+    
+    // Store referral if present
+    if (ref) {
+      await adLinksCollection.updateOne(
+        { short_id: shortId },
+        { 
+          $addToSet: { referrals: ref },
+          $push: {
+            access_logs: {
+              type: 'referral',
+              timestamp: new Date(),
+              ip: userIP,
+              referrer: ref
+            }
+          }
+        }
+      );
+    }
+    
+    // Track view
+    await adLinksCollection.updateOne(
+      { short_id: shortId },
+      { 
+        $push: {
+          access_logs: {
+            type: 'view',
+            timestamp: new Date(),
+            ip: userIP,
+            user_agent: req.get("user-agent"),
+            is_first_today: isFirstVisitToday
+          }
+        }
+      }
+    );
+    
+    // Render appropriate ad page
+    const adType = linkData.ad_config?.type || "timer";
+    const waitTime = linkData.ad_config?.wait_time || 5;
+    
+    switch (adType) {
+      case "timer":
+        renderTimerAdPage(res, shortId, linkData.target_url, waitTime, isFirstVisitToday);
+        break;
+      case "video":
+        renderVideoAdPage(res, shortId, linkData.target_url, waitTime, isFirstVisitToday);
+        break;
+      case "interstitial":
+        renderInterstitialAdPage(res, shortId, linkData.target_url, isFirstVisitToday);
+        break;
+      default:
+        renderBannerAdPage(res, shortId, linkData.target_url, isFirstVisitToday);
+    }
+    
+  } catch (error) {
+    console.error("AdGate error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// ========================
+// AD PAGE RENDER FUNCTIONS
+// ========================
+
+function renderTimerAdPage(res, shortId, targetUrl, waitTime, isFirstVisit) {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Please Wait... - MythoBot Link</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <style>
+        .progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 20px 0; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); width: 0%; transition: width 1s linear; }
+      </style>
+    </head>
+    <body class="bg-gray-50 min-h-screen flex items-center justify-center">
+      <div class="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+        <div class="mb-6">
+          <div class="text-4xl mb-2">⏳</div>
+          <h1 class="text-2xl font-bold text-gray-800">Please Wait</h1>
+          <p class="text-gray-600 mt-2">You will be redirected in <span id="timer">${waitTime}</span> seconds</p>
+        </div>
+        
+        <div class="progress-bar">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        
+        <!-- Ad Container -->
+        <div class="ad-container mt-6 p-4 bg-gray-100 rounded-lg">
+          <p class="text-sm text-gray-500 mb-2">Advertisement</p>
+          <div id="adContent" class="mb-4">
+            <div class="bg-gradient-to-r from-blue-400 to-purple-500 text-white p-4 rounded-lg text-center">
+              <h3 class="font-bold">Support Our Service</h3>
+              <p class="text-sm">Please wait to continue to your destination</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="mt-8">
+          <button id="skipBtn" disabled
+            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium w-full cursor-not-allowed">
+            Continue (${waitTime}s)
+          </button>
+        </div>
+      </div>
+      
+      <script>
+        let timeLeft = ${waitTime};
+        const timerElement = document.getElementById('timer');
+        const progressFill = document.getElementById('progressFill');
+        const skipBtn = document.getElementById('skipBtn');
+        const shortId = "${shortId}";
+        const targetUrl = "${targetUrl}";
+        
+        const timerInterval = setInterval(() => {
+          timeLeft--;
+          timerElement.textContent = timeLeft;
+          progressFill.style.width = (((${waitTime} - timeLeft) / ${waitTime}) * 100) + '%';
+          
+          if (timeLeft > 0) {
+            skipBtn.textContent = \`Continue (\${timeLeft}s)\`;
+          } else {
+            skipBtn.textContent = 'Continue Now';
+            skipBtn.disabled = false;
+            skipBtn.classList.remove('bg-gray-200', 'cursor-not-allowed');
+            skipBtn.classList.add('bg-blue-500', 'text-white', 'hover:bg-blue-600', 'cursor-pointer');
+          }
+          
+          if (timeLeft <= 0) {
+            clearInterval(timerInterval);
+            completeVisit();
+          }
+        }, 1000);
+        
+        skipBtn.addEventListener('click', () => {
+          if (timeLeft <= 0) {
+            completeVisit();
+          }
+        });
+        
+        function completeVisit() {
+          fetch(\`/api/v1/click/\${shortId}\`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }).then(() => {
+            window.location.href = targetUrl;
+          });
+        }
+        
+        setTimeout(completeVisit, ${waitTime * 1000});
+      </script>
+    </body>
+    </html>
+  `);
+}
+
+function renderVideoAdPage(res, shortId, targetUrl, videoDuration, isFirstVisit) {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Watch Ad - MythoBot Link</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-900 min-h-screen flex items-center justify-center">
+      <div class="bg-gray-800 rounded-2xl shadow-2xl p-6 max-w-2xl w-full text-center text-white">
+        <h1 class="text-2xl font-bold mb-2">Watch a Short Video</h1>
+        <p class="text-gray-300 mb-6">Please watch the video to unlock the link</p>
+        
+        <div class="video-container bg-black rounded-lg overflow-hidden">
+          <div class="video-overlay p-2 bg-gray-900">
+            <span id="timeDisplay">${videoDuration}s remaining</span>
+          </div>
+          <div class="p-4">
+            <p class="text-lg font-bold text-yellow-400">Video Ad</p>
+            <p class="text-gray-400 text-sm">This helps support our service</p>
+          </div>
+        </div>
+        
+        <div class="mt-8">
+          <button id="continueBtn" disabled
+            class="px-8 py-3 bg-gray-600 text-gray-300 rounded-lg font-bold text-lg w-full cursor-not-allowed">
+            Continue (${videoDuration}s)
+          </button>
+        </div>
+      </div>
+      
+      <script>
+        const continueBtn = document.getElementById('continueBtn');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const shortId = "${shortId}";
+        const targetUrl = "${targetUrl}";
+        let timeLeft = ${videoDuration};
+        
+        const timer = setInterval(() => {
+          timeLeft--;
+          timeDisplay.textContent = \`\${timeLeft}s remaining\`;
+          
+          if (timeLeft > 0) {
+            continueBtn.textContent = \`Continue (\${timeLeft}s)\`;
+          } else {
+            continueBtn.textContent = 'Continue Now';
+            continueBtn.disabled = false;
+            continueBtn.classList.remove('bg-gray-600', 'cursor-not-allowed');
+            continueBtn.classList.add('bg-green-500', 'hover:bg-green-600', 'cursor-pointer');
+            clearInterval(timer);
+          }
+        }, 1000);
+        
+        continueBtn.addEventListener('click', () => {
+          if (!continueBtn.disabled) {
+            fetch(\`/api/v1/click/\${shortId}\`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            }).then(() => {
+              window.location.href = targetUrl;
+            });
+          }
+        });
+        
+        setTimeout(() => {
+          if (timeLeft <= 0) {
+            fetch(\`/api/v1/click/\${shortId}\`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            }).then(() => {
+              window.location.href = targetUrl;
+            });
+          }
+        }, ${videoDuration * 1000});
+      </script>
+    </body>
+    </html>
+  `);
+}
+
+function renderInterstitialAdPage(res, shortId, targetUrl, isFirstVisit) {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Advertisement - MythoBot Link</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center">
+      <div class="bg-white rounded-3xl shadow-2xl overflow-hidden max-w-sm w-full">
+        <div class="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 text-center">
+          <div class="text-5xl mb-2">🎯</div>
+          <h1 class="text-xl font-bold">Advertisement</h1>
+        </div>
+        
+        <div class="p-6">
+          <div class="bg-gradient-to-r from-yellow-400 to-orange-500 text-white p-4 rounded-xl text-center mb-4">
+            <h2 class="font-bold text-lg">Special Offer!</h2>
+            <p class="text-sm mt-1">Support our service by viewing this ad</p>
+          </div>
+          
+          <div class="text-center">
+            <p class="text-gray-600 text-sm mb-4">
+              Please view this advertisement to continue to your destination
+            </p>
+          </div>
+        </div>
+        
+        <div class="p-6 pt-0">
+          <button id="continueBtn" 
+            onclick="completeAd()"
+            class="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg">
+            Continue to Link
+          </button>
+        </div>
+      </div>
+      
+      <script>
+        const shortId = "${shortId}";
+        const targetUrl = "${targetUrl}";
+        
+        fetch(\`/api/v1/click/track/\${shortId}/view\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        function completeAd() {
+          fetch(\`/api/v1/click/\${shortId}\`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }).then(() => {
+            window.location.href = targetUrl;
+          });
+        }
+        
+        setTimeout(completeAd, 5000);
+      </script>
+    </body>
+    </html>
+  `);
+}
+
+function renderBannerAdPage(res, shortId, targetUrl, isFirstVisit) {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Redirecting... - MythoBot Link</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-50 min-h-screen">
+      <div class="max-w-4xl mx-auto p-4">
+        <div class="text-center mb-8">
+          <h1 class="text-2xl font-bold text-gray-800">MythoBot Link Shortener</h1>
+          <p class="text-gray-600">You are being redirected to your destination</p>
+        </div>
+        
+        <div class="grid md:grid-cols-3 gap-6">
+          <div class="md:col-span-2">
+            <div class="bg-white rounded-xl shadow p-6 mb-6">
+              <h2 class="text-lg font-bold text-gray-800 mb-4">Destination Preview</h2>
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <p class="text-blue-800 text-sm break-all">${targetUrl.substring(0, 100)}...</p>
+              </div>
+              <p class="text-gray-600 text-sm">
+                You'll be redirected automatically in <span id="countdown">5</span> seconds
+              </p>
+            </div>
+            
+            <div class="text-center">
+              <button onclick="skipAd()" 
+                class="px-6 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors">
+                Skip Ad & Continue Now
+              </button>
+            </div>
+          </div>
+          
+          <div class="space-y-4">
+            <div class="bg-white rounded-xl shadow p-4">
+              <p class="text-xs text-gray-500 mb-2">Advertisement</p>
+              <div class="bg-gradient-to-r from-purple-100 to-pink-100 p-3 rounded-lg border border-purple-200">
+                <h3 class="font-bold text-purple-800">Premium Features</h3>
+                <p class="text-xs text-purple-600 mt-1">Support our service</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <script>
+        const shortId = "${shortId}";
+        const targetUrl = "${targetUrl}";
+        let countdown = 5;
+        const countdownElement = document.getElementById('countdown');
+        
+        fetch(\`/api/v1/click/track/\${shortId}/view\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const timer = setInterval(() => {
+          countdown--;
+          countdownElement.textContent = countdown;
+          
+          if (countdown <= 0) {
+            clearInterval(timer);
+            completeRedirect();
+          }
+        }, 1000);
+        
+        function skipAd() {
+          clearInterval(timer);
+          completeRedirect();
+        }
+        
+        function completeRedirect() {
+          fetch(\`/api/v1/click/\${shortId}\`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }).then(() => {
+            window.location.href = targetUrl;
+          });
+        }
+        
+        setTimeout(completeRedirect, 5000);
+      </script>
+    </body>
+    </html>
+  `);
+}
+
+// ========================
+// CLICK TRACKING ENDPOINT
+// ========================
+
+app.post("/api/v1/click/:shortId", async (req, res) => {
+  const { shortId } = req.params;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ short_id: shortId });
+    
+    if (!linkData) {
+      return res.json({ success: false });
+    }
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const existingClick = await adLinksCollection.findOne({
+      short_id: shortId,
+      "access_logs.type": "click",
+      "access_logs.ip": req.ip,
+      "access_logs.timestamp": { $gte: today }
+    });
+    
+    const isFirstClickToday = !existingClick;
+    const earnings = isFirstClickToday ? 0.001 : 0;
+    
+    await adLinksCollection.updateOne(
+      { short_id: shortId },
+      {
+        $inc: { 
+          clicks: 1,
+          earnings: earnings,
+          today_clicks: 1
+        },
+        $push: {
+          access_logs: {
+            type: 'click',
+            timestamp: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            earned: isFirstClickToday,
+            earnings: earnings
+          }
+        }
+      }
+    );
+    
+    res.json({ 
+      success: true, 
+      earned: isFirstClickToday,
+      earnings: earnings 
+    });
+    
+  } catch (error) {
+    console.error("Click tracking error:", error);
+    res.json({ success: false });
+  }
+});
+
+// ========================
+// YOUR EXISTING ROUTES
+// ========================
+
+app.get("/link/:hex", (req, res) => {
+  const { hex } = req.params;
+  
+  try {
+    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    new URL(targetUrl);
+    
+    res.redirect(302, targetUrl);
+    
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+app.get("/mask/:encodedUrl", async (req, res) => {
+  const { encodedUrl } = req.params;
+  
+  try {
+    let targetUrl;
+    try {
+      const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
+      targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
+      if (!targetUrl.includes('://')) throw new Error('Not a URL');
+    } catch (e) {
+      targetUrl = base62_decode(encodedUrl);
+    }
+    
+    new URL(targetUrl);
+    
+    try {
+      const maskedCollection = client.db("mythobot").collection("masked_links");
+      maskedCollection.insertOne({
+        encoded: encodedUrl,
+        target: targetUrl,
+        clicked_at: new Date(),
+        ip: req.ip
+      });
+    } catch(e) {}
+    
+    res.redirect(302, targetUrl);
+    
+  } catch (error) {
+    res.send(`
+      <script>
+        alert("Invalid link!");
+        window.location.href = "https://t.me/MythoSerialBot";
+      </script>
+    `);
+  }
+});
+
+app.get("/api/mask", (req, res) => {
+  const { url } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({ error: "Missing url parameter" });
+  }
+  
+  try {
+    new URL(url);
+    
+    const encodedUrl = base62_encode(url);
+    
+    const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
+    
+    res.json({
+      success: true,
+      original_url: url,
+      masked_url: maskedUrl,
+      encoded: encodedUrl
+    });
+    
+  } catch (error) {
+    res.status(400).json({ error: "Invalid URL format" });
+  }
+});
+
+app.get("/test-notification", async (req, res) => {
+  const testMessage = `
+🔔 <b>TEST NOTIFICATION</b>
+
+👤 <b>User ID:</b> <code>5189870730</code>
+📦 <b>Plan:</b> silver
+💵 <b>Amount:</b> ₹55
+🎯 <b>MythoPoints Discount:</b> ₹24 (30% off)
+⏰ <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+
+✅ <b>Status:</b> Test Successful!
+  `;
+  
+  await sendTelegramNotification(testMessage);
+  res.send('✅ Test notification sent! Check your Telegram.');
+});
+
 function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
   if (mythoPointsApplied) {
-    const discount = originalPrice * 0.3; // 30% discount
-    return Math.max(1, Math.round(originalPrice - discount)); // Minimum ₹1
+    const discount = originalPrice * 0.3;
+    return Math.max(1, Math.round(originalPrice - discount));
   }
   return originalPrice;
 }
 
-// 🔹 Generate a token and return protected link
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
@@ -274,18 +1487,13 @@ app.get("/generate/:userId", async (req, res) => {
   `);
 });
 
-// 🔹 Validate and redirect for double points
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
 
   console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
 
-  // Check referer (must come from softurl.in)
   const referer = req.get("referer") || "";
   if (!referer.includes("softurl.in")) {
-    // Roast message for double points bypass
     const roastMessages = [
       "🚫 Oops! Trying to double points without SoftURL? Even my grandma follows links better!",
       "🤡 Nice try, points pirate! But this isn't a shortcut to free MythoPoints!",
@@ -353,32 +1561,23 @@ app.get("/double/:userId/:token", async (req, res) => {
     `);
   }
 
-  // Mark token as used
   await doubleCollection.updateOne(
     { user_id: userId, token },
     { $set: { used: true, used_at: new Date() } }
   );
 
-  // Redirect to bot deep link
   const botUsername = "MythoSerialBot";
   const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
 
   res.redirect(deepLink);
 });
 
-// 🔹 Updated Bypass protection for URL shortener
 app.get("/Bypass/:userId/:token", async (req, res) => {
     const { userId, token } = req.params;
     const { t } = req.query;
     
     console.log(`--- incoming /Bypass request for user=${userId} ---`);
-    console.log("token:", token);
-    console.log("encoded target (t):", t);
-    console.log("referer:", req.get("referer"));
-    console.log("user-agent:", req.get("user-agent"));
-    console.log("ip:", req.ip);
     
-    // Check if token exists in database first
     let dbRecord = null;
     try {
         dbRecord = await urlShortenerCollection.findOne({ 
@@ -390,17 +1589,14 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         console.error("Database error:", dbError);
     }
     
-    // If database record exists, use that URL (direct access allowed)
     if (dbRecord) {
         console.log("Using URL from database:", dbRecord.target_url);
         
-        // Increment click count
         await urlShortenerCollection.updateOne(
             { token: token },
             { $inc: { clicks: 1 } }
         );
         
-        // Add to access logs
         await urlShortenerCollection.updateOne(
             { token: token },
             {
@@ -416,11 +1612,9 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
             }
         );
         
-        // Redirect to target URL
         return res.redirect(dbRecord.target_url);
     }
     
-    // If no database record but we have encoded parameter
     if (t) {
         try {
             console.log("Decoding target from parameter...");
@@ -429,7 +1623,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
             let decodeMethod = "";
             let decodeError = null;
             
-            // Method 1: Try base62 decode
             try {
                 decodedTarget = base62_decode(t);
                 new URL(decodedTarget);
@@ -439,7 +1632,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                 decodeError = e1;
                 console.log("Base62 decode failed:", e1.message);
                 
-                // Method 2: Try legacy URL decode
                 try {
                     decodedTarget = decodeURIComponent(t);
                     new URL(decodedTarget);
@@ -449,7 +1641,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                     decodeError = e2;
                     console.log("Legacy URL decode also failed:", e2.message);
                     
-                    // Method 3: Try direct if it looks like a URL
                     try {
                         if (t.startsWith('http://') || t.startsWith('https://') || t.startsWith('t.me/') || t.startsWith('tg://')) {
                             decodedTarget = t;
@@ -467,10 +1658,8 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                 }
             }
             
-            // Validate URL
             new URL(decodedTarget);
             
-            // Store in database for future use
             await urlShortenerCollection.insertOne({
                 token: token,
                 creator_id: parseInt(userId),
@@ -495,7 +1684,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         } catch (error) {
             console.error("Final decoding/validation error:", error.message);
             
-            // Log the failed attempt
             await urlShortenerCollection.insertOne({
                 token: token,
                 creator_id: parseInt(userId),
@@ -513,7 +1701,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
                 }]
             });
             
-            // Show error page
             return res.send(`
                 <!DOCTYPE html>
                 <html>
@@ -601,7 +1788,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
         }
     }
     
-    // No token in DB and no encoded parameter - show info page
     return res.send(`
       <!DOCTYPE html>
       <html>
@@ -679,7 +1865,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
     `);
 });
 
-// 🔹 URL Shortener API endpoint (for bot to generate links)
 app.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
   
@@ -691,19 +1876,14 @@ app.get("/shorten", async (req, res) => {
   }
   
   try {
-    // Validate URL
     new URL(url);
     
-    // Generate token for the URL
     const token = crypto.randomBytes(8).toString("hex");
     
-    // Encode URL using base62
     const encodedUrl = base62_encode(url);
     
-    // Generate bypass URL with base62 encoded parameter
     const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
     
-    // Store in database
     await urlShortenerCollection.insertOne({
       token: token,
       creator_id: parseInt(userId),
@@ -733,7 +1913,6 @@ app.get("/shorten", async (req, res) => {
   }
 });
 
-// 🔹 Get URL access statistics
 app.get("/stats/:userId", async (req, res) => {
   const { userId } = req.params;
   
@@ -768,18 +1947,15 @@ app.get("/stats/:userId", async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Payment Page with MythoPoints Discount
 app.get("/payment", (req, res) => {
   const { amount, upi, channel, admin, mythopoints } = req.query;
   
-  // Default values if not provided
   const baseAmount = amount || 49;
   const upiId = upi || "sandip10x@fam";
   const channelName = channel || "MythoBot Premium";
   const adminUsername = admin || "MythoSerialBot";
   const mythoPointsApplied = mythopoints === "true";
 
-  // Calculate discounted price
   const finalAmount = calculateDiscountedPrice(parseInt(baseAmount), mythoPointsApplied);
   const originalAmount = parseInt(baseAmount);
   const discountAmount = originalAmount - finalAmount;
@@ -913,14 +2089,11 @@ app.get("/payment", (req, res) => {
                 const originalCopyHTML = copySpan.innerHTML;
                 const upiAppsContainer = document.getElementById('upi-apps-container');
 
-                // Use the final amount from server calculation
                 const finalAmount = ${finalAmount};
                 
-                // Generate UPI link
                 const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
                 const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
                 
-                // Load QR Code
                 const qrImage = new Image();
                 qrImage.src = qrApiUrl;
                 qrImage.alt = 'Scan to Pay';
@@ -935,7 +2108,6 @@ app.get("/payment", (req, res) => {
                     qrContainer.innerHTML = '<p class="text-red-500 text-sm">QR Code failed to load</p>';
                 };
 
-                // UPI Apps Configuration
                 const upiApps = [
                     {
                         name: "GPay",
@@ -987,7 +2159,6 @@ app.get("/payment", (req, res) => {
                     }
                 ];
 
-                // Create UPI App buttons
                 upiApps.forEach(app => {
                     const appButton = document.createElement('button');
                     appButton.className = \`upi-app \${app.color} text-white rounded-lg p-3 flex flex-col items-center justify-center\`;
@@ -998,19 +2169,15 @@ app.get("/payment", (req, res) => {
                     
                     appButton.onclick = () => {
                         if (app.package) {
-                            // Try to open in app first, then fallback to UPI link
                             const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
                             const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
                             
-                            // Try app intent first
                             window.location.href = intentUrl;
                             
-                            // Fallback after delay
                             setTimeout(() => {
                                 window.location.href = upiUrl;
                             }, 500);
                         } else {
-                            // Direct UPI link for "Any UPI"
                             window.location.href = upiLink;
                         }
                     };
@@ -1018,7 +2185,6 @@ app.get("/payment", (req, res) => {
                     upiAppsContainer.appendChild(appButton);
                 });
 
-                // Copy UPI ID functionality
                 copyButton.addEventListener('click', () => {
                     navigator.clipboard.writeText(upiIdElement.textContent).then(() => {
                         copySpan.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Copied!';
@@ -1040,14 +2206,11 @@ app.get("/payment", (req, res) => {
         </script>
         
         <script>
-            // Security features
             document.addEventListener('DOMContentLoaded', function() {
-                // Disable Right-Click Context Menu
                 document.addEventListener('contextmenu', function(e) {
                     e.preventDefault();
                 });
 
-                // Disable Keyboard Shortcuts
                 document.addEventListener('keydown', function(e) {
                     if (e.ctrlKey && (e.key === 'c' || e.key === 'u')) {
                         e.preventDefault();
@@ -1057,7 +2220,6 @@ app.get("/payment", (req, res) => {
                     }
                 });
 
-                // Disable Dragging
                 document.addEventListener('dragstart', function(e) {
                     e.preventDefault();
                 });
@@ -1068,16 +2230,13 @@ app.get("/payment", (req, res) => {
   `);
 });
 
-// 🔹 Enhanced Premium Payment with MythoPoints Discount Button
 app.get("/premium-payment", async (req, res) => {
   const { user_id, plan, duration, amount, upi, admin, mythopoints } = req.query;
   
-  // Validate required parameters
   if (!user_id || !plan) {
     return res.status(400).send("Missing user_id or plan parameters");
   }
 
-  // Plan configurations
   const plans = {
     'silver': { default_amount: 79, default_duration: 28, name: 'Silver Plan' },
     'gold': { default_amount: 149, default_duration: 30, name: 'Gold Plan' }
@@ -1087,7 +2246,6 @@ app.get("/premium-payment", async (req, res) => {
   const originalAmount = amount || selectedPlan.default_amount;
   const mythoPointsApplied = mythopoints === "true";
   
-  // Apply 30% discount if MythoPoints are used
   const finalAmount = calculateDiscountedPrice(parseInt(originalAmount), mythoPointsApplied);
   const discountAmount = originalAmount - finalAmount;
   
@@ -1096,10 +2254,8 @@ app.get("/premium-payment", async (req, res) => {
   const adminUsername = admin || "MythoSerialBot";
   const planName = selectedPlan.name;
 
-  // Generate payment token
   const paymentToken = crypto.randomBytes(16).toString('hex');
   
-  // Store payment session in database
   const paymentCollection = client.db("mythobot").collection("payment_sessions");
   await paymentCollection.insertOne({
     payment_token: paymentToken,
@@ -1139,7 +2295,6 @@ app.get("/premium-payment", async (req, res) => {
     <body class="flex items-center justify-center min-h-screen p-4">
         <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
             
-            <!-- Header Section -->
             <div class="p-6 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
                 <h1 class="text-2xl font-bold">${planName}</h1>
                 <p class="text-purple-200 mt-2">Automatic Activation • ${finalDuration} Days</p>
@@ -1152,7 +2307,6 @@ app.get("/premium-payment", async (req, res) => {
                 ` : ''}
             </div>
 
-            <!-- Payment Details -->
             <div class="p-6 text-center">
                 ${mythoPointsApplied ? `
                 <div class="flex justify-center items-center gap-4 mb-4">
@@ -1169,7 +2323,6 @@ app.get("/premium-payment", async (req, res) => {
                 
                 <p class="text-sm text-slate-600">User ID: <code>${user_id}</code></p>
                 
-                <!-- MythoPoints Discount Button -->
                 ${!mythoPointsApplied ? `
                 <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
                     <div class="flex items-center justify-center gap-2">
@@ -1189,10 +2342,8 @@ app.get("/premium-payment", async (req, res) => {
                     <div id="loader" class="loader"></div>
                 </div>
 
-                <!-- UPI Apps -->
                 <div class="grid grid-cols-4 gap-2 mb-4" id="upi-apps-container"></div>
 
-                <!-- UPI ID -->
                 <div class="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200 mt-4">
                     <span class="font-mono text-slate-700 text-sm break-all" id="upi-id-text">${upiId}</span>
                     <button id="copy-button" class="bg-purple-600 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-purple-700 transition-all">
@@ -1200,7 +2351,6 @@ app.get("/premium-payment", async (req, res) => {
                     </button>
                 </div>
 
-                <!-- Payment Status -->
                 <div id="status-container" class="status-check mt-4">
                     <p class="text-sm font-semibold">Payment Status: <span id="status-text">Waiting for payment...</span></p>
                     <div id="status-loader" class="loader mx-auto my-2" style="width: 20px; height: 20px;"></div>
@@ -1208,7 +2358,6 @@ app.get("/premium-payment", async (req, res) => {
                 </div>
             </div>
             
-            <!-- Instructions -->
             <div class="bg-purple-50 p-6">
                 <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
                     <p class="text-xs text-green-700 text-center">
@@ -1228,7 +2377,6 @@ app.get("/premium-payment", async (req, res) => {
             const userId = "${user_id}";
             let statusCheckInterval;
 
-            // Generate QR Code
             const upiLink = \`upi://pay?pa=${upiId}&pn=\${encodeURIComponent("MythoBot " + "${planName}")}&am=${finalAmount}.00&cu=INR&tn=Payment for ${planName} (User: ${user_id})\`;
             const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}\`;
             
@@ -1240,7 +2388,6 @@ app.get("/premium-payment", async (req, res) => {
                 document.getElementById('qr-code-container').appendChild(qrImage);
             };
 
-            // UPI Apps
             const upiApps = [
                 { name: "GPay", package: "com.google.android.apps.nbu.paisa.user", icon: "fa-brands fa-google-pay", color: "bg-blue-500" },
                 { name: "Paytm", package: "net.one97.paytm", icon: "fa-solid fa-mobile", color: "bg-blue-600" },
@@ -1264,7 +2411,6 @@ app.get("/premium-payment", async (req, res) => {
                 document.getElementById('upi-apps-container').appendChild(appButton);
             });
 
-            // Copy UPI ID
             document.getElementById('copy-button').addEventListener('click', () => {
                 navigator.clipboard.writeText("${upiId}").then(() => {
                     const span = document.querySelector('.copy-text-span');
@@ -1273,7 +2419,6 @@ app.get("/premium-payment", async (req, res) => {
                 });
             });
 
-            // Payment Status Check
             async function checkPaymentStatus() {
                 try {
                     const response = await fetch(\`/payment-status/\${paymentToken}\`);
@@ -1285,7 +2430,6 @@ app.get("/premium-payment", async (req, res) => {
                         document.getElementById('status-message').innerHTML = 'Your premium plan has been activated! Return to Telegram bot.';
                         clearInterval(statusCheckInterval);
                         
-                        // Redirect to bot after delay
                         setTimeout(() => {
                             window.location.href = \`https://t.me/MythoSerialBot?start=payment_success_\${userId}\`;
                         }, 3000);
@@ -1295,13 +2439,11 @@ app.get("/premium-payment", async (req, res) => {
                         document.getElementById('status-message').textContent = data.message || 'Payment verification failed. Please try again.';
                         clearInterval(statusCheckInterval);
                     }
-                    // If still pending, continue checking
                 } catch (error) {
                     console.error('Status check error:', error);
                 }
             }
 
-            // Start status checking
             statusCheckInterval = setInterval(checkPaymentStatus, 5000);
         </script>
     </body>
@@ -1309,7 +2451,6 @@ app.get("/premium-payment", async (req, res) => {
   `);
 });
 
-// 🔹 UPI Deep Link API
 app.get("/upi-redirect", (req, res) => {
   const { upi, amount, name } = req.query;
   
@@ -1322,7 +2463,6 @@ app.get("/upi-redirect", (req, res) => {
   res.redirect(upiLink);
 });
 
-// 🔹 Payment API endpoint
 app.get("/payment/api", (req, res) => {
   const { amount, upi, channel, admin } = req.query;
   
@@ -1340,7 +2480,6 @@ app.get("/payment/api", (req, res) => {
   });
 });
 
-// 🔹 Enhanced Payment Status Check with Telegram Notifications
 app.get("/payment-status/:token", async (req, res) => {
   const { token } = req.params;
   
@@ -1359,11 +2498,9 @@ app.get("/payment-status/:token", async (req, res) => {
     return res.json({ status: 'failed', message: 'Payment verification failed' });
   }
   
-  // Check if payment is completed
   const isPaymentVerified = await verifyUPIPayment(paymentSession);
   
   if (isPaymentVerified) {
-    // Update payment status
     await paymentCollection.updateOne(
       { payment_token: token },
       { 
@@ -1375,10 +2512,8 @@ app.get("/payment-status/:token", async (req, res) => {
       }
     );
     
-    // Activate premium for user
     await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
     
-    // Send Telegram notification for successful payment
     const notificationMessage = `
 💳 <b>NEW PAYMENT RECEIVED! 💰</b>
 
@@ -1401,12 +2536,10 @@ ${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${p
   res.json({ status: 'pending' });
 });
 
-// 🔹 UPI Payment Verification
 async function verifyUPIPayment(paymentSession) {
   return false;
 }
 
-// 🔹 Activate Premium Subscription
 async function activatePremiumSubscription(userId, duration) {
   const usersCollection = client.db("mythobot").collection("users");
   const subscriptionDate = new Date();
@@ -1428,24 +2561,22 @@ async function activatePremiumSubscription(userId, duration) {
   
   console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
 }
+
 app.get("/ad/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   
-  // Check referer
   const referer = req.get("referer") || "";
   
   if (!referer.includes("softurl.in")) {
     return res.send("❌ Open ad via SoftURL link only!");
   }
   
-  // Verify and mark ad as opened
   const adGateCollection = client.db("mythobot").collection("spin_ad_gate");
   await adGateCollection.updateOne(
     { user_id: parseInt(userId), token },
     { $set: { opened: true, opened_at: new Date() } }
   );
   
-  // Redirect to Telegram bot
   res.redirect(`https://t.me/MythoSerialBot?start=ad_unlocked_${userId}`);
 });
 
@@ -1504,17 +2635,14 @@ app.get("/", (req, res) => {
     </head>
     <body class="min-h-screen flex flex-col items-center justify-center px-4 py-10">
 
-      <!-- Header -->
       <div class="text-center mb-10 animate-fadeIn">
         <img src="https://envs.sh/XwB.jpg" alt="MythoserialBot" class="w-24 h-24 rounded-full mx-auto mb-4 shadow-lg border-4 border-white/20 pulse">
         <h1 class="text-5xl font-extrabold tracking-wide">✨ MythoserialBot Portal ✨</h1>
         <p class="text-purple-200 mt-3 text-sm">Your One-stop Hub for Mythological Serials, Games & Premium Access</p>
       </div>
 
-      <!-- Feature Cards -->
       <div class="grid md:grid-cols-2 gap-6 max-w-3xl w-full">
         
-        <!-- Premium Access -->
         <div class="glass text-center p-6 delay-100">
           <i class="fa-solid fa-gem text-yellow-400 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Premium Membership</h2>
@@ -1522,7 +2650,6 @@ app.get("/", (req, res) => {
           <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="btn inline-block mt-4 bg-yellow-400 text-black font-semibold px-5 py-2 rounded-full">Upgrade Now</a>
         </div>
 
-        <!-- YouTube Downloader -->
         <div class="glass text-center p-6 delay-500">
           <i class="fa-solid fa-youtube text-red-500 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">YouTube Downloader</h2>
@@ -1530,7 +2657,6 @@ app.get("/", (req, res) => {
           <a href="/yt" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Download Now</a>
         </div>
 
-        <!-- Games -->
         <div class="glass text-center p-6 delay-200">
           <i class="fa-solid fa-gamepad text-pink-300 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Mytho Games</h2>
@@ -1538,7 +2664,6 @@ app.get("/", (req, res) => {
           <a href="/radhe" class="btn inline-block mt-4 bg-pink-500 text-white font-semibold px-5 py-2 rounded-full">Play Radhe Radhe</a>
         </div>
 
-        <!-- Bypass Protection -->
         <div class="glass text-center p-6 delay-300">
           <i class="fa-solid fa-shield-halved text-green-400 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Bypass Protection</h2>
@@ -1546,7 +2671,6 @@ app.get("/", (req, res) => {
           <a href="/generate/12345" class="btn inline-block mt-4 bg-green-400 text-black font-semibold px-5 py-2 rounded-full">Test Demo</a>
         </div>
 
-        <!-- Payment Gateway -->
         <div class="glass text-center p-6 delay-400">
           <i class="fa-solid fa-wallet text-blue-400 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Payment Portal</h2>
@@ -1554,7 +2678,6 @@ app.get("/", (req, res) => {
           <a href="/payment?amount=49&upi=sandip10x@fam&channel=MythoBot%20Premium&admin=MythoSerialBot" class="btn inline-block mt-4 bg-blue-500 text-white font-semibold px-5 py-2 rounded-full">Open Payment</a>
         </div>
 
-        <!-- MythoPoints Discount -->
         <div class="glass text-center p-6 delay-500">
           <i class="fa-solid fa-coins text-yellow-500 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">MythoPoints</h2>
@@ -1562,7 +2685,6 @@ app.get("/", (req, res) => {
           <a href="/payment?amount=49&mythopoints=true" class="btn inline-block mt-4 bg-yellow-500 text-black font-semibold px-5 py-2 rounded-full">Use Points</a>
         </div>
 
-        <!-- Admin Notifications -->
         <div class="glass text-center p-6 delay-600">
           <i class="fa-solid fa-bell text-red-400 text-3xl mb-3"></i>
           <h2 class="text-xl font-bold">Live Alerts</h2>
@@ -1571,7 +2693,6 @@ app.get("/", (req, res) => {
         </div>
       </div>
 
-      <!-- Footer -->
       <div class="text-center mt-12 text-sm text-purple-200">
         <p>💫 Developed by <b>@Sandip10x</b> | Powered by <b>MythoBot Server</b></p>
         <p class="mt-1">
@@ -1581,7 +2702,6 @@ app.get("/", (req, res) => {
       </div>
 
       <script>
-        // Smooth Fade-in Animations
         document.addEventListener('DOMContentLoaded', () => {
           const cards = document.querySelectorAll('.glass');
           cards.forEach((card, i) => {
@@ -1664,7 +2784,6 @@ app.get("/radhe", (req, res) => {
           count++;
           countEl.textContent = count + " Japs";
           if (audio.paused) audio.play();
-          // small heart burst
           const heart = document.createElement('div');
           heart.textContent = "💖";
           heart.style.position = 'absolute';
@@ -1689,12 +2808,269 @@ app.get("/radhe", (req, res) => {
 // This line should be BEFORE app.listen()
 app.use("/yt", youtubeDLRouter);
 
+// ========================
+// ADMIN API ENDPOINTS
+// ========================
+
+app.get("/admin/api/links", authenticateAPI, async (req, res) => {
+  const { page = 1, limit = 50 } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  
+  try {
+    const links = await adLinksCollection
+      .find({})
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+    
+    const total = await adLinksCollection.countDocuments({});
+    
+    res.json({
+      success: true,
+      data: {
+        links: links.map(link => ({
+          short_id: link.short_id,
+          creator_id: link.creator_id,
+          target_url: link.target_url,
+          created_at: link.created_at,
+          clicks: link.clicks || 0,
+          earnings: link.earnings || 0,
+          status: link.status,
+          ad_type: link.ad_config?.type,
+          blogger_clicks: link.blogger_clicks || 0
+        })),
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+app.get("/admin/api/stats", authenticateAPI, async (req, res) => {
+  try {
+    const totalLinks = await adLinksCollection.countDocuments({});
+    const totalClicks = await adLinksCollection.aggregate([
+      { $group: { _id: null, total: { $sum: "$clicks" } } }
+    ]).toArray();
+    
+    const totalEarnings = await adLinksCollection.aggregate([
+      { $group: { _id: null, total: { $sum: "$earnings" } } }
+    ]).toArray();
+    
+    const totalBloggerClicks = await adLinksCollection.aggregate([
+      { $group: { _id: null, total: { $sum: "$blogger_clicks" } } }
+    ]).toArray();
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayLinks = await adLinksCollection.countDocuments({
+      created_at: { $gte: today }
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        total_links: totalLinks,
+        total_clicks: totalClicks[0]?.total || 0,
+        total_blogger_clicks: totalBloggerClicks[0]?.total || 0,
+        total_earnings: totalEarnings[0]?.total || 0,
+        today_new_links: todayLinks,
+        average_cpc: totalClicks[0]?.total > 0 
+          ? (totalEarnings[0]?.total || 0) / totalClicks[0]?.total 
+          : 0
+      }
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// ========================
+// USER DASHBOARD
+// ========================
+
+app.get("/dashboard/:userId", async (req, res) => {
+  const { userId } = req.params;
+  
+  try {
+    const links = await adLinksCollection
+      .find({ creator_id: parseInt(userId) })
+      .sort({ created_at: -1 })
+      .limit(20)
+      .toArray();
+    
+    const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
+    const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
+    const totalBloggerClicks = links.reduce((sum, link) => sum + (link.blogger_clicks || 0), 0);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let todayClicks = 0;
+    let todayEarnings = 0;
+    
+    links.forEach(link => {
+      if (link.access_logs) {
+        link.access_logs.forEach(log => {
+          if (log.type === 'click' && new Date(log.timestamp) >= today) {
+            todayClicks++;
+            if (log.earned) {
+              todayEarnings += 0.001;
+            }
+          }
+        });
+      }
+    });
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dashboard - MythoBot URL Shortener</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+      </head>
+      <body class="bg-gray-50 min-h-screen">
+        <div class="max-w-6xl mx-auto p-4">
+          <div class="bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-2xl p-6 mb-6 shadow-lg">
+            <h1 class="text-2xl font-bold">💰 MythoBot URL Shortener Dashboard</h1>
+            <p class="text-blue-100">User ID: ${userId}</p>
+          </div>
+          
+          <div class="grid md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-xl shadow p-4">
+              <div class="flex items-center">
+                <div class="bg-blue-100 p-3 rounded-lg mr-4">
+                  <i class="fa-solid fa-link text-blue-500 text-xl"></i>
+                </div>
+                <div>
+                  <p class="text-sm text-gray-500">Total Links</p>
+                  <p class="text-2xl font-bold">${links.length}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow p-4">
+              <div class="flex items-center">
+                <div class="bg-green-100 p-3 rounded-lg mr-4">
+                  <i class="fa-solid fa-mouse-pointer text-green-500 text-xl"></i>
+                </div>
+                <div>
+                  <p class="text-sm text-gray-500">Total Clicks</p>
+                  <p class="text-2xl font-bold">${totalClicks}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow p-4">
+              <div class="flex items-center">
+                <div class="bg-yellow-100 p-3 rounded-lg mr-4">
+                  <i class="fa-solid fa-dollar-sign text-yellow-500 text-xl"></i>
+                </div>
+                <div>
+                  <p class="text-sm text-gray-500">Total Earnings</p>
+                  <p class="text-2xl font-bold">$${totalEarnings.toFixed(3)}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow p-4">
+              <div class="flex items-center">
+                <div class="bg-purple-100 p-3 rounded-lg mr-4">
+                  <i class="fa-solid fa-blog text-purple-500 text-xl"></i>
+                </div>
+                <div>
+                  <p class="text-sm text-gray-500">Blogger Clicks</p>
+                  <p class="text-2xl font-bold">${totalBloggerClicks}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="bg-white rounded-xl shadow p-6 mb-6">
+            <h2 class="text-lg font-bold mb-4">Your Links</h2>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Short Link</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clicks</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Blogger</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Earnings</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  ${links.map(link => `
+                    <tr>
+                      <td class="px-6 py-4">
+                        <div class="flex items-center space-x-2">
+                          <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                          <div>
+                            <a href="/s/${link.short_id}" target="_blank" class="text-blue-500 hover:underline">
+                              /s/${link.short_id}
+                            </a>
+                            ${link.blogger_code ? `
+                            <p class="text-xs text-gray-500">
+                              <i class="fas fa-external-link-alt mr-1"></i>
+                              Blogger: <a href="/blogger/${link.blogger_code}" target="_blank" class="text-green-500">/blogger/${link.blogger_code}</a>
+                            </p>
+                            ` : ''}
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-6 py-4">${link.clicks || 0}</td>
+                      <td class="px-6 py-4">${link.blogger_clicks || 0}</td>
+                      <td class="px-6 py-4 font-bold text-green-600">$${(link.earnings || 0).toFixed(3)}</td>
+                      <td class="px-6 py-4 text-sm text-gray-500">${new Date(link.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <div class="text-center">
+            <a href="/" class="inline-block px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+              <i class="fas fa-home mr-2"></i>Back to Home
+            </a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    res.status(500).send("Error loading dashboard");
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Bypass protection with base62 encoding activated!`);
-  console.log(`✅ URLs will now show encoded parameters: /Bypass/123/abc?t=encoded_string`);
-  console.log(`🔔 Telegram notifications: ${TELEGRAM_BOT_TOKEN ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`💰 30% MythoPoints discount system: ACTIVE`);
-  console.log(`🔗 Use /shorten API to generate encoded URLs for bot`);
+  console.log(`🎯 Blogger Redirection System: ACTIVATED`);
+  console.log(`💰 AdLinkFly Earnings: $0.001 per click`);
+  console.log(`🔗 Blogger Flow: User → Blogger → Shortener → Target URL`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard/{userId}`);
+  console.log(`🔐 API: http://localhost:${PORT}/api/v1/blogger/shorten`);
+  console.log(`🤖 Bot Integration: READY`);
+  console.log(`✨ All existing features: PRESERVED`);
 });
