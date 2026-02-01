@@ -1190,6 +1190,43 @@ app.get("/mask/:encodedUrl", async (req, res) => {
   }
 });
 
+// ========================
+// BLOGGER TRACKING ENDPOINT
+// ========================
+app.get("/api/track-blogger", async (req, res) => {
+  const { code, ref, source } = req.query;
+  
+  if (!code) {
+    return res.json({ success: false });
+  }
+  
+  try {
+    await adLinksCollection.updateOne(
+      { blogger_code: code },
+      { 
+        $inc: { blogger_clicks: 1 },
+        $push: {
+          blogger_logs: {
+            type: 'blogger_auto_redirect',
+            timestamp: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            ref: ref || null,
+            source: source || null,
+            auto_redirect: true
+          }
+        }
+      }
+    );
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: false });
+  }
+});
+
+
+
 app.get("/api/mask", (req, res) => {
   const { url } = req.query;
   
