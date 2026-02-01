@@ -47,19 +47,58 @@ async function connectDB() {
     maskCollection = db.collection("masked_links");
     adLinksCollection = db.collection("ad_links");
 
-    // Create indexes
-    await adLinksCollection.createIndex({ short_id: 1 }, { unique: true });
-    await adLinksCollection.createIndex({ blogger_code: 1 }, { unique: true });
-    await adLinksCollection.createIndex({ creator_id: 1 });
-    await adLinksCollection.createIndex({ created_at: -1 });
-
     console.log("✅ MongoDB connected");
+
+    // Try to create indexes, but don't crash if they fail
+    try {
+      // Create short_id index
+      await adLinksCollection.createIndex({ short_id: 1 }, { unique: true });
+      console.log("✅ Created short_id index");
+    } catch (err) {
+      console.log("⚠️ short_id index already exists or failed");
+    }
+
+    try {
+      // Create blogger_code index with sparse option to allow nulls
+      await adLinksCollection.createIndex({ blogger_code: 1 }, { 
+        unique: true, 
+        sparse: true 
+      });
+      console.log("✅ Created blogger_code index (sparse)");
+    } catch (err) {
+      console.log("⚠️ blogger_code index already exists or failed:", err.message);
+      
+      // If index creation fails, drop it first
+      try {
+        await adLinksCollection.dropIndex("blogger_code_1");
+        console.log("✅ Dropped old blogger_code index");
+        
+        // Create new sparse index
+        await adLinksCollection.createIndex({ blogger_code: 1 }, { 
+          unique: true, 
+          sparse: true 
+        });
+        console.log("✅ Recreated blogger_code index with sparse option");
+      } catch (dropErr) {
+        console.log("⚠️ Could not fix blogger_code index, continuing without it");
+      }
+    }
+
+    try {
+      // Create other indexes
+      await adLinksCollection.createIndex({ creator_id: 1 });
+      await adLinksCollection.createIndex({ created_at: -1 });
+      console.log("✅ Created other indexes");
+    } catch (err) {
+      console.log("⚠️ Other indexes already exist");
+    }
+
   } catch (error) {
-    console.error("❌ MongoDB connection error:", error);
-    process.exit(1);
+    console.error("❌ MongoDB connection error:", error.message);
+    // Don't exit - continue without indexes
+    console.log("⚠️ Continuing without database indexes...");
   }
 }
-
 connectDB();
 
 // ========================
