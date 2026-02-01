@@ -21,6 +21,15 @@ const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 // API Authentication
 const API_KEYS = new Set(process.env.API_KEYS ? process.env.API_KEYS.split(',') : []);
 
+// Blogger Configuration
+const BLOGGER_CONFIG = {
+  enabled: process.env.BLOGGER_ENABLED === "true",
+  default_blogger_url: process.env.DEFAULT_BLOGGER_URL || "https://mythobot.blogspot.com",
+  default_title: "Content Loading... Please Wait",
+  default_delay: 3,
+  skip_blogger: process.env.SKIP_BLOGGER === "true"
+};
+
 const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
@@ -29,15 +38,26 @@ let maskCollection;
 let adLinksCollection;
 
 async function connectDB() {
-  await client.connect();
-  const db = client.db("mythobot");
-  doubleCollection = db.collection("double_points");
-  urlShortenerCollection = db.collection("url_shortener");
-  downloadsCollection = db.collection("youtube_downloads");
-  maskCollection = db.collection("masked_links");
-  adLinksCollection = db.collection("ad_links");
+  try {
+    await client.connect();
+    const db = client.db("mythobot");
+    doubleCollection = db.collection("double_points");
+    urlShortenerCollection = db.collection("url_shortener");
+    downloadsCollection = db.collection("youtube_downloads");
+    maskCollection = db.collection("masked_links");
+    adLinksCollection = db.collection("ad_links");
 
-  console.log("✅ MongoDB connected");
+    // Create indexes
+    await adLinksCollection.createIndex({ short_id: 1 }, { unique: true });
+    await adLinksCollection.createIndex({ blogger_code: 1 }, { unique: true });
+    await adLinksCollection.createIndex({ creator_id: 1 });
+    await adLinksCollection.createIndex({ created_at: -1 });
+
+    console.log("✅ MongoDB connected");
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error);
+    process.exit(1);
+  }
 }
 
 connectDB();
@@ -58,7 +78,9 @@ function authenticateAPI(req, res, next) {
   next();
 }
 
-// Simple Base62 Encoding/Decoding functions
+// ========================
+// UTILITY FUNCTIONS
+// ========================
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function base62_encode(data) {
@@ -120,7 +142,6 @@ function base62_decode(encoded) {
     }
 }
 
-// 🔹 Telegram Notification Function
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
     console.log("🔔 Telegram notification (simulated):", message);
@@ -153,606 +174,31 @@ async function sendTelegramNotification(message) {
   }
 }
 
-// ========================
-// BLOGGER REDIRECTION SYSTEM
-// ========================
-
-// 🔹 1. Create Blogger-Friendly Short Link API
-app.get("/api/v1/blogger/shorten", authenticateAPI, async (req, res) => {
-  const { 
-    url, 
-    user_id, 
-    blogger_url,
-    blogger_title = "Click to Continue",
-    blogger_delay = 3,
-    ad_type = "timer",
-    wait_time = 5,
-    reward_type = "points"
-  } = req.query;
-  
-  // Required parameters validation
-  if (!url || !user_id || !blogger_url) {
-    return res.json({
-      success: false,
-      error: "Missing required parameters: url, user_id, blogger_url"
-    });
+function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
+  if (mythoPointsApplied) {
+    const discount = originalPrice * 0.3;
+    return Math.max(1, Math.round(originalPrice - discount));
   }
-  
-  try {
-    // Validate URLs
-    new URL(url);
-    new URL(blogger_url);
-    
-    // Generate unique IDs
-    const shortId = crypto.randomBytes(4).toString("hex");
-    const bloggerCode = crypto.randomBytes(3).toString("hex");
-    
-    // Ad configuration
-    const adConfig = {
-      type: ad_type,
-      wait_time: parseInt(wait_time),
-      reward_type: reward_type,
-      earnings_per_click: 0.001,
-      blogger: {
-        url: blogger_url,
-        title: blogger_title,
-        delay: parseInt(blogger_delay)
-      }
-    };
-    
-    // Create URLs
-    const shortUrl = `https://${req.hostname}/s/${shortId}`;
-    const bloggerRedirectUrl = `https://${req.hostname}/blogger/${bloggerCode}`;
-    const directUrl = `https://${req.hostname}/adgate/${shortId}`;
-    
-    // Store in database
-    await adLinksCollection.insertOne({
-      short_id: shortId,
-      blogger_code: bloggerCode,
-      creator_id: parseInt(user_id),
-      target_url: url,
-      blogger_url: blogger_url,
-      ad_config: adConfig,
-      created_at: new Date(),
-      clicks: 0,
-      blogger_clicks: 0,
-      earnings: 0,
-      status: "active",
-      access_logs: [],
-      blogger_logs: [],
-      metadata: {
-        created_via: "blogger_api",
-        blogger_title: blogger_title,
-        blogger_delay: blogger_delay
-      }
-    });
-    
-    res.json({
-      success: true,
-      data: {
-        short_id: shortId,
-        blogger_code: bloggerCode,
-        short_url: shortUrl,
-        blogger_redirect_url: bloggerRedirectUrl,
-        direct_ad_url: directUrl,
-        blogger_config: adConfig.blogger,
-        ad_config: adConfig,
-        user_id: parseInt(user_id),
-        created_at: new Date().toISOString(),
-        stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
-        blogger_stats_url: `https://${req.hostname}/api/v1/blogger/stats/${bloggerCode}?api_key=${req.query.api_key}`
-      },
-      message: "Blogger short link created successfully"
-    });
-    
-  } catch (error) {
-    console.error("Blogger API shorten error:", error);
-    res.json({
-      success: false,
-      error: error.code === 'ERR_INVALID_URL' ? 'Invalid URL format' : 'Internal server error'
-    });
-  }
-});
-
-// Add this after other routes but before app.listen()
-
-// 🔹 Generate Your Own API Key
-app.get("/generate-api-key", (req, res) => {
-  const { user_id } = req.query;
-  
-  if (!user_id) {
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Generate API Key</title>
-        <style>
-          body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
-          .form-group { margin: 15px 0; }
-          label { display: block; margin-bottom: 5px; font-weight: bold; }
-          input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-          button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-          .api-key { background: #f4f4f4; padding: 15px; border-radius: 5px; font-family: monospace; margin: 15px 0; }
-        </style>
-      </head>
-      <body>
-        <h1>🔑 Generate API Key</h1>
-        <form method="GET" action="/create-api-key">
-          <div class="form-group">
-            <label for="user_id">Your User ID:</label>
-            <input type="number" id="user_id" name="user_id" required placeholder="5189870730">
-          </div>
-          <div class="form-group">
-            <label for="email">Email (optional):</label>
-            <input type="email" id="email" name="email" placeholder="your@email.com">
-          </div>
-          <button type="submit">Generate API Key</button>
-        </form>
-      </body>
-      </html>
-    `);
-  }
-  
-  // Generate API key
-  const apiKey = crypto.randomBytes(32).toString('hex');
-  
-  // Store in database
-  const apiKeysCollection = client.db("mythobot").collection("api_keys");
-  apiKeysCollection.insertOne({
-    api_key: apiKey,
-    user_id: parseInt(user_id),
-    created_at: new Date(),
-    is_active: true,
-    requests: 0
-  });
-  
-  // Also add to environment variable (temporary)
-  API_KEYS.add(apiKey);
-  
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>API Key Generated</title>
-      <style>
-        body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
-        .success { color: green; font-size: 24px; }
-        .api-key { background: #f4f4f4; padding: 15px; border-radius: 5px; font-family: monospace; margin: 15px 0; word-break: break-all; }
-        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 15px 0; }
-      </style>
-    </head>
-    <body>
-      <div class="success">✅ API Key Generated Successfully!</div>
-      
-      <h2>Your API Key:</h2>
-      <div class="api-key">${apiKey}</div>
-      
-      <div class="warning">
-        ⚠️ <strong>Important:</strong> Save this key now! It won't be shown again.
-      </div>
-      
-      <h3>Usage Examples:</h3>
-      <pre>
-https://your-domain.com/api/v1/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}
-
-https://your-domain.com/api/v1/blogger/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}&blogger_url=https://your-blog.com
-      </pre>
-      
-      <a href="/dashboard/${user_id}">Go to Dashboard</a>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 Create API Key Endpoint
-app.get("/create-api-key", async (req, res) => {
-  const { user_id, email } = req.query;
-  
-  if (!user_id) {
-    return res.redirect("/generate-api-key");
-  }
-  
-  // Generate API key
-  const apiKey = `mythobot_${crypto.randomBytes(16).toString('hex')}`;
-  
-  // Store in database
-  const apiKeysCollection = client.db("mythobot").collection("api_keys");
-  await apiKeysCollection.insertOne({
-    api_key: apiKey,
-    user_id: parseInt(user_id),
-    email: email || null,
-    created_at: new Date(),
-    is_active: true,
-    requests: 0,
-    last_used: null
-  });
-  
-  // Add to current session
-  API_KEYS.add(apiKey);
-  
-  // Send to Telegram bot if configured
-  if (TELEGRAM_ADMIN_CHAT_ID) {
-    const message = `
-🔑 <b>NEW API KEY GENERATED</b>
-
-👤 <b>User ID:</b> <code>${user_id}</code>
-📧 <b>Email:</b> ${email || 'Not provided'}
-🕒 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-🔑 <b>Key:</b> <code>${apiKey.substring(0, 20)}...</code>
-
-⚠️ <i>Stored in database</i>
-    `;
-    
-    await sendTelegramNotification(message);
-  }
-  
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>API Key Created</title>
-      <style>
-        body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
-        .key-box { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          color: white; 
-          padding: 20px; 
-          border-radius: 10px; 
-          margin: 20px 0;
-          font-family: monospace;
-          word-break: break-all;
-        }
-        .example { 
-          background: #f8f9fa; 
-          padding: 15px; 
-          border-radius: 5px; 
-          margin: 15px 0;
-          overflow-x: auto;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>🎉 API Key Created Successfully!</h1>
-      
-      <div class="key-box">
-        <strong>Your API Key:</strong><br>
-        ${apiKey}
-      </div>
-      
-      <h2>📋 How to Use:</h2>
-      
-      <h3>1. Create Regular Short Link:</h3>
-      <div class="example">
-        <code>
-https://${req.hostname}/api/v1/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}
-        </code>
-      </div>
-      
-      <h3>2. Create Blogger Short Link:</h3>
-      <div class="example">
-        <code>
-https://${req.hostname}/api/v1/blogger/shorten?api_key=${apiKey}&url=https://example.com&user_id=${user_id}&blogger_url=https://your-blog.com
-        </code>
-      </div>
-      
-      <h3>3. Test in Browser:</h3>
-      <p>Copy this URL and paste in browser:</p>
-      <div class="example">
-        <code>
-https://${req.hostname}/api/v1/shorten?api_key=${apiKey}&url=https://google.com&user_id=${user_id}
-        </code>
-      </div>
-      
-      <div style="margin-top: 30px; padding: 15px; background: #d4edda; border-radius: 5px;">
-        <strong>✅ Key has been saved to database.</strong><br>
-        You can now use it with your bot or scripts.
-      </div>
-      
-      <div style="margin-top: 20px;">
-        <a href="/dashboard/${user_id}" style="display: inline-block; padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px;">
-          📊 Go to Dashboard
-        </a>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 List Your API Keys
-app.get("/my-api-keys/:user_id", async (req, res) => {
-  const { user_id } = req.params;
-  
-  const apiKeysCollection = client.db("mythobot").collection("api_keys");
-  const keys = await apiKeysCollection
-    .find({ user_id: parseInt(user_id) })
-    .sort({ created_at: -1 })
-    .toArray();
-  
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>My API Keys</title>
-      <style>
-        body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background: #f8f9fa; }
-        .key-cell { font-family: monospace; word-break: break-all; }
-        .active { color: green; }
-        .inactive { color: red; }
-      </style>
-    </head>
-    <body>
-      <h1>🔑 My API Keys</h1>
-      <p>User ID: ${user_id}</p>
-      
-      ${keys.length === 0 ? `
-        <p>No API keys found. <a href="/generate-api-key?user_id=${user_id}">Generate one now</a></p>
-      ` : `
-        <table>
-          <thead>
-            <tr>
-              <th>API Key</th>
-              <th>Created</th>
-              <th>Requests</th>
-              <th>Status</th>
-              <th>Last Used</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${keys.map(key => `
-              <tr>
-                <td class="key-cell">${key.api_key}</td>
-                <td>${new Date(key.created_at).toLocaleDateString()}</td>
-                <td>${key.requests || 0}</td>
-                <td class="${key.is_active ? 'active' : 'inactive'}">
-                  ${key.is_active ? '✅ Active' : '❌ Inactive'}
-                </td>
-                <td>${key.last_used ? new Date(key.last_used).toLocaleString() : 'Never'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `}
-      
-      <div style="margin-top: 20px;">
-        <a href="/generate-api-key?user_id=${user_id}" style="display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px;">
-          🔑 Generate New Key
-        </a>
-        <a href="/dashboard/${user_id}" style="display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px;">
-          📊 Dashboard
-        </a>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 2. Blogger Redirection Page
-app.get("/blogger/:code", async (req, res) => {
-  const { code } = req.params;
-  const { ref, source } = req.query;
-  
-  try {
-    const linkData = await adLinksCollection.findOne({ 
-      blogger_code: code,
-      status: "active"
-    });
-    
-    if (!linkData) {
-      return res.status(404).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Link Not Found</title>
-          <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-            .container { max-width: 600px; margin: 0 auto; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>Link Not Found</h1>
-            <p>This blogger redirection link has expired or doesn't exist.</p>
-          </div>
-        </body>
-        </html>
-      `);
-    }
-    
-    // Track blogger visit
-    await adLinksCollection.updateOne(
-      { blogger_code: code },
-      { 
-        $inc: { blogger_clicks: 1 },
-        $push: {
-          blogger_logs: {
-            type: 'visit',
-            timestamp: new Date(),
-            ip: req.ip,
-            user_agent: req.get("user-agent"),
-            referer: req.get("referer"),
-            ref: ref || null,
-            source: source || null
-          }
-        }
-      }
-    );
-    
-    // Blogger page configuration
-    const bloggerConfig = linkData.ad_config?.blogger || {};
-    const delay = bloggerConfig.delay || 3;
-    const title = bloggerConfig.title || "Redirecting...";
-    
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${title}</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-        <style>
-          .pulse {
-            animation: pulse 2s infinite;
-          }
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-          }
-        </style>
-      </head>
-      <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center">
-        <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full text-center">
-          <div class="mb-6">
-            <div class="text-5xl mb-4 pulse">
-              <i class="fas fa-external-link-alt text-blue-500"></i>
-            </div>
-            <h1 class="text-2xl font-bold text-gray-800">${title}</h1>
-            <p class="text-gray-600 mt-2">You are being redirected to the content...</p>
-          </div>
-          
-          <div class="mb-6">
-            <div class="flex items-center justify-center mb-4">
-              <div class="w-full bg-gray-200 rounded-full h-2.5">
-                <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
-              </div>
-            </div>
-            <p class="text-sm text-gray-500">
-              Redirecting in <span id="countdown">${delay}</span> seconds...
-            </p>
-          </div>
-          
-          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <div class="flex items-center justify-center text-blue-800">
-              <i class="fas fa-shield-alt mr-2"></i>
-              <span class="text-sm">Secure Connection • Safe Redirect</span>
-            </div>
-          </div>
-          
-          <div class="space-y-3">
-            <button onclick="redirectNow()" 
-              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all">
-              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue Now
-            </button>
-            
-            <a href="${linkData.blogger_url}" 
-              target="_blank"
-              class="inline-block w-full py-2 text-blue-600 hover:text-blue-800">
-              <i class="fas fa-external-link-alt mr-2"></i>Visit Blogger Page Instead
-            </a>
-          </div>
-        </div>
-        
-        <script>
-          const delay = ${delay};
-          const shortUrl = "https://${req.hostname}/s/${linkData.short_id}";
-          let countdown = delay;
-          const countdownElement = document.getElementById('countdown');
-          const progressBar = document.getElementById('progressBar');
-          
-          const timer = setInterval(() => {
-            countdown--;
-            countdownElement.textContent = countdown;
-            progressBar.style.width = \`\${((delay - countdown) / delay) * 100}%\`;
-            
-            if (countdown <= 0) {
-              clearInterval(timer);
-              window.location.href = shortUrl;
-            }
-          }, 1000);
-          
-          function redirectNow() {
-            clearInterval(timer);
-            window.location.href = shortUrl;
-          }
-          
-          // Auto-redirect
-          setTimeout(redirectNow, delay * 1000);
-        </script>
-      </body>
-      </html>
-    `);
-    
-  } catch (error) {
-    console.error("Blogger redirect error:", error);
-    res.status(500).send("Internal server error");
-  }
-});
-
-// 🔹 3. Blogger Link Statistics API
-app.get("/api/v1/blogger/stats/:bloggerCode", authenticateAPI, async (req, res) => {
-  const { bloggerCode } = req.params;
-  const { user_id } = req.query;
-  
-  try {
-    const query = { blogger_code: bloggerCode };
-    if (user_id) {
-      query.creator_id = parseInt(user_id);
-    }
-    
-    const linkData = await adLinksCollection.findOne(query);
-    
-    if (!linkData) {
-      return res.json({
-        success: false,
-        error: "Blogger link not found or access denied"
-      });
-    }
-    
-    // Calculate stats
-    const totalBloggerClicks = linkData.blogger_clicks || 0;
-    const totalAdClicks = linkData.clicks || 0;
-    const conversionRate = totalBloggerClicks > 0 
-      ? ((totalAdClicks / totalBloggerClicks) * 100).toFixed(2) 
-      : 0;
-    
-    res.json({
-      success: true,
-      data: {
-        blogger_code: bloggerCode,
-        short_id: linkData.short_id,
-        blogger_url: linkData.blogger_url,
-        target_url: linkData.target_url,
-        created_at: linkData.created_at,
-        total_blogger_clicks: totalBloggerClicks,
-        total_ad_clicks: totalAdClicks,
-        conversion_rate: `${conversionRate}%`,
-        earnings: parseFloat((linkData.earnings || 0).toFixed(3)),
-        blogger_config: linkData.ad_config?.blogger,
-        blogger_logs: linkData.blogger_logs?.slice(0, 20) || [],
-        short_url: `https://${req.hostname}/s/${linkData.short_id}`,
-        blogger_redirect_url: `https://${req.hostname}/blogger/${bloggerCode}`
-      }
-    });
-    
-  } catch (error) {
-    console.error("Blogger stats error:", error);
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
+  return originalPrice;
+}
 
 // ========================
-// BOT API ENDPOINTS
+// API ENDPOINTS
 // ========================
 
-// 🔹 1. Generate Ad Short Link API (for bot)
+// 🔹 1. Universal Blogger Short Link Creation
 app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
   const { 
     url, 
     user_id, 
+    blogger_url = BLOGGER_CONFIG.default_blogger_url,
+    blogger_title = BLOGGER_CONFIG.default_title,
+    blogger_delay = BLOGGER_CONFIG.default_delay,
     ad_type = "timer",
     wait_time = 5,
     reward_type = "points",
     custom_alias,
-    campaign_name,
-    title,
-    description
+    skip_blogger = "false"
   } = req.query;
   
   if (!url || !user_id) {
@@ -782,333 +228,117 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       shortId = crypto.randomBytes(4).toString("hex");
     }
     
+    const bloggerCode = crypto.randomBytes(3).toString("hex");
+    const useBlogger = skip_blogger !== "true" && BLOGGER_CONFIG.enabled;
+    
+    const shortUrl = `https://${req.hostname}/s/${shortId}`;
+    const bloggerRedirectUrl = `https://${req.hostname}/blogger/${bloggerCode}`;
+    const directAdUrl = `https://${req.hostname}/adgate/${shortId}`;
+    
     const adConfig = {
       type: ad_type,
       wait_time: parseInt(wait_time),
       reward_type: reward_type,
-      earnings_per_click: 0.001,
-      campaign: campaign_name || null,
-      title: title || null,
-      description: description || null
+      earnings_per_click: 0.001
     };
-    
-    const shortUrl = `https://${req.hostname}/s/${shortId}`;
-    const directUrl = `https://${req.hostname}/adgate/${shortId}`;
-    const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shortUrl)}`;
     
     await adLinksCollection.insertOne({
       short_id: shortId,
+      blogger_code: bloggerCode,
       creator_id: parseInt(user_id),
       target_url: url,
+      blogger_url: useBlogger ? blogger_url : null,
+      blogger_config: {
+        enabled: useBlogger,
+        title: blogger_title,
+        delay: parseInt(blogger_delay),
+        url: blogger_url
+      },
       ad_config: adConfig,
       custom_alias: custom_alias || null,
       created_at: new Date(),
       clicks: 0,
-      views: 0,
+      blogger_clicks: 0,
+      direct_clicks: 0,
       earnings: 0,
       status: "active",
-      total_earnings: 0,
-      today_clicks: 0,
       access_logs: [],
+      blogger_logs: [],
       metadata: {
-        user_agent: req.get("user-agent"),
-        ip: req.ip,
         created_via: "api",
-        api_key: req.query.api_key
+        skip_blogger: skip_blogger === "true",
+        ip: req.ip
       }
     });
     
+    const responseData = {
+      success: true,
+      data: {
+        short_id: shortId,
+        blogger_code: bloggerCode,
+        user_id: parseInt(user_id),
+        created_at: new Date().toISOString(),
+        blogger_config: {
+          enabled: useBlogger,
+          url: blogger_url,
+          title: blogger_title,
+          delay: blogger_delay
+        },
+        ad_config: adConfig,
+        stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
+        delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`
+      },
+      message: useBlogger 
+        ? "Short link created with automatic Blogger redirection" 
+        : "Short link created (Blogger redirection disabled)"
+    };
+    
+    if (useBlogger) {
+      responseData.data.primary_url = bloggerRedirectUrl;
+      responseData.data.blogger_redirect_url = bloggerRedirectUrl;
+      responseData.data.short_url = shortUrl;
+      responseData.data.direct_ad_url = directAdUrl;
+      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(bloggerRedirectUrl)}`;
+    } else {
+      responseData.data.primary_url = directAdUrl;
+      responseData.data.short_url = directAdUrl;
+      responseData.data.direct_ad_url = directAdUrl;
+      responseData.data.qr_code = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(directAdUrl)}`;
+    }
+    
     if (TELEGRAM_ADMIN_CHAT_ID && process.env.NOTIFY_NEW_LINKS === "true") {
       const notification = `
-🔗 <b>New Short Link Created via API</b>
+🔗 <b>New ${useBlogger ? 'Blogger ' : ''}Short Link Created</b>
 
 👤 <b>User ID:</b> <code>${user_id}</code>
 📝 <b>Short ID:</b> <code>${shortId}</code>
+${useBlogger ? `🌐 <b>Blogger:</b> ${blogger_url.substring(0, 30)}...\n` : ''}
 🎯 <b>Ad Type:</b> ${ad_type}
 ⏱️ <b>Wait Time:</b> ${wait_time}s
-💰 <b>Reward Type:</b> ${reward_type}
 
-🔗 <b>Short URL:</b> ${shortUrl}
-🎯 <b>Target URL:</b> ${url.substring(0, 50)}...
-
+🔗 <b>Primary URL:</b> ${useBlogger ? bloggerRedirectUrl : directAdUrl}
+${useBlogger ? `🎯 <b>Direct URL:</b> ${directAdUrl}\n` : ''}
 📊 <b>Stats:</b> <a href="https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}">View Stats</a>
       `;
       
       await sendTelegramNotification(notification);
     }
     
-    res.json({
-      success: true,
-      data: {
-        short_id: shortId,
-        short_url: shortUrl,
-        direct_url: directUrl,
-        telegram_share_url: telegramUrl,
-        qr_code: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shortUrl)}`,
-        ad_config: adConfig,
-        user_id: parseInt(user_id),
-        created_at: new Date().toISOString(),
-        stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
-        delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`,
-        preview_url: `https://${req.hostname}/api/v1/preview/${shortId}`
-      },
-      message: "Short link created successfully"
-    });
+    res.json(responseData);
     
   } catch (error) {
     console.error("API shorten error:", error);
     res.json({
       success: false,
-      error: error.code === 'ERR_INVALID_URL' ? 'Invalid URL format' : 'Internal server error'
+      error: error.code === 'ERR_INVALID_URL' ? 'Invalid URL format' : error.message
     });
   }
 });
 
-// 🔹 2. Get Link Statistics API
-app.get("/api/v1/stats/:shortId", authenticateAPI, async (req, res) => {
-  const { shortId } = req.params;
-  const { user_id, days = 7 } = req.query;
-  
-  try {
-    const query = { short_id: shortId };
-    if (user_id) {
-      query.creator_id = parseInt(user_id);
-    }
-    
-    const linkData = await adLinksCollection.findOne(query);
-    
-    if (!linkData) {
-      return res.json({
-        success: false,
-        error: "Link not found or access denied"
-      });
-    }
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayClicks = linkData.access_logs?.filter(log => 
-      log.type === 'click' && new Date(log.timestamp) >= today
-    ).length || 0;
-    
-    const earningsByDay = {};
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
-    
-    for (let i = 0; i < parseInt(days); i++) {
-      const date = new Date(startDate);
-      date.setDate(date.getDate() + i);
-      const dateStr = date.toISOString().split('T')[0];
-      earningsByDay[dateStr] = 0;
-    }
-    
-    if (linkData.access_logs) {
-      linkData.access_logs.forEach(log => {
-        if (log.earned) {
-          const logDate = new Date(log.timestamp).toISOString().split('T')[0];
-          if (earningsByDay[logDate] !== undefined) {
-            earningsByDay[logDate] += 0.001;
-          }
-        }
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: {
-        short_id: shortId,
-        target_url: linkData.target_url,
-        created_at: linkData.created_at,
-        total_clicks: linkData.clicks || 0,
-        total_views: linkData.views || 0,
-        total_earnings: parseFloat((linkData.earnings || 0).toFixed(3)),
-        today_clicks: todayClicks,
-        today_earnings: parseFloat((todayClicks * 0.001).toFixed(3)),
-        ad_config: linkData.ad_config,
-        status: linkData.status,
-        earnings_by_day: earningsByDay,
-        blogger_clicks: linkData.blogger_clicks || 0,
-        blogger_url: linkData.blogger_url || null,
-        recent_clicks: linkData.access_logs?.slice(0, 10).map(log => ({
-          timestamp: log.timestamp,
-          ip: log.ip,
-          earned: log.earned,
-          user_agent: log.user_agent
-        })) || []
-      }
-    });
-    
-  } catch (error) {
-    console.error("Stats error:", error);
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-// 🔹 3. Delete Link API
-app.delete("/api/v1/delete/:shortId", authenticateAPI, async (req, res) => {
-  const { shortId } = req.params;
-  const { user_id } = req.query;
-  
-  try {
-    const query = { short_id: shortId };
-    if (user_id) {
-      query.creator_id = parseInt(user_id);
-    }
-    
-    const result = await adLinksCollection.deleteOne(query);
-    
-    if (result.deletedCount === 0) {
-      return res.json({
-        success: false,
-        error: "Link not found or access denied"
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: "Link deleted successfully"
-    });
-    
-  } catch (error) {
-    console.error("Delete error:", error);
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-// 🔹 4. List User Links API
-app.get("/api/v1/user/:userId/links", authenticateAPI, async (req, res) => {
-  const { userId } = req.params;
-  const { page = 1, limit = 20, status = "active" } = req.query;
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-  
-  try {
-    const query = { creator_id: parseInt(userId) };
-    if (status !== "all") {
-      query.status = status;
-    }
-    
-    const links = await adLinksCollection
-      .find(query)
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .toArray();
-    
-    const total = await adLinksCollection.countDocuments(query);
-    
-    const formattedLinks = links.map(link => ({
-      short_id: link.short_id,
-      blogger_code: link.blogger_code,
-      short_url: `https://${req.hostname}/s/${link.short_id}`,
-      blogger_url: link.blogger_url ? `https://${req.hostname}/blogger/${link.blogger_code}` : null,
-      target_url: link.target_url,
-      created_at: link.created_at,
-      clicks: link.clicks || 0,
-      blogger_clicks: link.blogger_clicks || 0,
-      earnings: parseFloat((link.earnings || 0).toFixed(3)),
-      ad_type: link.ad_config?.type,
-      status: link.status,
-      custom_alias: link.custom_alias
-    }));
-    
-    res.json({
-      success: true,
-      data: {
-        links: formattedLinks,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
-    
-  } catch (error) {
-    console.error("User links error:", error);
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-// 🔹 5. Get User Earnings Summary
-app.get("/api/v1/user/:userId/earnings", authenticateAPI, async (req, res) => {
-  const { userId } = req.params;
-  
-  try {
-    const links = await adLinksCollection.find({ 
-      creator_id: parseInt(userId) 
-    }).toArray();
-    
-    const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
-    const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
-    const totalBloggerClicks = links.reduce((sum, link) => sum + (link.blogger_clicks || 0), 0);
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    let todayEarnings = 0;
-    let todayClicks = 0;
-    
-    links.forEach(link => {
-      if (link.access_logs) {
-        link.access_logs.forEach(log => {
-          if (log.type === 'click' && new Date(log.timestamp) >= today) {
-            todayClicks++;
-            if (log.earned) {
-              todayEarnings += 0.001;
-            }
-          }
-        });
-      }
-    });
-    
-    res.json({
-      success: true,
-      data: {
-        user_id: parseInt(userId),
-        total_links: links.length,
-        total_clicks: totalClicks,
-        total_blogger_clicks: totalBloggerClicks,
-        total_earnings: parseFloat(totalEarnings.toFixed(3)),
-        today_clicks: todayClicks,
-        today_earnings: parseFloat(todayEarnings.toFixed(3)),
-        average_cpc: totalClicks > 0 ? parseFloat((totalEarnings / totalClicks).toFixed(3)) : 0,
-        links_summary: links.map(link => ({
-          short_id: link.short_id,
-          clicks: link.clicks || 0,
-          blogger_clicks: link.blogger_clicks || 0,
-          earnings: parseFloat((link.earnings || 0).toFixed(3)),
-          status: link.status,
-          created_at: link.created_at
-        }))
-      }
-    });
-    
-  } catch (error) {
-    console.error("Earnings error:", error);
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-// ========================
-// AD LINKFLY SYSTEM
-// ========================
-
-// 🔹 Short URL Redirect
+// 🔹 2. Short URL Redirect (Auto-redirects to Blogger)
 app.get("/s/:shortId", async (req, res) => {
   const { shortId } = req.params;
+  const { direct } = req.query;
   
   try {
     const linkData = await adLinksCollection.findOne({ 
@@ -1141,21 +371,228 @@ app.get("/s/:shortId", async (req, res) => {
       `);
     }
     
-    // Increment view count
     await adLinksCollection.updateOne(
       { short_id: shortId },
       { $inc: { views: 1 } }
     );
     
-    // Redirect to ad gateway
-    res.redirect(`/adgate/${shortId}`);
+    const skipBlogger = direct === "true" || !linkData.blogger_config?.enabled;
+    
+    if (skipBlogger) {
+      res.redirect(`/adgate/${shortId}`);
+    } else {
+      res.redirect(`/blogger/${linkData.blogger_code}`);
+    }
     
   } catch (error) {
+    console.error("Short URL error:", error);
     res.status(500).send("Internal server error");
   }
 });
 
-// 🔹 Ad Gateway
+// 🔹 3. Blogger Redirection Page
+app.get("/blogger/:code", async (req, res) => {
+  const { code } = req.params;
+  const { ref, source, skip } = req.query;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      blogger_code: code,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Link Not Found</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .container { max-width: 600px; margin: 0 auto; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Blogger Link Not Found</h1>
+            <p>This blogger redirection link has expired or doesn't exist.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    if (skip === "true") {
+      await adLinksCollection.updateOne(
+        { blogger_code: code },
+        { 
+          $push: {
+            blogger_logs: {
+              type: 'skipped',
+              timestamp: new Date(),
+              ip: req.ip
+            }
+          }
+        }
+      );
+      
+      return res.redirect(`/adgate/${linkData.short_id}`);
+    }
+    
+    await adLinksCollection.updateOne(
+      { blogger_code: code },
+      { 
+        $inc: { blogger_clicks: 1 },
+        $push: {
+          blogger_logs: {
+            type: 'visit',
+            timestamp: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            referer: req.get("referer"),
+            ref: ref || null,
+            source: source || null
+          }
+        }
+      }
+    );
+    
+    const bloggerConfig = linkData.blogger_config || {};
+    const delay = bloggerConfig.delay || 3;
+    const title = bloggerConfig.title || "Redirecting...";
+    const bloggerUrl = linkData.blogger_url || BLOGGER_CONFIG.default_blogger_url;
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+        <style>
+          .pulse { animation: pulse 2s infinite; }
+          @keyframes pulse {
+            0%,100% { opacity: 1; }
+            50% { opacity: 0.7; }
+          }
+          .progress-bar {
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 20px 0;
+          }
+          .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            width: 0%;
+            transition: width 1s linear;
+          }
+        </style>
+      </head>
+      <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full text-center">
+          <div class="mb-6">
+            <div class="text-5xl mb-4 pulse">
+              <i class="fas fa-external-link-alt text-blue-500"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800">${title}</h1>
+            <p class="text-gray-600 mt-2">You are being redirected to the content...</p>
+          </div>
+          
+          <div class="mb-6">
+            <div class="progress-bar">
+              <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <p class="text-sm text-gray-500">
+              Redirecting in <span id="countdown">${delay}</span> seconds...
+            </p>
+          </div>
+          
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-center text-blue-800">
+              <i class="fas fa-blog mr-2"></i>
+              <span class="text-sm">Via: ${new URL(bloggerUrl).hostname}</span>
+            </div>
+          </div>
+          
+          <div class="space-y-3">
+            <button onclick="redirectNow()" 
+              class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all">
+              <i class="fas fa-bolt mr-2"></i>Skip Wait & Continue Now
+            </button>
+            
+            <a href="${bloggerUrl}" 
+              target="_blank"
+              class="inline-block w-full py-2 text-blue-600 hover:text-blue-800">
+              <i class="fas fa-external-link-alt mr-2"></i>Visit Blogger Page
+            </a>
+            
+            <button onclick="skipBlogger()" 
+              class="w-full py-2 text-gray-500 hover:text-gray-700">
+              <i class="fas fa-forward mr-2"></i>Skip Blogger Next Time
+            </button>
+          </div>
+          
+          <div class="mt-6 pt-4 border-t border-gray-200">
+            <p class="text-xs text-gray-500">
+              <i class="fas fa-shield-alt mr-1"></i>
+              Secure redirect via MythoBot • Protected connection
+            </p>
+          </div>
+        </div>
+        
+        <script>
+          const delay = ${delay};
+          const shortId = "${linkData.short_id}";
+          let countdown = delay;
+          const countdownElement = document.getElementById('countdown');
+          const progressFill = document.getElementById('progressFill');
+          
+          const timer = setInterval(() => {
+            countdown--;
+            countdownElement.textContent = countdown;
+            progressFill.style.width = \`\${((delay - countdown) / delay) * 100}%\`;
+            
+            if (countdown <= 0) {
+              clearInterval(timer);
+              redirectToAd();
+            }
+          }, 1000);
+          
+          function redirectNow() {
+            clearInterval(timer);
+            redirectToAd();
+          }
+          
+          function redirectToAd() {
+            window.location.href = \`/adgate/\${shortId}\`;
+          }
+          
+          function skipBlogger() {
+            document.cookie = "skip_blogger=true; max-age=2592000; path=/";
+            redirectToAd();
+          }
+          
+          if (document.cookie.includes("skip_blogger=true")) {
+            skipBlogger();
+          }
+          
+          setTimeout(redirectToAd, delay * 1000);
+        </script>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error("Blogger redirect error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// 🔹 4. Ad Gateway
 app.get("/adgate/:shortId", async (req, res) => {
   const { shortId } = req.params;
   const { ref } = req.query;
@@ -1170,7 +607,6 @@ app.get("/adgate/:shortId", async (req, res) => {
       return res.status(404).send("Link not found or disabled");
     }
     
-    // Check if user has already visited today
     const userIP = req.ip;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1183,7 +619,6 @@ app.get("/adgate/:shortId", async (req, res) => {
     
     const isFirstVisitToday = !existingVisit;
     
-    // Store referral if present
     if (ref) {
       await adLinksCollection.updateOne(
         { short_id: shortId },
@@ -1201,7 +636,6 @@ app.get("/adgate/:shortId", async (req, res) => {
       );
     }
     
-    // Track view
     await adLinksCollection.updateOne(
       { short_id: shortId },
       { 
@@ -1217,7 +651,6 @@ app.get("/adgate/:shortId", async (req, res) => {
       }
     );
     
-    // Render appropriate ad page
     const adType = linkData.ad_config?.type || "timer";
     const waitTime = linkData.ad_config?.wait_time || 5;
     
@@ -1237,6 +670,45 @@ app.get("/adgate/:shortId", async (req, res) => {
     
   } catch (error) {
     console.error("AdGate error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+// 🔹 5. Direct Route (Skip blogger completely)
+app.get("/d/:shortId", async (req, res) => {
+  const { shortId } = req.params;
+  
+  try {
+    const linkData = await adLinksCollection.findOne({ 
+      short_id: shortId,
+      status: "active"
+    });
+    
+    if (!linkData) {
+      return res.status(404).send("Link not found");
+    }
+    
+    await adLinksCollection.updateOne(
+      { short_id: shortId },
+      { 
+        $inc: { direct_clicks: 1 },
+        $push: {
+          access_logs: {
+            type: 'direct_click',
+            timestamp: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            bypassed_blogger: true,
+            bypassed_ad: true
+          }
+        }
+      }
+    );
+    
+    res.redirect(linkData.target_url);
+    
+  } catch (error) {
+    console.error("Direct route error:", error);
     res.status(500).send("Internal server error");
   }
 });
@@ -1271,7 +743,6 @@ function renderTimerAdPage(res, shortId, targetUrl, waitTime, isFirstVisit) {
           <div id="progressFill" class="progress-fill"></div>
         </div>
         
-        <!-- Ad Container -->
         <div class="ad-container mt-6 p-4 bg-gray-100 rounded-lg">
           <p class="text-sm text-gray-500 mb-2">Advertisement</p>
           <div id="adContent" class="mb-4">
@@ -1578,7 +1049,7 @@ function renderBannerAdPage(res, shortId, targetUrl, isFirstVisit) {
 }
 
 // ========================
-// CLICK TRACKING ENDPOINT
+// CLICK TRACKING
 // ========================
 
 app.post("/api/v1/click/:shortId", async (req, res) => {
@@ -1609,8 +1080,7 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
       {
         $inc: { 
           clicks: 1,
-          earnings: earnings,
-          today_clicks: 1
+          earnings: earnings
         },
         $push: {
           access_logs: {
@@ -1638,7 +1108,7 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
 });
 
 // ========================
-// YOUR EXISTING ROUTES
+// EXISTING ROUTES (KEEP ALL YOUR FEATURES)
 // ========================
 
 app.get("/link/:hex", (req, res) => {
@@ -1647,9 +1117,7 @@ app.get("/link/:hex", (req, res) => {
   try {
     const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
     new URL(targetUrl);
-    
     res.redirect(302, targetUrl);
-    
   } catch (error) {
     res.redirect('https://t.me/MythoSerialBot');
   }
@@ -1672,7 +1140,7 @@ app.get("/mask/:encodedUrl", async (req, res) => {
     
     try {
       const maskedCollection = client.db("mythobot").collection("masked_links");
-      maskedCollection.insertOne({
+      await maskedCollection.insertOne({
         encoded: encodedUrl,
         target: targetUrl,
         clicked_at: new Date(),
@@ -1701,9 +1169,7 @@ app.get("/api/mask", (req, res) => {
   
   try {
     new URL(url);
-    
     const encodedUrl = base62_encode(url);
-    
     const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
     
     res.json({
@@ -1735,14 +1201,6 @@ app.get("/test-notification", async (req, res) => {
   res.send('✅ Test notification sent! Check your Telegram.');
 });
 
-function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
-  if (mythoPointsApplied) {
-    const discount = originalPrice * 0.3;
-    return Math.max(1, Math.round(originalPrice - discount));
-  }
-  return originalPrice;
-}
-
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
@@ -1764,8 +1222,6 @@ app.get("/generate/:userId", async (req, res) => {
 
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
-
-  console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
 
   const referer = req.get("referer") || "";
   if (!referer.includes("softurl.in")) {
@@ -1843,301 +1299,232 @@ app.get("/double/:userId/:token", async (req, res) => {
 
   const botUsername = "MythoSerialBot";
   const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
-
   res.redirect(deepLink);
 });
 
 app.get("/Bypass/:userId/:token", async (req, res) => {
-    const { userId, token } = req.params;
-    const { t } = req.query;
+  const { userId, token } = req.params;
+  const { t } = req.query;
+  
+  let dbRecord = null;
+  try {
+    dbRecord = await urlShortenerCollection.findOne({ 
+      token: token,
+      creator_id: parseInt(userId) 
+    });
+  } catch (dbError) {
+    console.error("Database error:", dbError);
+  }
+  
+  if (dbRecord) {
+    await urlShortenerCollection.updateOne(
+      { token: token },
+      { $inc: { clicks: 1 } }
+    );
     
-    console.log(`--- incoming /Bypass request for user=${userId} ---`);
-    
-    let dbRecord = null;
-    try {
-        dbRecord = await urlShortenerCollection.findOne({ 
-            token: token,
-            creator_id: parseInt(userId) 
-        });
-        console.log("Database record found:", dbRecord ? "YES" : "NO");
-    } catch (dbError) {
-        console.error("Database error:", dbError);
-    }
-    
-    if (dbRecord) {
-        console.log("Using URL from database:", dbRecord.target_url);
-        
-        await urlShortenerCollection.updateOne(
-            { token: token },
-            { $inc: { clicks: 1 } }
-        );
-        
-        await urlShortenerCollection.updateOne(
-            { token: token },
-            {
-                $push: {
-                    access_logs: {
-                        accessed_at: new Date(),
-                        ip: req.ip,
-                        user_agent: req.get("user-agent"),
-                        referer: req.get("referer"),
-                        via_db: true
-                    }
-                }
-            }
-        );
-        
-        return res.redirect(dbRecord.target_url);
-    }
-    
-    if (t) {
-        try {
-            console.log("Decoding target from parameter...");
-            
-            let decodedTarget = null;
-            let decodeMethod = "";
-            let decodeError = null;
-            
-            try {
-                decodedTarget = base62_decode(t);
-                new URL(decodedTarget);
-                decodeMethod = "base62";
-                console.log("Successfully decoded via base62:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
-            } catch (e1) {
-                decodeError = e1;
-                console.log("Base62 decode failed:", e1.message);
-                
-                try {
-                    decodedTarget = decodeURIComponent(t);
-                    new URL(decodedTarget);
-                    decodeMethod = "legacy_url";
-                    console.log("Successfully decoded via legacy URL decode:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
-                } catch (e2) {
-                    decodeError = e2;
-                    console.log("Legacy URL decode also failed:", e2.message);
-                    
-                    try {
-                        if (t.startsWith('http://') || t.startsWith('https://') || t.startsWith('t.me/') || t.startsWith('tg://')) {
-                            decodedTarget = t;
-                            new URL(decodedTarget);
-                            decodeMethod = "direct";
-                            console.log("Using direct URL:", decodedTarget.substring(0, 100) + (decodedTarget.length > 100 ? "..." : ""));
-                        } else {
-                            throw new Error("Not a valid URL format");
-                        }
-                    } catch (e3) {
-                        decodeError = e3;
-                        console.log("Direct URL also failed:", e3.message);
-                        throw new Error(`All decode methods failed. Last error: ${decodeError.message}`);
-                    }
-                }
-            }
-            
-            new URL(decodedTarget);
-            
-            await urlShortenerCollection.insertOne({
-                token: token,
-                creator_id: parseInt(userId),
-                target_url: decodedTarget,
-                encoded_target: t,
-                decode_method: decodeMethod,
-                created_at: new Date(),
-                clicks: 1,
-                access_logs: [{
-                    accessed_at: new Date(),
-                    ip: req.ip,
-                    user_agent: req.get("user-agent"),
-                    referer: req.get("referer"),
-                    via_param: true,
-                    decode_method: decodeMethod
-                }]
-            });
-            
-            console.log(`✅ Redirecting user ${userId} to target URL (via ${decodeMethod})`);
-            return res.redirect(decodedTarget);
-            
-        } catch (error) {
-            console.error("Final decoding/validation error:", error.message);
-            
-            await urlShortenerCollection.insertOne({
-                token: token,
-                creator_id: parseInt(userId),
-                encoded_target: t,
-                decode_method: "failed",
-                created_at: new Date(),
-                clicks: 0,
-                error: error.message,
-                access_logs: [{
-                    accessed_at: new Date(),
-                    ip: req.ip,
-                    user_agent: req.get("user-agent"),
-                    referer: req.get("referer"),
-                    error: error.message
-                }]
-            });
-            
-            return res.send(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Invalid Link - MythoBot</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body { 
-                            font-family: Arial, sans-serif; 
-                            max-width: 600px; 
-                            margin: 50px auto; 
-                            padding: 20px; 
-                            text-align: center; 
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                            color: white;
-                        }
-                        .error-container { 
-                            background: rgba(255,255,255,0.1);
-                            padding: 30px;
-                            border-radius: 15px;
-                            backdrop-filter: blur(10px);
-                            border: 1px solid rgba(255,255,255,0.2);
-                            margin: 20px 0;
-                        }
-                        .info-box { 
-                            background: rgba(0,0,0,0.2); 
-                            padding: 15px; 
-                            border-radius: 8px; 
-                            margin: 15px 0; 
-                            font-family: monospace; 
-                            text-align: left;
-                            overflow-wrap: break-word;
-                        }
-                        .btn {
-                            display: inline-block;
-                            background: #8b5cf6;
-                            color: white;
-                            padding: 12px 24px;
-                            border-radius: 25px;
-                            text-decoration: none;
-                            margin-top: 20px;
-                            font-weight: bold;
-                            transition: transform 0.3s;
-                        }
-                        .btn:hover {
-                            transform: scale(1.05);
-                            background: #7c3aed;
-                        }
-                        .emoji {
-                            font-size: 50px;
-                            margin: 10px;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="emoji">🔗❌</div>
-                    <h1>Invalid or Corrupted Link</h1>
-                    
-                    <div class="error-container">
-                        <h3>⚠️ Unable to Process Link</h3>
-                        <p>The link appears to be corrupted or uses an unsupported encoding format.</p>
-                        <p><strong>Error:</strong> ${error.message}</p>
-                        <p>Please regenerate the link from the Telegram bot.</p>
-                    </div>
-                    
-                    <div class="info-box">
-                        <p><strong>Debug Information:</strong></p>
-                        <p><strong>Token:</strong> ${token}</p>
-                        <p><strong>User ID:</strong> ${userId}</p>
-                        <p><strong>Encoded String:</strong> ${t.substring(0, 100)}${t.length > 100 ? '...' : ''}</p>
-                        <p><strong>Length:</strong> ${t.length} characters</p>
-                        <p><strong>Time:</strong> ${new Date().toUTCString()}</p>
-                    </div>
-                    
-                    <a href="https://t.me/MythoSerialBot" class="btn">
-                        <span style="vertical-align: middle;">🤖 Go To MythoBot</span>
-                    </a>
-                    
-                    <div style="margin-top: 30px; font-size: 12px; color: rgba(255,255,255,0.7);">
-                        <p>If this error persists, contact @Sandip10x on Telegram</p>
-                    </div>
-                </body>
-                </html>
-            `);
+    await urlShortenerCollection.updateOne(
+      { token: token },
+      {
+        $push: {
+          access_logs: {
+            accessed_at: new Date(),
+            ip: req.ip,
+            user_agent: req.get("user-agent"),
+            referer: req.get("referer"),
+            via_db: true
+          }
         }
-    }
+      }
+    );
     
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>MythoBot URL Bypass Protection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-align: center;
+    return res.redirect(dbRecord.target_url);
+  }
+  
+  if (t) {
+    try {
+      let decodedTarget = null;
+      let decodeMethod = "";
+      
+      try {
+        decodedTarget = base62_decode(t);
+        new URL(decodedTarget);
+        decodeMethod = "base62";
+      } catch (e1) {
+        try {
+          decodedTarget = decodeURIComponent(t);
+          new URL(decodedTarget);
+          decodeMethod = "legacy_url";
+        } catch (e2) {
+          try {
+            if (t.startsWith('http://') || t.startsWith('https://') || t.startsWith('t.me/') || t.startsWith('tg://')) {
+              decodedTarget = t;
+              new URL(decodedTarget);
+              decodeMethod = "direct";
+            } else {
+              throw new Error("Not a valid URL format");
+            }
+          } catch (e3) {
+            throw new Error("All decode methods failed");
           }
-          .info { 
-            background: rgba(255,255,255,0.1); 
-            padding: 20px; 
-            border-radius: 15px; 
-            margin: 20px 0; 
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-          }
-          code { 
-            background: rgba(0,0,0,0.3); 
-            padding: 2px 6px; 
-            border-radius: 4px; 
-            font-family: monospace;
-          }
-          .btn {
-            display: inline-block;
-            background: #8b5cf6;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 25px;
-            text-decoration: none;
-            margin-top: 20px;
-            font-weight: bold;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>🛡️ MythoBot URL Bypass Protection</h1>
-        
-        <div class="info">
-          <h3>📊 Request Information:</h3>
-          <p><strong>User ID:</strong> <code>${userId}</code></p>
-          <p><strong>Token:</strong> <code>${token}</code></p>
-          <p><strong>Encoded Target:</strong> <code>${t || 'Not provided'}</code></p>
-          <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Status:</strong> 
-            ${t ? '<span style="color: orange;">MISSING_DB_RECORD</span> ⚠️' : '<span style="color: red;">NO_TARGET_PARAMETER</span> ❌'}
-          </p>
-        </div>
-        
-        ${t ? `
-        <div class="info" style="background: rgba(255,165,0,0.2);">
-          <h3>❌ Error Details:</h3>
-          <p>This link appears to be corrupted or incomplete.</p>
-          <p>Please regenerate the link from the bot.</p>
-        </div>
-        ` : `
-        <div class="info">
-          <h3>ℹ️ Usage Information:</h3>
-          <p>This endpoint requires a target URL parameter.</p>
-          <p>Proper format: <code>/Bypass/&lt;userId&gt;/&lt;token&gt;?t=&lt;encoded_url&gt;</code></p>
-        </div>
-        `}
-        
-        <a href="https://t.me/MythoSerialBot" class="btn">🤖 Go to MythoBot</a>
-      </body>
-      </html>
-    `);
+        }
+      }
+      
+      new URL(decodedTarget);
+      
+      await urlShortenerCollection.insertOne({
+        token: token,
+        creator_id: parseInt(userId),
+        target_url: decodedTarget,
+        encoded_target: t,
+        decode_method: decodeMethod,
+        created_at: new Date(),
+        clicks: 1,
+        access_logs: [{
+          accessed_at: new Date(),
+          ip: req.ip,
+          user_agent: req.get("user-agent"),
+          referer: req.get("referer"),
+          via_param: true,
+          decode_method: decodeMethod
+        }]
+      });
+      
+      return res.redirect(decodedTarget);
+      
+    } catch (error) {
+      await urlShortenerCollection.insertOne({
+        token: token,
+        creator_id: parseInt(userId),
+        encoded_target: t,
+        decode_method: "failed",
+        created_at: new Date(),
+        clicks: 0,
+        error: error.message,
+        access_logs: [{
+          accessed_at: new Date(),
+          ip: req.ip,
+          user_agent: req.get("user-agent"),
+          referer: req.get("referer"),
+          error: error.message
+        }]
+      });
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Invalid Link - MythoBot</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              max-width: 600px; 
+              margin: 50px auto; 
+              padding: 20px; 
+              text-align: center; 
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+            }
+            .error-container { 
+              background: rgba(255,255,255,0.1);
+              padding: 30px;
+              border-radius: 15px;
+              backdrop-filter: blur(10px);
+              border: 1px solid rgba(255,255,255,0.2);
+              margin: 20px 0;
+            }
+            .btn {
+              display: inline-block;
+              background: #8b5cf6;
+              color: white;
+              padding: 12px 24px;
+              border-radius: 25px;
+              text-decoration: none;
+              margin-top: 20px;
+              font-weight: bold;
+              transition: transform 0.3s;
+            }
+            .btn:hover {
+              transform: scale(1.05);
+              background: #7c3aed;
+            }
+            .emoji {
+              font-size: 50px;
+              margin: 10px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="emoji">🔗❌</div>
+          <h1>Invalid or Corrupted Link</h1>
+          <div class="error-container">
+            <h3>⚠️ Unable to Process Link</h3>
+            <p>The link appears to be corrupted or uses an unsupported encoding format.</p>
+            <p><strong>Error:</strong> ${error.message}</p>
+            <p>Please regenerate the link from the Telegram bot.</p>
+          </div>
+          <a href="https://t.me/MythoSerialBot" class="btn">
+            <span style="vertical-align: middle;">🤖 Go To MythoBot</span>
+          </a>
+        </body>
+        </html>
+      `);
+    }
+  }
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>MythoBot URL Bypass Protection</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { 
+          font-family: Arial, sans-serif; 
+          max-width: 600px; 
+          margin: 50px auto; 
+          padding: 20px; 
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          text-align: center;
+        }
+        .info { 
+          background: rgba(255,255,255,0.1); 
+          padding: 20px; 
+          border-radius: 15px; 
+          margin: 20px 0; 
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255,255,255,0.2);
+        }
+        .btn {
+          display: inline-block;
+          background: #8b5cf6;
+          color: white;
+          padding: 12px 24px;
+          border-radius: 25px;
+          text-decoration: none;
+          margin-top: 20px;
+          font-weight: bold;
+        }
+      </style>
+    </head>
+    <body>
+      <h1>🛡️ MythoBot URL Bypass Protection</h1>
+      <div class="info">
+        <h3>📊 Request Information:</h3>
+        <p><strong>User ID:</strong> <code>${userId}</code></p>
+        <p><strong>Token:</strong> <code>${token}</code></p>
+        <p><strong>Encoded Target:</strong> <code>${t || 'Not provided'}</code></p>
+        <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
+        <p><strong>IP Address:</strong> ${req.ip}</p>
+        <p><strong>Status:</strong> 
+          ${t ? '<span style="color: orange;">MISSING_DB_RECORD</span> ⚠️' : '<span style="color: red;">NO_TARGET_PARAMETER</span> ❌'}
+        </p>
+      </div>
+      <a href="https://t.me/MythoSerialBot" class="btn">🤖 Go to MythoBot</a>
+    </body>
+    </html>
+  `);
 });
 
 app.get("/shorten", async (req, res) => {
@@ -2152,11 +1539,8 @@ app.get("/shorten", async (req, res) => {
   
   try {
     new URL(url);
-    
     const token = crypto.randomBytes(8).toString("hex");
-    
     const encodedUrl = base62_encode(url);
-    
     const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
     
     await urlShortenerCollection.insertOne({
@@ -2180,7 +1564,6 @@ app.get("/shorten", async (req, res) => {
     });
     
   } catch (error) {
-    console.error("Shorten error:", error);
     res.status(400).json({
       success: false,
       error: "Invalid URL format"
@@ -2214,7 +1597,6 @@ app.get("/stats/:userId", async (req, res) => {
     });
     
   } catch (error) {
-    console.error("Stats error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to fetch statistics"
@@ -2248,7 +1630,6 @@ app.get("/payment", (req, res) => {
         <style>
             .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #8b5cf6; width: 40px; height: 40px; animation: spin 1.5s linear infinite; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
             body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -ms-user-select: none; user-select: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
             .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
             .upi-app { transition: all 0.3s ease; }
@@ -2260,7 +1641,6 @@ app.get("/payment", (req, res) => {
     <body class="flex items-center justify-center min-h-screen p-4">
         <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
             
-            <!-- Header Section -->
             <div class="p-8 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
                 <div class="flex justify-center mb-4">
                     <i class="fa-solid fa-robot fa-3x text-white"></i>
@@ -2276,7 +1656,6 @@ app.get("/payment", (req, res) => {
                 ` : ''}
             </div>
 
-            <!-- Payment Details Section -->
             <div class="p-6 sm:p-8 text-center">
                 ${mythoPointsApplied ? `
                 <div class="flex justify-center items-center gap-4 mb-4">
@@ -2298,7 +1677,6 @@ app.get("/payment", (req, res) => {
                 </div>
                 <p class="text-sm text-slate-600 mt-4 font-semibold">Scan QR to pay via any UPI App</p>
 
-                <!-- MythoPoints Info -->
                 ${!mythoPointsApplied ? `
                 <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
                     <div class="flex items-center justify-center gap-2">
@@ -2314,12 +1692,9 @@ app.get("/payment", (req, res) => {
                 </div>
                 ` : ''}
 
-                <!-- UPI Apps Direct Links -->
                 <div class="mt-6">
                     <p class="text-sm font-semibold text-slate-600 mb-3">Or open directly in:</p>
-                    <div class="grid grid-cols-4 gap-3 mb-4" id="upi-apps-container">
-                        <!-- UPI apps will be dynamically added here -->
-                    </div>
+                    <div class="grid grid-cols-4 gap-3 mb-4" id="upi-apps-container"></div>
                 </div>
 
                 <div class="flex items-center my-6">
@@ -2335,7 +1710,6 @@ app.get("/payment", (req, res) => {
                 </div>
             </div>
             
-            <!-- Instructions Section -->
             <div class="bg-purple-50 p-6 sm:p-8">
                 <h3 class="text-lg font-bold text-slate-800 text-center">What happens next?</h3>
                 <p class="text-slate-600 text-center mt-2 text-sm">After successful payment, send screenshot to @${adminUsername} on Telegram to activate your premium features.</p>
@@ -2365,7 +1739,6 @@ app.get("/payment", (req, res) => {
                 const upiAppsContainer = document.getElementById('upi-apps-container');
 
                 const finalAmount = ${finalAmount};
-                
                 const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
                 const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
                 
@@ -2384,54 +1757,14 @@ app.get("/payment", (req, res) => {
                 };
 
                 const upiApps = [
-                    {
-                        name: "GPay",
-                        package: "com.google.android.apps.nbu.paisa.user",
-                        icon: "fa-brands fa-google-pay",
-                        color: "bg-gradient-to-r from-blue-500 to-purple-600"
-                    },
-                    {
-                        name: "Paytm",
-                        package: "net.one97.paytm",
-                        icon: "fa-solid fa-mobile-screen-button",
-                        color: "bg-gradient-to-r from-blue-600 to-blue-800"
-                    },
-                    {
-                        name: "PhonePe",
-                        package: "com.phonepe.app",
-                        icon: "fa-solid fa-phone",
-                        color: "bg-gradient-to-r from-purple-600 to-purple-800"
-                    },
-                    {
-                        name: "BHIM",
-                        package: "in.org.npci.upiapp",
-                        icon: "fa-solid fa-indian-rupee-sign",
-                        color: "bg-gradient-to-r from-green-600 to-green-800"
-                    },
-                    {
-                        name: "Amazon Pay",
-                        package: "in.amazon.mShop.android.shopping",
-                        icon: "fa-brands fa-amazon",
-                        color: "bg-gradient-to-r from-yellow-500 to-orange-500"
-                    },
-                    {
-                        name: "WhatsApp",
-                        package: "com.whatsapp",
-                        icon: "fa-brands fa-whatsapp",
-                        color: "bg-gradient-to-r from-green-500 to-green-600"
-                    },
-                    {
-                        name: "Cred",
-                        package: "com.dreamplug.androidapp",
-                        icon: "fa-solid fa-gem",
-                        color: "bg-gradient-to-r from-purple-700 to-purple-900"
-                    },
-                    {
-                        name: "Any UPI",
-                        package: "",
-                        icon: "fa-solid fa-wallet",
-                        color: "bg-gradient-to-r from-gray-600 to-gray-800"
-                    }
+                    { name: "GPay", package: "com.google.android.apps.nbu.paisa.user", icon: "fa-brands fa-google-pay", color: "bg-gradient-to-r from-blue-500 to-purple-600" },
+                    { name: "Paytm", package: "net.one97.paytm", icon: "fa-solid fa-mobile-screen-button", color: "bg-gradient-to-r from-blue-600 to-blue-800" },
+                    { name: "PhonePe", package: "com.phonepe.app", icon: "fa-solid fa-phone", color: "bg-gradient-to-r from-purple-600 to-purple-800" },
+                    { name: "BHIM", package: "in.org.npci.upiapp", icon: "fa-solid fa-indian-rupee-sign", color: "bg-gradient-to-r from-green-600 to-green-800" },
+                    { name: "Amazon Pay", package: "in.amazon.mShop.android.shopping", icon: "fa-brands fa-amazon", color: "bg-gradient-to-r from-yellow-500 to-orange-500" },
+                    { name: "WhatsApp", package: "com.whatsapp", icon: "fa-brands fa-whatsapp", color: "bg-gradient-to-r from-green-500 to-green-600" },
+                    { name: "Cred", package: "com.dreamplug.androidapp", icon: "fa-solid fa-gem", color: "bg-gradient-to-r from-purple-700 to-purple-900" },
+                    { name: "Any UPI", package: "", icon: "fa-solid fa-wallet", color: "bg-gradient-to-r from-gray-600 to-gray-800" }
                 ];
 
                 upiApps.forEach(app => {
@@ -2446,17 +1779,12 @@ app.get("/payment", (req, res) => {
                         if (app.package) {
                             const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
                             const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
-                            
                             window.location.href = intentUrl;
-                            
-                            setTimeout(() => {
-                                window.location.href = upiUrl;
-                            }, 500);
+                            setTimeout(() => { window.location.href = upiUrl; }, 500);
                         } else {
                             window.location.href = upiLink;
                         }
                     };
-                    
                     upiAppsContainer.appendChild(appButton);
                 });
 
@@ -2472,9 +1800,7 @@ app.get("/payment", (req, res) => {
                         }, 2000);
                     }).catch(() => {
                         copySpan.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Failed!';
-                        setTimeout(() => {
-                            copySpan.innerHTML = originalCopyHTML;
-                        }, 2000);
+                        setTimeout(() => { copySpan.innerHTML = originalCopyHTML; }, 2000);
                     });
                 });
             });
@@ -2482,22 +1808,12 @@ app.get("/payment", (req, res) => {
         
         <script>
             document.addEventListener('DOMContentLoaded', function() {
-                document.addEventListener('contextmenu', function(e) {
-                    e.preventDefault();
-                });
-
+                document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
                 document.addEventListener('keydown', function(e) {
-                    if (e.ctrlKey && (e.key === 'c' || e.key === 'u')) {
-                        e.preventDefault();
-                    }
-                    if (e.key === 'F12') {
-                        e.preventDefault();
-                    }
+                    if (e.ctrlKey && (e.key === 'c' || e.key === 'u')) { e.preventDefault(); }
+                    if (e.key === 'F12') { e.preventDefault(); }
                 });
-
-                document.addEventListener('dragstart', function(e) {
-                    e.preventDefault();
-                });
+                document.addEventListener('dragstart', function(e) { e.preventDefault(); });
             });
         </script>
     </body>
@@ -2734,7 +2050,6 @@ app.get("/upi-redirect", (req, res) => {
   const receiverName = name || "MythoBot Premium";
   
   const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
-  
   res.redirect(upiLink);
 });
 
@@ -2773,7 +2088,7 @@ app.get("/payment-status/:token", async (req, res) => {
     return res.json({ status: 'failed', message: 'Payment verification failed' });
   }
   
-  const isPaymentVerified = await verifyUPIPayment(paymentSession);
+  const isPaymentVerified = false; // You need to implement actual UPI verification
   
   if (isPaymentVerified) {
     await paymentCollection.updateOne(
@@ -2787,7 +2102,23 @@ app.get("/payment-status/:token", async (req, res) => {
       }
     );
     
-    await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
+    const usersCollection = client.db("mythobot").collection("users");
+    const subscriptionDate = new Date();
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + paymentSession.duration);
+    
+    await usersCollection.updateOne(
+      { user_id: paymentSession.user_id },
+      { 
+        $set: { 
+          is_premium: true,
+          premium_since: subscriptionDate,
+          premium_until: expiryDate,
+          plan_duration: paymentSession.duration
+        } 
+      },
+      { upsert: true }
+    );
     
     const notificationMessage = `
 💳 <b>NEW PAYMENT RECEIVED! 💰</b>
@@ -2811,37 +2142,10 @@ ${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${p
   res.json({ status: 'pending' });
 });
 
-async function verifyUPIPayment(paymentSession) {
-  return false;
-}
-
-async function activatePremiumSubscription(userId, duration) {
-  const usersCollection = client.db("mythobot").collection("users");
-  const subscriptionDate = new Date();
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + duration);
-  
-  await usersCollection.updateOne(
-    { user_id: userId },
-    { 
-      $set: { 
-        is_premium: true,
-        premium_since: subscriptionDate,
-        premium_until: expiryDate,
-        plan_duration: duration
-      } 
-    },
-    { upsert: true }
-  );
-  
-  console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
-}
-
 app.get("/ad/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   
   const referer = req.get("referer") || "";
-  
   if (!referer.includes("softurl.in")) {
     return res.send("❌ Open ad via SoftURL link only!");
   }
@@ -2855,7 +2159,10 @@ app.get("/ad/:userId/:token", async (req, res) => {
   res.redirect(`https://t.me/MythoSerialBot?start=ad_unlocked_${userId}`);
 });
 
-// 🏠 MythoBot Animated Home Page
+// ========================
+// HOME PAGE
+// ========================
+
 app.get("/", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -3080,104 +2387,11 @@ app.get("/radhe", (req, res) => {
   `);
 });
 
-// This line should be BEFORE app.listen()
+// YouTube Downloader
 app.use("/yt", youtubeDLRouter);
 
 // ========================
-// ADMIN API ENDPOINTS
-// ========================
-
-app.get("/admin/api/links", authenticateAPI, async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-  
-  try {
-    const links = await adLinksCollection
-      .find({})
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .toArray();
-    
-    const total = await adLinksCollection.countDocuments({});
-    
-    res.json({
-      success: true,
-      data: {
-        links: links.map(link => ({
-          short_id: link.short_id,
-          creator_id: link.creator_id,
-          target_url: link.target_url,
-          created_at: link.created_at,
-          clicks: link.clicks || 0,
-          earnings: link.earnings || 0,
-          status: link.status,
-          ad_type: link.ad_config?.type,
-          blogger_clicks: link.blogger_clicks || 0
-        })),
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
-    
-  } catch (error) {
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-app.get("/admin/api/stats", authenticateAPI, async (req, res) => {
-  try {
-    const totalLinks = await adLinksCollection.countDocuments({});
-    const totalClicks = await adLinksCollection.aggregate([
-      { $group: { _id: null, total: { $sum: "$clicks" } } }
-    ]).toArray();
-    
-    const totalEarnings = await adLinksCollection.aggregate([
-      { $group: { _id: null, total: { $sum: "$earnings" } } }
-    ]).toArray();
-    
-    const totalBloggerClicks = await adLinksCollection.aggregate([
-      { $group: { _id: null, total: { $sum: "$blogger_clicks" } } }
-    ]).toArray();
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayLinks = await adLinksCollection.countDocuments({
-      created_at: { $gte: today }
-    });
-    
-    res.json({
-      success: true,
-      data: {
-        total_links: totalLinks,
-        total_clicks: totalClicks[0]?.total || 0,
-        total_blogger_clicks: totalBloggerClicks[0]?.total || 0,
-        total_earnings: totalEarnings[0]?.total || 0,
-        today_new_links: todayLinks,
-        average_cpc: totalClicks[0]?.total > 0 
-          ? (totalEarnings[0]?.total || 0) / totalClicks[0]?.total 
-          : 0
-      }
-    });
-    
-  } catch (error) {
-    res.json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
-});
-
-// ========================
-// USER DASHBOARD
+// ADMIN & DASHBOARD
 // ========================
 
 app.get("/dashboard/:userId", async (req, res) => {
@@ -3193,25 +2407,6 @@ app.get("/dashboard/:userId", async (req, res) => {
     const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
     const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
     const totalBloggerClicks = links.reduce((sum, link) => sum + (link.blogger_clicks || 0), 0);
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    let todayClicks = 0;
-    let todayEarnings = 0;
-    
-    links.forEach(link => {
-      if (link.access_logs) {
-        link.access_logs.forEach(log => {
-          if (log.type === 'click' && new Date(log.timestamp) >= today) {
-            todayClicks++;
-            if (log.earned) {
-              todayEarnings += 0.001;
-            }
-          }
-        });
-      }
-    });
     
     res.send(`
       <!DOCTYPE html>
@@ -3338,14 +2533,71 @@ app.get("/dashboard/:userId", async (req, res) => {
   }
 });
 
+// ========================
+// ERROR HANDLING
+// ========================
+
+// 404 Error Handler
+app.use((req, res) => {
+  res.status(404).send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>404 - Page Not Found</title>
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .error { color: #dc3545; font-size: 48px; margin: 20px 0; }
+        .btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="error">🔍 404</div>
+        <h1>Page Not Found</h1>
+        <p>The page you're looking for doesn't exist.</p>
+        <a href="/" class="btn">Return to Home</a>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>500 - Server Error</title>
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .error { color: #dc3545; font-size: 48px; margin: 20px 0; }
+        .btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="error">💥 500</div>
+        <h1>Internal Server Error</h1>
+        <p>Something went wrong on our end. Please try again later.</p>
+        <a href="/" class="btn">Return to Home</a>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Blogger Redirection System: ACTIVATED`);
-  console.log(`💰 AdLinkFly Earnings: $0.001 per click`);
-  console.log(`🔗 Blogger Flow: User → Blogger → Shortener → Target URL`);
+  console.log(`🌐 Home: http://localhost:${PORT}`);
+  console.log(`💰 Blogger System: ${BLOGGER_CONFIG.enabled ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`🔗 Short URLs: http://localhost:${PORT}/s/{id}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard/{userId}`);
-  console.log(`🔐 API: http://localhost:${PORT}/api/v1/blogger/shorten`);
-  console.log(`🤖 Bot Integration: READY`);
-  console.log(`✨ All existing features: PRESERVED`);
+  console.log(`🎯 All features: ACTIVE`);
+  console.log(`🤖 Bot API: READY`);
+  console.log(`✨ MythoBot Portal: FULLY FUNCTIONAL`);
 });
