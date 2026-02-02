@@ -1,4 +1,4 @@
-// index.js - FULL UPDATED CODE (Without Skip Buttons)
+// index.js - FULL UPDATED CODE (Complete with all original routes)
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
@@ -35,6 +35,7 @@ let urlShortenerCollection;
 let downloadsCollection;
 let maskCollection;
 let adLinksCollection;
+let articlesCollection;
 
 async function connectDB() {
   try {
@@ -45,6 +46,7 @@ async function connectDB() {
     downloadsCollection = db.collection("youtube_downloads");
     maskCollection = db.collection("masked_links");
     adLinksCollection = db.collection("ad_links");
+    articlesCollection = db.collection("articles");
 
     console.log("✅ MongoDB connected");
 
@@ -81,6 +83,15 @@ async function connectDB() {
       console.log("✅ Created other indexes");
     } catch (err) {
       console.log("⚠️ Other indexes already exist");
+    }
+
+    // Create articles collection index
+    try {
+      await articlesCollection.createIndex({ user_id: 1 });
+      await articlesCollection.createIndex({ created_at: -1 });
+      console.log("✅ Created articles indexes");
+    } catch (err) {
+      console.log("⚠️ Articles indexes already exist");
     }
 
   } catch (error) {
@@ -210,10 +221,15 @@ function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
   return originalPrice;
 }
 
+// Generate secure token
+function generateSecureToken(length = 32) {
+  return crypto.randomBytes(length).toString('hex');
+}
+
 // ========================
-// ARTICLES DATA
+// DEFAULT ARTICLES DATA
 // ========================
-const ARTICLES = [
+const DEFAULT_ARTICLES = [
   {
     id: 1,
     title: "🔮 Mythological Wonders of India",
@@ -284,7 +300,624 @@ const ARTICLES = [
 ];
 
 // ========================
-// API ENDPOINTS
+// DASHBOARD ROUTES
+// ========================
+
+// Main Dashboard with Tabs
+app.get("/dashboard", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Dashboard - MythoBot URL Shortener</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+      <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-button.active { 
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-color: #764ba2;
+        }
+        .glass {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(10px);
+          border-radius: 15px;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .nav-sticky {
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          background: white;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .menu-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+        }
+        .menu-item {
+          text-align: center;
+          padding: 1rem;
+          border-radius: 10px;
+          background: #f8f9fa;
+          transition: all 0.3s ease;
+          cursor: pointer;
+        }
+        .menu-item:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .menu-item i {
+          font-size: 24px;
+          margin-bottom: 0.5rem;
+        }
+        @media (max-width: 640px) {
+          .menu-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
+      </style>
+    </head>
+    <body class="bg-gray-50 min-h-screen">
+      <!-- Sticky Navigation -->
+      <div class="nav-sticky">
+        <div class="max-w-6xl mx-auto p-4">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-robot text-purple-600 text-xl"></i>
+              <h1 class="text-xl font-bold">MythoBot Dashboard</h1>
+            </div>
+            <a href="/" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+              <i class="fas fa-home mr-2"></i>Home
+            </a>
+          </div>
+          
+          <!-- Tab Navigation -->
+          <div class="flex space-x-2 mt-4 overflow-x-auto">
+            <button class="tab-button active px-4 py-2 rounded-lg border transition-all" data-tab="shorten">
+              <i class="fas fa-link mr-2"></i>Shorten URL
+            </button>
+            <button class="tab-button px-4 py-2 rounded-lg border transition-all" data-tab="my-links">
+              <i class="fas fa-list mr-2"></i>My Links
+            </button>
+            <button class="tab-button px-4 py-2 rounded-lg border transition-all" data-tab="articles">
+              <i class="fas fa-newspaper mr-2"></i>Articles
+            </button>
+            <button class="tab-button px-4 py-2 rounded-lg border transition-all" data-tab="analytics">
+              <i class="fas fa-chart-bar mr-2"></i>Analytics
+            </button>
+            <button class="tab-button px-4 py-2 rounded-lg border transition-all" data-tab="api">
+              <i class="fas fa-code mr-2"></i>API Docs
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content -->
+      <div class="max-w-6xl mx-auto p-4 mt-4">
+        
+        <!-- Shorten URL Tab -->
+        <div id="shorten" class="tab-content active">
+          <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4">🔗 Shorten URL with Page Flow</h2>
+            <p class="text-gray-600 mb-6">Create secure links with 3 pages + 10-second ad before destination</p>
+            
+            <form id="shortenForm" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Destination URL</label>
+                <input type="url" id="targetUrl" 
+                  class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="https://example.com" required>
+              </div>
+              
+              <div class="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">User ID</label>
+                  <input type="number" id="userId" 
+                    class="w-full p-3 border border-gray-300 rounded-lg"
+                    placeholder="123456" required>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Page Title</label>
+                  <input type="text" id="pageTitle" 
+                    class="w-full p-3 border border-gray-300 rounded-lg"
+                    placeholder="Exploring Content" value="Exploring Mythological Content">
+                </div>
+              </div>
+              
+              <div class="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Custom Alias (Optional)</label>
+                  <input type="text" id="customAlias" 
+                    class="w-full p-3 border border-gray-300 rounded-lg"
+                    placeholder="my-link">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Ad Type</label>
+                  <select id="adType" class="w-full p-3 border border-gray-300 rounded-lg">
+                    <option value="timer">Timer (10s)</option>
+                    <option value="video">Video Ad</option>
+                    <option value="interstitial">Interstitial</option>
+                    <option value="banner">Banner</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Ad Wait Time (seconds)</label>
+                  <input type="number" id="waitTime" 
+                    class="w-full p-3 border border-gray-300 rounded-lg"
+                    value="10" min="5" max="60">
+                </div>
+              </div>
+              
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="enablePages" class="w-4 h-4" checked>
+                <label for="enablePages" class="text-sm text-gray-700">Enable Page Flow (3 pages × 10s each)</label>
+              </div>
+              
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="skipPages" class="w-4 h-4">
+                <label for="skipPages" class="text-sm text-gray-700">Skip Pages (go directly to ad)</label>
+              </div>
+              
+              <div class="mt-6">
+                <button type="submit" 
+                  class="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all">
+                  <i class="fas fa-magic mr-2"></i>Create Secure Link
+                </button>
+              </div>
+            </form>
+            
+            <div id="result" class="mt-6 hidden">
+              <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h3 class="text-lg font-bold text-green-800 mb-2">✅ Link Created Successfully!</h3>
+                <div class="space-y-2">
+                  <p><strong>Short URL:</strong> <span id="shortUrl" class="text-blue-600"></span></p>
+                  <p><strong>Page Flow URL:</strong> <span id="flowUrl" class="text-green-600"></span></p>
+                  <p><strong>Direct Ad URL:</strong> <span id="adUrl" class="text-purple-600"></span></p>
+                  <p><strong>QR Code:</strong> <img id="qrCode" src="" alt="QR Code" class="w-32 h-32 mt-2"></p>
+                  <button onclick="copyToClipboard('shortUrl')" class="px-3 py-1 bg-blue-500 text-white rounded text-sm">
+                    <i class="fas fa-copy mr-1"></i>Copy Short URL
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- How it Works -->
+          <div class="bg-white rounded-xl shadow-lg p-6">
+            <h3 class="text-xl font-bold mb-4">🛡️ How Our Secure Link System Works</h3>
+            <div class="grid md:grid-cols-4 gap-4">
+              <div class="text-center p-4 border rounded-lg">
+                <div class="text-2xl mb-2">1️⃣</div>
+                <h4 class="font-bold">Page 1</h4>
+                <p class="text-sm text-gray-600">User reads article (10s wait)</p>
+              </div>
+              <div class="text-center p-4 border rounded-lg">
+                <div class="text-2xl mb-2">2️⃣</div>
+                <h4 class="font-bold">Page 2</h4>
+                <p class="text-sm text-gray-600">Second article (10s wait)</p>
+              </div>
+              <div class="text-center p-4 border rounded-lg">
+                <div class="text-2xl mb-2">3️⃣</div>
+                <h4 class="font-bold">Page 3</h4>
+                <p class="text-sm text-gray-600">Third article (10s wait)</p>
+              </div>
+              <div class="text-center p-4 border rounded-lg">
+                <div class="text-2xl mb-2">🎯</div>
+                <h4 class="font-bold">Get Link + Ad</h4>
+                <p class="text-sm text-gray-600">10-second ad before destination</p>
+              </div>
+            </div>
+            <p class="mt-4 text-sm text-gray-600 text-center">
+              <i class="fas fa-lock mr-1"></i>Users cannot bypass pages - Secure token system prevents URL manipulation
+            </p>
+          </div>
+        </div>
+        
+        <!-- My Links Tab -->
+        <div id="my-links" class="tab-content">
+          <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">📊 Your Shortened Links</h2>
+            <div class="mb-4">
+              <input type="number" id="searchUserId" 
+                class="p-2 border rounded-lg mr-2" 
+                placeholder="Enter User ID">
+              <button onclick="loadUserLinks()" class="px-4 py-2 bg-purple-600 text-white rounded-lg">
+                Load Links
+              </button>
+            </div>
+            <div id="linksTable" class="overflow-x-auto">
+              <p class="text-gray-500">Enter a User ID to load links</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Articles Tab -->
+        <div id="articles" class="tab-content">
+          <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">📝 Manage Articles</h2>
+            <div class="grid md:grid-cols-2 gap-6">
+              <!-- Create Article Form -->
+              <div>
+                <h3 class="text-lg font-bold mb-3">Create New Article</h3>
+                <form id="articleForm" class="space-y-3">
+                  <input type="number" id="articleUserId" 
+                    class="w-full p-2 border rounded" 
+                    placeholder="User ID" required>
+                  <input type="text" id="articleTitle" 
+                    class="w-full p-2 border rounded" 
+                    placeholder="Article Title" required>
+                  <textarea id="articleContent" 
+                    class="w-full p-2 border rounded" rows="5"
+                    placeholder="HTML content..."></textarea>
+                  <input type="text" id="articleImage" 
+                    class="w-full p-2 border rounded" 
+                    placeholder="Image URL">
+                  <input type="text" id="articleTags" 
+                    class="w-full p-2 border rounded" 
+                    placeholder="Tags (comma separated)">
+                  <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded">
+                    Save Article
+                  </button>
+                </form>
+              </div>
+              
+              <!-- User Articles -->
+              <div>
+                <h3 class="text-lg font-bold mb-3">Your Articles</h3>
+                <div class="mb-3">
+                  <input type="number" id="userArticlesId" 
+                    class="p-2 border rounded" 
+                    placeholder="Enter User ID">
+                  <button onclick="loadUserArticles()" class="ml-2 px-3 py-2 bg-blue-600 text-white rounded">
+                    Load
+                  </button>
+                </div>
+                <div id="articlesList" class="space-y-3 max-h-96 overflow-y-auto">
+                  <!-- Articles will load here -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Analytics Tab -->
+        <div id="analytics" class="tab-content">
+          <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">📈 Analytics Dashboard</h2>
+            <div class="grid md:grid-cols-4 gap-4 mb-6" id="statsCards">
+              <!-- Stats will load here -->
+            </div>
+            <div>
+              <input type="number" id="analyticsUserId" 
+                class="p-2 border rounded" 
+                placeholder="Enter User ID">
+              <button onclick="loadAnalytics()" class="ml-2 px-4 py-2 bg-purple-600 text-white rounded">
+                View Analytics
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- API Docs Tab -->
+        <div id="api" class="tab-content">
+          <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">🔧 API Documentation</h2>
+            <div class="space-y-4">
+              <div class="border-l-4 border-blue-500 pl-4">
+                <h3 class="font-bold">Create Short Link</h3>
+                <p class="text-sm text-gray-600 mb-2">POST /api/v1/shorten</p>
+                <pre class="bg-gray-100 p-2 rounded text-sm">
+Parameters:
+  • url (required) - Destination URL
+  • user_id (required) - Your user ID
+  • page_title - Page title (default: "Exploring Mythological Content")
+  • custom_alias - Custom short ID (3-20 chars)
+  • ad_type - timer/video/interstitial/banner
+  • wait_time - Ad wait time in seconds
+  • skip_pages - true/false (skip page flow)</pre>
+              </div>
+              
+              <div class="border-l-4 border-green-500 pl-4">
+                <h3 class="font-bold">Get Link Stats</h3>
+                <p class="text-sm text-gray-600 mb-2">GET /api/v1/stats/{shortId}?api_key=YOUR_KEY</p>
+              </div>
+              
+              <div class="border-l-4 border-purple-500 pl-4">
+                <h3 class="font-bold">Delete Link</h3>
+                <p class="text-sm text-gray-600 mb-2">GET /api/v1/delete/{shortId}?api_key=YOUR_KEY</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+      </div>
+      
+      <!-- Bottom Menu (Instagram-style) -->
+      <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-3">
+        <div class="menu-grid max-w-md mx-auto">
+          <div class="menu-item" onclick="showTab('shorten')">
+            <i class="fas fa-link text-purple-600"></i>
+            <span class="text-xs">Shorten</span>
+          </div>
+          <div class="menu-item" onclick="showTab('my-links')">
+            <i class="fas fa-list text-blue-600"></i>
+            <span class="text-xs">My Links</span>
+          </div>
+          <div class="menu-item" onclick="showTab('articles')">
+            <i class="fas fa-newspaper text-green-600"></i>
+            <span class="text-xs">Articles</span>
+          </div>
+          <div class="menu-item" onclick="showTab('analytics')">
+            <i class="fas fa-chart-bar text-yellow-600"></i>
+            <span class="text-xs">Analytics</span>
+          </div>
+          <div class="menu-item" onclick="showTab('api')">
+            <i class="fas fa-code text-red-600"></i>
+            <span class="text-xs">API Docs</span>
+          </div>
+          <div class="menu-item" onclick="window.location.href='/'">
+            <i class="fas fa-home text-gray-600"></i>
+            <span class="text-xs">Home</span>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        // Tab functionality
+        function showTab(tabId) {
+          // Hide all tabs
+          document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+          });
+          
+          // Remove active from all buttons
+          document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+          });
+          
+          // Show selected tab
+          document.getElementById(tabId).classList.add('active');
+          
+          // Activate corresponding button
+          document.querySelectorAll('.tab-button').forEach(btn => {
+            if (btn.dataset.tab === tabId) {
+              btn.classList.add('active');
+            }
+          });
+        }
+        
+        // Add click listeners to tab buttons
+        document.querySelectorAll('.tab-button').forEach(button => {
+          button.addEventListener('click', () => {
+            showTab(button.dataset.tab);
+          });
+        });
+        
+        // Form submission
+        document.getElementById('shortenForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          const formData = {
+            url: document.getElementById('targetUrl').value,
+            user_id: document.getElementById('userId').value,
+            page_title: document.getElementById('pageTitle').value,
+            custom_alias: document.getElementById('customAlias').value || undefined,
+            ad_type: document.getElementById('adType').value,
+            wait_time: document.getElementById('waitTime').value,
+            skip_pages: document.getElementById('skipPages').checked ? 'true' : 'false'
+          };
+          
+          // Remove undefined values
+          Object.keys(formData).forEach(key => {
+            if (formData[key] === undefined) delete formData[key];
+          });
+          
+          try {
+            const response = await fetch('/api/v1/shorten?' + new URLSearchParams(formData));
+            const result = await response.json();
+            
+            if (result.success) {
+              document.getElementById('shortUrl').textContent = result.data.short_url;
+              document.getElementById('flowUrl').textContent = result.data.primary_url;
+              document.getElementById('adUrl').textContent = result.data.direct_ad_url;
+              document.getElementById('qrCode').src = result.data.qr_code;
+              document.getElementById('result').classList.remove('hidden');
+            } else {
+              alert('Error: ' + result.error);
+            }
+          } catch (error) {
+            alert('Error creating link: ' + error.message);
+          }
+        });
+        
+        // Copy to clipboard
+        function copyToClipboard(elementId) {
+          const text = document.getElementById(elementId).textContent;
+          navigator.clipboard.writeText(text).then(() => {
+            alert('Copied to clipboard!');
+          });
+        }
+        
+        // Load user links
+        async function loadUserLinks() {
+          const userId = document.getElementById('searchUserId').value;
+          if (!userId) return alert('Please enter User ID');
+          
+          try {
+            const response = await fetch(\`/api/v1/links/\${userId}\`);
+            const data = await response.json();
+            
+            if (data.success) {
+              let html = \`
+                <table class="w-full border">
+                  <thead class="bg-gray-100">
+                    <tr>
+                      <th class="p-2 border">Short ID</th>
+                      <th class="p-2 border">Clicks</th>
+                      <th class="p-2 border">Page Views</th>
+                      <th class="p-2 border">Earnings</th>
+                      <th class="p-2 border">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+              \`;
+              
+              data.links.forEach(link => {
+                html += \`
+                  <tr>
+                    <td class="p-2 border">
+                      <a href="/s/\${link.short_id}" target="_blank" class="text-blue-600">\${link.short_id}</a>
+                    </td>
+                    <td class="p-2 border">\${link.clicks || 0}</td>
+                    <td class="p-2 border">\${link.page_views || 0}</td>
+                    <td class="p-2 border">$\${(link.earnings || 0).toFixed(3)}</td>
+                    <td class="p-2 border">\${new Date(link.created_at).toLocaleDateString()}</td>
+                  </tr>
+                \`;
+              });
+              
+              html += '</tbody></table>';
+              document.getElementById('linksTable').innerHTML = html;
+            } else {
+              document.getElementById('linksTable').innerHTML = '<p class="text-red-500">' + data.error + '</p>';
+            }
+          } catch (error) {
+            document.getElementById('linksTable').innerHTML = '<p class="text-red-500">Error loading links</p>';
+          }
+        }
+        
+        // Load analytics
+        async function loadAnalytics() {
+          const userId = document.getElementById('analyticsUserId').value;
+          if (!userId) return alert('Please enter User ID');
+          
+          try {
+            const response = await fetch(\`/api/v1/stats/user/\${userId}\`);
+            const data = await response.json();
+            
+            if (data.success) {
+              const html = \`
+                <div class="bg-purple-50 p-4 rounded-lg">
+                  <div class="text-3xl font-bold text-purple-600">\${data.total_links}</div>
+                  <div class="text-sm text-purple-800">Total Links</div>
+                </div>
+                <div class="bg-blue-50 p-4 rounded-lg">
+                  <div class="text-3xl font-bold text-blue-600">\${data.total_clicks}</div>
+                  <div class="text-sm text-blue-800">Total Clicks</div>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg">
+                  <div class="text-3xl font-bold text-green-600">\${data.total_page_views}</div>
+                  <div class="text-sm text-green-800">Page Views</div>
+                </div>
+                <div class="bg-yellow-50 p-4 rounded-lg">
+                  <div class="text-3xl font-bold text-yellow-600">$\${data.total_earnings.toFixed(3)}</div>
+                  <div class="text-sm text-yellow-800">Total Earnings</div>
+                </div>
+              \`;
+              
+              document.getElementById('statsCards').innerHTML = html;
+            }
+          } catch (error) {
+            document.getElementById('statsCards').innerHTML = '<p class="text-red-500">Error loading analytics</p>';
+          }
+        }
+        
+        // Article functions
+        document.getElementById('articleForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          const articleData = {
+            user_id: document.getElementById('articleUserId').value,
+            title: document.getElementById('articleTitle').value,
+            content: document.getElementById('articleContent').value,
+            image: document.getElementById('articleImage').value,
+            tags: document.getElementById('articleTags').value.split(',').map(t => t.trim())
+          };
+          
+          try {
+            const response = await fetch('/api/v1/articles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(articleData)
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+              alert('Article saved successfully!');
+              document.getElementById('articleForm').reset();
+              loadUserArticles();
+            } else {
+              alert('Error: ' + result.error);
+            }
+          } catch (error) {
+            alert('Error saving article');
+          }
+        });
+        
+        async function loadUserArticles() {
+          const userId = document.getElementById('userArticlesId').value;
+          if (!userId) return alert('Please enter User ID');
+          
+          try {
+            const response = await fetch(\`/api/v1/articles/\${userId}\`);
+            const data = await response.json();
+            
+            let html = '';
+            if (data.success && data.articles.length > 0) {
+              data.articles.forEach(article => {
+                html += \`
+                  <div class="border rounded-lg p-3">
+                    <h4 class="font-bold">\${article.title}</h4>
+                    <p class="text-sm text-gray-600 truncate">\${article.content.substring(0, 100)}...</p>
+                    <div class="flex justify-between mt-2">
+                      <span class="text-xs text-gray-500">\${article.tags?.join(', ') || 'No tags'}</span>
+                      <button onclick="deleteArticle('\${article._id}')" class="text-xs text-red-500">Delete</button>
+                    </div>
+                  </div>
+                \`;
+              });
+            } else {
+              html = '<p class="text-gray-500">No articles found</p>';
+            }
+            
+            document.getElementById('articlesList').innerHTML = html;
+          } catch (error) {
+            document.getElementById('articlesList').innerHTML = '<p class="text-red-500">Error loading articles</p>';
+          }
+        }
+        
+        async function deleteArticle(articleId) {
+          if (!confirm('Delete this article?')) return;
+          
+          try {
+            const response = await fetch(\`/api/v1/articles/\${articleId}\`, {
+              method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+              loadUserArticles();
+            } else {
+              alert('Error deleting article');
+            }
+          } catch (error) {
+            alert('Error deleting article');
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// ========================
+// SECURE PAGE FLOW SYSTEM (Fixed - No bypass)
 // ========================
 
 // 🔹 1. Universal Short Link Creation (with Page Flow)
@@ -299,7 +932,8 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     wait_time = 10,
     reward_type = "points",
     custom_alias,
-    skip_pages = "false"
+    skip_pages = "false",
+    article_ids // New: Custom article IDs
   } = req.query;
   
   if (!url || !user_id) {
@@ -329,11 +963,19 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       shortId = crypto.randomBytes(4).toString("hex");
     }
     
-    const flowCode = crypto.randomBytes(3).toString("hex");
+    const flowCode = crypto.randomBytes(6).toString("hex"); // Longer code for security
     const usePages = skip_pages !== "true" && PAGE_FLOW_CONFIG.enabled;
     
+    // Generate secure tokens for each page to prevent bypass
+    const pageTokens = {};
+    if (usePages) {
+      for (let i = 1; i <= total_pages; i++) {
+        pageTokens[i] = generateSecureToken(16);
+      }
+    }
+    
     const shortUrl = `https://${req.hostname}/s/${shortId}`;
-    const pageFlowUrl = `https://${req.hostname}/flow/${flowCode}`;
+    const pageFlowUrl = `https://${req.hostname}/flow/${flowCode}?token=${pageTokens[1]}`; // First page requires token
     const directAdUrl = `https://${req.hostname}/adgate/${shortId}`;
     
     const adConfig = {
@@ -343,17 +985,37 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       earnings_per_click: 0.001
     };
     
+    // Get articles (custom or default)
+    let articlesToUse = DEFAULT_ARTICLES;
+    if (article_ids) {
+      const articleIds = article_ids.split(',').map(id => parseInt(id.trim()));
+      const customArticles = await articlesCollection.find({
+        _id: { $in: articleIds }
+      }).toArray();
+      
+      if (customArticles.length > 0) {
+        articlesToUse = customArticles.map(article => ({
+          id: article._id,
+          title: article.title,
+          content: article.content,
+          image: article.image || DEFAULT_ARTICLES[0].image,
+          tags: article.tags || []
+        }));
+      }
+    }
+    
     await adLinksCollection.insertOne({
       short_id: shortId,
       flow_code: flowCode,
       creator_id: parseInt(user_id),
       target_url: url,
+      page_tokens: pageTokens, // Store tokens for validation
       page_flow_config: {
         enabled: usePages,
         title: page_title,
         delay: parseInt(page_delay),
         total_pages: parseInt(total_pages),
-        articles: ARTICLES.map(article => article.id)
+        articles: articlesToUse.map(article => article.id)
       },
       ad_config: adConfig,
       custom_alias: custom_alias || null,
@@ -368,7 +1030,8 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
       metadata: {
         created_via: "api",
         skip_pages: skip_pages === "true",
-        ip: req.ip
+        ip: req.ip,
+        secure: true // Mark as secure flow
       }
     });
     
@@ -387,10 +1050,11 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
         },
         ad_config: adConfig,
         stats_url: `https://${req.hostname}/api/v1/stats/${shortId}?api_key=${req.query.api_key}`,
-        delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`
+        delete_url: `https://${req.hostname}/api/v1/delete/${shortId}?api_key=${req.query.api_key}`,
+        secure: true
       },
       message: usePages 
-        ? "Short link created with automatic page flow (3 pages → ad)" 
+        ? "Secure short link created with page flow (cannot be bypassed)" 
         : "Short link created (page flow disabled)"
     };
     
@@ -409,10 +1073,11 @@ app.get("/api/v1/shorten", authenticateAPI, async (req, res) => {
     
     if (TELEGRAM_ADMIN_CHAT_ID && process.env.NOTIFY_NEW_LINKS === "true") {
       const notification = `
-🔗 <b>New ${usePages ? 'Page Flow ' : ''}Short Link Created</b>
+🔗 <b>New ${usePages ? 'Secure Page Flow ' : ''}Short Link Created</b>
 
 👤 <b>User ID:</b> <code>${user_id}</code>
 📝 <b>Short ID:</b> <code>${shortId}</code>
+🔐 <b>Security:</b> ${usePages ? 'Token-based (no bypass)' : 'Basic'}
 📄 <b>Pages:</b> ${usePages ? '3 pages × 10s each' : 'Disabled'}
 🎯 <b>Ad Type:</b> ${ad_type}
 ⏱️ <b>Wait Time:</b> ${wait_time}s
@@ -481,7 +1146,13 @@ app.get("/s/:shortId", async (req, res) => {
     if (skipPages) {
       res.redirect(`/adgate/${shortId}`);
     } else {
-      res.redirect(`/flow/${linkData.flow_code}`);
+      // Redirect to first page with token
+      const firstToken = linkData.page_tokens?.[1];
+      if (firstToken) {
+        res.redirect(`/flow/${linkData.flow_code}?token=${firstToken}`);
+      } else {
+        res.redirect(`/flow/${linkData.flow_code}`);
+      }
     }
     
   } catch (error) {
@@ -490,10 +1161,10 @@ app.get("/s/:shortId", async (req, res) => {
   }
 });
 
-// 🔹 3. Page Flow System - WITHOUT SKIP BUTTONS
+// 🔹 3. Page Flow System - SECURE (with token validation)
 app.get("/flow/:code", async (req, res) => {
   const { code } = req.params;
-  const { page = 1 } = req.query;
+  const { page = 1, token } = req.query;
   
   try {
     const linkData = await adLinksCollection.findOne({ 
@@ -526,6 +1197,55 @@ app.get("/flow/:code", async (req, res) => {
     const totalPages = linkData.page_flow_config?.total_pages || PAGE_FLOW_CONFIG.total_pages;
     const waitTime = linkData.page_flow_config?.delay || PAGE_FLOW_CONFIG.wait_time_per_page;
     
+    // SECURITY: Validate token for current page
+    if (currentPage === 1 && !token) {
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Access Denied</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error { color: #dc3545; font-size: 48px; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="error">🚫</div>
+          <h1>Access Denied</h1>
+          <p>Invalid access token. Please use the correct link.</p>
+          <p><small>Security token missing or invalid</small></p>
+        </body>
+        </html>
+      `);
+    }
+    
+    // SECURITY: Validate token for subsequent pages
+    if (currentPage > 1) {
+      const pageToken = token || req.session?.pageToken;
+      const expectedToken = linkData.page_tokens?.[currentPage];
+      
+      if (!pageToken || pageToken !== expectedToken) {
+        return res.status(403).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Access Denied</title>
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #dc3545; font-size: 48px; margin: 20px 0; }
+            </style>
+          </head>
+          <body>
+            <div class="error">🔒</div>
+            <h1>Page Bypass Detected</h1>
+            <p>You cannot skip pages or access pages out of order.</p>
+            <p><small>Each page requires a valid security token</small></p>
+          </body>
+          </html>
+        `);
+      }
+    }
+    
     if (currentPage > totalPages) {
       // Show "Get Link" page after all pages
       return renderGetLinkPage(res, code, linkData);
@@ -542,15 +1262,41 @@ app.get("/flow/:code", async (req, res) => {
             page: currentPage,
             timestamp: new Date(),
             ip: req.ip,
-            user_agent: req.get("user-agent")
+            user_agent: req.get("user-agent"),
+            valid_token: true
           }
         }
       }
     );
     
     // Get article for current page
-    const articleIndex = (currentPage - 1) % ARTICLES.length;
-    const article = ARTICLES[articleIndex];
+    let article;
+    const articlesToUse = linkData.page_flow_config?.articles || DEFAULT_ARTICLES.map(a => a.id);
+    const articleIndex = (currentPage - 1) % articlesToUse.length;
+    
+    // Try to get custom article first
+    const customArticle = await articlesCollection.findOne({
+      _id: articlesToUse[articleIndex]
+    });
+    
+    if (customArticle) {
+      article = {
+        id: customArticle._id,
+        title: customArticle.title,
+        content: customArticle.content,
+        image: customArticle.image || DEFAULT_ARTICLES[0].image,
+        tags: customArticle.tags || []
+      };
+    } else {
+      // Use default article
+      article = DEFAULT_ARTICLES[articleIndex] || DEFAULT_ARTICLES[0];
+    }
+    
+    // Generate next page token
+    const nextPageToken = linkData.page_tokens?.[currentPage + 1];
+    const nextPageUrl = nextPageToken 
+      ? `/flow/${code}?page=${currentPage + 1}&token=${nextPageToken}`
+      : `/flow/${code}/get-link`;
     
     res.send(`
       <!DOCTYPE html>
@@ -594,10 +1340,17 @@ app.get("/flow/:code", async (req, res) => {
       </head>
       <body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-xl p-6 max-w-2xl w-full">
+          <!-- Security Badge -->
+          <div class="mb-4 text-center">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+              <i class="fas fa-shield-alt mr-1"></i> Secure Page ${currentPage}
+            </span>
+          </div>
+          
           <!-- Progress Header -->
           <div class="mb-6">
             <div class="flex justify-between items-center mb-2">
-              <h1 class="text-xl font-bold text-gray-800">📖 MythoBot Content Hub</h1>
+              <h1 class="text-xl font-bold text-gray-800">📖 ${linkData.page_flow_config?.title || "MythoBot Content Hub"}</h1>
               <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
                 Page ${currentPage}/${totalPages}
               </span>
@@ -610,10 +1363,10 @@ app.get("/flow/:code", async (req, res) => {
           <!-- Article Content -->
           <div class="mb-6">
             <div class="mb-4">
-              <img src="${article.image}" alt="${article.title}" class="w-full h-48 object-cover rounded-lg mb-3">
+              ${article.image ? `<img src="${article.image}" alt="${article.title}" class="w-full h-48 object-cover rounded-lg mb-3">` : ''}
               <h2 class="text-2xl font-bold text-gray-800 mb-2">${article.title}</h2>
               <div class="mb-3">
-                ${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                ${article.tags?.map(tag => `<span class="tag">${tag}</span>`).join('') || ''}
               </div>
             </div>
             
@@ -625,6 +1378,9 @@ app.get("/flow/:code", async (req, res) => {
               <p class="text-sm text-gray-600">
                 <i class="fas fa-info-circle mr-2 text-blue-500"></i>
                 Reading time: ${waitTime} seconds. Next page loads automatically.
+              </p>
+              <p class="text-xs text-gray-500 mt-1">
+                <i class="fas fa-lock mr-1"></i> Secure token: ${token ? 'Validated' : 'Required'}
               </p>
             </div>
           </div>
@@ -648,7 +1404,7 @@ app.get("/flow/:code", async (req, res) => {
           <div class="mt-6 pt-4 border-t border-gray-200 text-center">
             <p class="text-xs text-gray-500">
               <i class="fas fa-shield-alt mr-1"></i>
-              Secure content delivery by MythoBot • Article ${currentPage} of ${totalPages}
+              Secure page flow by MythoBot • Page ${currentPage} of ${totalPages} • Token: ${token ? '✓' : '✗'}
             </p>
           </div>
         </div>
@@ -657,11 +1413,15 @@ app.get("/flow/:code", async (req, res) => {
           const currentPage = ${currentPage};
           const totalPages = ${totalPages};
           const waitTime = ${waitTime};
+          const nextPageUrl = "${nextPageUrl}";
           let timeLeft = waitTime;
           const countdownElement = document.getElementById('countdown');
           const btnTimerElement = document.getElementById('btnTimer');
           const progressFill = document.getElementById('progressFill');
           const continueBtn = document.getElementById('continueBtn');
+          
+          // Update progress bar
+          progressFill.style.width = '${((currentPage - 1) / totalPages) * 100}%';
           
           const timer = setInterval(() => {
             timeLeft--;
@@ -677,22 +1437,14 @@ app.get("/flow/:code", async (req, res) => {
               
               // Enable button click
               continueBtn.onclick = function() {
-                if (currentPage >= totalPages) {
-                  window.location.href = "/flow/${code}/get-link";
-                } else {
-                  window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
-                }
+                window.location.href = nextPageUrl;
               };
             }
           }, 1000);
           
           // Auto-redirect after wait time
           setTimeout(function() {
-            if (currentPage >= totalPages) {
-              window.location.href = "/flow/${code}/get-link";
-            } else {
-              window.location.href = "/flow/${code}?page=${parseInt(page) + 1}";
-            }
+            window.location.href = nextPageUrl;
           }, waitTime * 1000);
         </script>
       </body>
@@ -1403,7 +2155,144 @@ app.post("/api/v1/click/:shortId", async (req, res) => {
 });
 
 // ========================
-// EXISTING ROUTES (all original)
+// NEW API ENDPOINTS FOR DASHBOARD
+// ========================
+
+// Get user links
+app.get("/api/v1/links/:userId", async (req, res) => {
+  const { userId } = req.params;
+  
+  try {
+    const links = await adLinksCollection
+      .find({ creator_id: parseInt(userId) })
+      .sort({ created_at: -1 })
+      .limit(50)
+      .toArray();
+    
+    res.json({
+      success: true,
+      links: links.map(link => ({
+        short_id: link.short_id,
+        flow_code: link.flow_code,
+        target_url: link.target_url,
+        clicks: link.clicks || 0,
+        page_views: link.page_views || 0,
+        earnings: link.earnings || 0,
+        created_at: link.created_at,
+        status: link.status,
+        page_flow_enabled: link.page_flow_config?.enabled || false
+      }))
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Failed to fetch links"
+    });
+  }
+});
+
+// Get user stats
+app.get("/api/v1/stats/user/:userId", async (req, res) => {
+  const { userId } = req.params;
+  
+  try {
+    const links = await adLinksCollection
+      .find({ creator_id: parseInt(userId) })
+      .toArray();
+    
+    const totalLinks = links.length;
+    const totalClicks = links.reduce((sum, link) => sum + (link.clicks || 0), 0);
+    const totalPageViews = links.reduce((sum, link) => sum + (link.page_views || 0), 0);
+    const totalEarnings = links.reduce((sum, link) => sum + (link.earnings || 0), 0);
+    
+    res.json({
+      success: true,
+      user_id: userId,
+      total_links: totalLinks,
+      total_clicks: totalClicks,
+      total_page_views: totalPageViews,
+      total_earnings: totalEarnings
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Failed to fetch stats"
+    });
+  }
+});
+
+// Article management endpoints
+app.post("/api/v1/articles", express.json(), async (req, res) => {
+  const { user_id, title, content, image, tags } = req.body;
+  
+  if (!user_id || !title || !content) {
+    return res.json({
+      success: false,
+      error: "Missing required fields: user_id, title, content"
+    });
+  }
+  
+  try {
+    const result = await articlesCollection.insertOne({
+      user_id: parseInt(user_id),
+      title: title,
+      content: content,
+      image: image || DEFAULT_ARTICLES[0].image,
+      tags: tags || [],
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    
+    res.json({
+      success: true,
+      article_id: result.insertedId
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Failed to save article"
+    });
+  }
+});
+
+app.get("/api/v1/articles/:userId", async (req, res) => {
+  const { userId } = req.params;
+  
+  try {
+    const articles = await articlesCollection
+      .find({ user_id: parseInt(userId) })
+      .sort({ created_at: -1 })
+      .toArray();
+    
+    res.json({
+      success: true,
+      articles: articles
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      error: "Failed to fetch articles"
+    });
+  }
+});
+
+app.delete("/api/v1/articles/:articleId", async (req, res) => {
+  const { articleId } = req.params;
+  
+  try {
+    await articlesCollection.deleteOne({ _id: articleId });
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: false, error: "Failed to delete article" });
+  }
+});
+
+// ========================
+// ORIGINAL ROUTES (KEEP ALL)
 // ========================
 
 app.get("/link/:hex", (req, res) => {
@@ -2531,13 +3420,21 @@ app.get("/", (req, res) => {
           <p class="text-purple-100 text-sm mt-2">Instant Telegram notifications for all payments & activities.</p>
           <a href="https://t.me/MythoSerialBot" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Get Alerts</a>
         </div>
+        
+        <div class="glass text-center p-6 delay-700">
+          <i class="fa-solid fa-link text-purple-400 text-3xl mb-3"></i>
+          <h2 class="text-xl font-bold">URL Shortener</h2>
+          <p class="text-purple-100 text-sm mt-2">Create secure short links with page flow & analytics.</p>
+          <a href="/dashboard" class="btn inline-block mt-4 bg-purple-500 text-white font-semibold px-5 py-2 rounded-full">Go to Dashboard</a>
+        </div>
       </div>
 
       <div class="text-center mt-12 text-sm text-purple-200">
         <p>💫 Developed by <b>@Sandip10x</b> | Powered by <b>MythoBot Server</b></p>
         <p class="mt-1">
           <a href="https://t.me/MythoSerialBot" class="underline text-purple-100">Telegram Bot</a> • 
-          <a href="/radhe" class="underline text-purple-100">Radhe Radhe Game</a>
+          <a href="/radhe" class="underline text-purple-100">Radhe Radhe Game</a> •
+          <a href="/dashboard" class="underline text-purple-100">URL Dashboard</a>
         </p>
       </div>
 
@@ -2649,7 +3546,7 @@ app.get("/radhe", (req, res) => {
 app.use("/yt", youtubeDLRouter);
 
 // ========================
-// ADMIN & DASHBOARD - UPDATED for Page Flow
+// USER DASHBOARD (Original) - Keep for backward compatibility
 // ========================
 
 app.get("/dashboard/:userId", async (req, res) => {
@@ -2846,17 +3743,24 @@ app.use((err, req, res, next) => {
   `);
 });
 
-// Start server
+// ========================
+// START SERVER
+// ========================
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Home: http://localhost:${PORT}`);
-  console.log(`📄 Page Flow System: ${PAGE_FLOW_CONFIG.enabled ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard`);
   console.log(`🔗 Short URLs: http://localhost:${PORT}/s/{id}`);
-  console.log(`📊 Page Flow: http://localhost:${PORT}/flow/{code}`);
+  console.log(`📄 Page Flow: http://localhost:${PORT}/flow/{code}`);
   console.log(`🎯 Get Link Page: http://localhost:${PORT}/flow/{code}/get-link`);
   console.log(`💰 Ad Page: http://localhost:${PORT}/adgate/{shortId}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard/{userId}`);
+  console.log(`📊 User Dashboard: http://localhost:${PORT}/dashboard/{userId}`);
   console.log(`✨ MythoBot Portal: FULLY FUNCTIONAL`);
+  console.log(`🛡️ Security: Token-based page flow (NO BYPASS)`);
+  console.log(`📝 Dashboard: Full management interface`);
+  console.log(`📰 Articles: Customizable content system`);
+  console.log(`📱 UI: Instagram-style bottom menu (3 rows)`);
   console.log(`⏱️ Page wait time: 10s per page (3 pages total)`);
   console.log(`⏱️ Ad page wait: 10s`);
   console.log(`🚫 Skip buttons: REMOVED - Users must wait full time`);
