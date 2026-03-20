@@ -120,7 +120,7 @@ app.get("/double/:userId/:token", async (req, res) => {
 
   // Check referer (must come from softurl.in)
   const referer = req.get("referer") || "";
-  if (!referer.includes("softurl.in")) {
+  if (!referer.includes("arolinks.com")) {
     // Roast message for double points bypass
     const roastMessages = [
       "🚫 Oops! Trying to double points without SoftURL? Even my grandma follows links better!",
@@ -214,7 +214,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   
   // Check if this is a direct bypass attempt (no referer or not from softurl)
   const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("softurl.in");
+  const isBypassAttempt = !referer.includes("arolinks.com");
   
   // If no target URL provided, show info page
   if (!target) {
