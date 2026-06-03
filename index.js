@@ -76,7 +76,7 @@ function base62_decode(encoded) {
 }
 
 // ========================
-// 1. THE ENTRY SHIELD (5-Sec AUTO Iframe Mask)
+// 1. THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait -> SoftURL)
 // ========================
 function renderAntiBypassPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -88,12 +88,11 @@ function renderAntiBypassPage(res, targetUrl) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Secure Link Verification</title>
           <style>
-              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-              .container { text-align: center; background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 400px; width: 90%; z-index: 10; }
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; text-align: center; }
+              .container { background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 400px; width: 90%; }
               h2 { margin-bottom: 10px; font-size: 24px; color: #3b82f6; }
-              p { color: #94a3b8; font-size: 15px; margin-bottom: 20px; }
+              p { color: #94a3b8; font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
               
-              /* Clean Loading Spinner */
               .loader {
                   border: 4px solid rgba(255,255,255,0.1);
                   border-top: 4px solid #3b82f6;
@@ -105,57 +104,70 @@ function renderAntiBypassPage(res, targetUrl) {
               }
               @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
               
-              /* Fullscreen Iframe hidden by default. 
-                 Using sandbox prevents SoftURL from modifying the parent address bar */
-              #content-frame { 
-                  display: none; 
-                  position: absolute; 
-                  top: 0; 
-                  left: 0; 
-                  width: 100vw; 
-                  height: 100vh; 
-                  border: none; 
-                  z-index: 999; 
-                  background: white; 
-              }
+              .manual-box { display: none; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; padding: 15px; border-radius: 8px; margin-top: 20px; }
           </style>
       </head>
       <body>
       
-      <div class="container" id="verify-box">
-          <div class="loader"></div>
-          <h2>Securing Connection</h2>
-          <p id="status-text">Automatically proceeding in <span id="countdown">5</span> seconds...</p>
+      <div class="container" id="main-box">
+          <div class="loader" id="spinner"></div>
+          <h2 id="title-text">Securing Connection</h2>
+          <p id="status-text">Checking browser environment...</p>
+          
+          <div class="manual-box" id="manual-box">
+              <b style="color:white; font-size:18px;">How to open:</b><br><br>
+              1. Tap the three dots <b>(⋮)</b> at the top right corner.<br>
+              2. Select <b>"Open in Chrome"</b> or <b>"Open in Browser"</b>.
+          </div>
       </div>
-
-      <iframe id="content-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
 
       <script>
       const encodedUrl = "${b64Url}"; 
-      let timeLeft = 5;
       const statusText = document.getElementById('status-text');
-      const countdownSpan = document.getElementById('countdown');
-      const verifyBox = document.getElementById('verify-box');
-      const contentFrame = document.getElementById('content-frame');
+      const titleText = document.getElementById('title-text');
+      const spinner = document.getElementById('spinner');
+      const manualBox = document.getElementById('manual-box');
 
-      // Auto start the 5-second timer immediately
-      const timer = setInterval(() => {
-          timeLeft--;
-          if (countdownSpan) countdownSpan.textContent = timeLeft;
+      // Detect if user is inside Telegram's internal browser
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isTelegram = (userAgent.indexOf("Telegram") > -1);
+
+      if (isTelegram) {
+          // FORCE GOOGLE CHROME (Android Intent)
+          titleText.innerHTML = "Opening in Chrome...";
+          statusText.innerHTML = "Redirecting to your main browser for security.";
+          spinner.style.display = "none";
+          manualBox.style.display = "block";
           
-          // When timer hits zero, auto-load without user clicking
-          if (timeLeft <= 0) {
-              clearInterval(timer);
-              statusText.innerHTML = "Verification complete! Loading destination...";
+          // Get current URL without the protocol part
+          const urlParts = window.location.href.split('//');
+          const currentUrl = urlParts.length > 1 ? urlParts[1] : window.location.href;
+          
+          const chromeIntent = "intent://" + currentUrl + "#Intent;scheme=https;package=com.android.chrome;end;";
+          window.location.replace(chromeIntent);
+          
+      } else {
+          // IF IN NORMAL BROWSER: Run the 5-second timer
+          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:white;">5</span> seconds...';
+          let timeLeft = 5;
+          const countdownSpan = document.getElementById('countdown');
+
+          const timer = setInterval(() => {
+              timeLeft--;
+              if (countdownSpan) countdownSpan.textContent = timeLeft;
               
-              // Small 500ms delay for smoothness, then swap to iframe
-              setTimeout(() => {
-                  verifyBox.style.display = 'none';
-                  contentFrame.src = atob(encodedUrl);
-                  contentFrame.style.display = 'block';
-              }, 500);
-          }
-      }, 1000);
+              if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  titleText.innerHTML = "Verification Complete!";
+                  statusText.innerHTML = "Redirecting to destination...";
+                  
+                  setTimeout(() => {
+                      // Safe top-level redirect to avoid ERR_BLOCKED_BY_RESPONSE
+                      window.location.replace(atob(encodedUrl));
+                  }, 500);
+              }
+          }, 1000);
+      }
       </script>
       </body>
       </html>
