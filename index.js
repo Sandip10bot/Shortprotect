@@ -23,7 +23,7 @@ let searchAdsCollection;
 async function connectDB() {
   try {
     await client.connect();
-    const db = client.db("mythobot");
+    const db = client.db("Mytho");
     
     doubleCollection = db.collection("double_points");
     urlShortenerCollection = db.collection("url_shortener");
