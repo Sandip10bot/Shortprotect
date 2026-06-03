@@ -18,6 +18,7 @@ const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
 let maskCollection;
+let searchAdsCollection; // Dynamic /link endpoint verification ke liye
 
 async function connectDB() {
   try {
@@ -26,7 +27,8 @@ async function connectDB() {
     doubleCollection = db.collection("double_points");
     urlShortenerCollection = db.collection("url_shortener");
     maskCollection = db.collection("masked_links");
-    console.log("✅ MongoDB connected for Masking & Double Bypass");
+    searchAdsCollection = db.collection("search_ads"); // Connected to search_ads
+    console.log("✅ MongoDB connected for Masking, Double, and Dynamic Search Ads");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
   }
@@ -128,18 +130,15 @@ function renderAntiBypassPage(res, targetUrl) {
       const spinner = document.getElementById('spinner');
       const manualBox = document.getElementById('manual-box');
 
-      // Detect if user is inside Telegram's internal browser
       const userAgent = navigator.userAgent || navigator.vendor || window.opera;
       const isTelegram = (userAgent.indexOf("Telegram") > -1);
 
       if (isTelegram) {
-          // FORCE GOOGLE CHROME (Android Intent)
           titleText.innerHTML = "Opening in Chrome...";
           statusText.innerHTML = "Redirecting to your main browser for security.";
           spinner.style.display = "none";
           manualBox.style.display = "block";
           
-          // Get current URL without the protocol part
           const urlParts = window.location.href.split('//');
           const currentUrl = urlParts.length > 1 ? urlParts[1] : window.location.href;
           
@@ -147,7 +146,6 @@ function renderAntiBypassPage(res, targetUrl) {
           window.location.replace(chromeIntent);
           
       } else {
-          // IF IN NORMAL BROWSER: Run the 5-second timer
           statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:white;">5</span> seconds...';
           let timeLeft = 5;
           const countdownSpan = document.getElementById('countdown');
@@ -162,7 +160,6 @@ function renderAntiBypassPage(res, targetUrl) {
                   statusText.innerHTML = "Redirecting to destination...";
                   
                   setTimeout(() => {
-                      // Safe top-level redirect to avoid ERR_BLOCKED_BY_RESPONSE
                       window.location.replace(atob(encodedUrl));
                   }, 500);
               }
@@ -232,8 +229,38 @@ function renderSecureFinalPage(res, targetUrl) {
 }
 
 // ========================
-// MASKED LINK ROUTES (Entry points from Telegram)
+// NEW SECURE ENTRY POINT (Database Token Method)
 // ========================
+app.get("/link/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  try {
+    const adData = await searchAdsCollection.findOne({
+      user_id: parseInt(userId),
+      token: token,
+      used: false
+    });
+    
+    if (!adData || !adData.short_url) {
+      return res.redirect('https://t.me/MythoSerialBot');
+    }
+    
+    renderAntiBypassPage(res, adData.short_url);
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+// Backward compatibility fallback for old hex links if any exist
+app.get("/link/:hex", (req, res) => {
+  const { hex } = req.params;
+  try {
+    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    new URL(targetUrl);
+    renderAntiBypassPage(res, targetUrl);
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
 
 app.get("/api/mask", (req, res) => {
   const { url } = req.query;
@@ -245,17 +272,6 @@ app.get("/api/mask", (req, res) => {
     res.json({ success: true, original_url: url, masked_url: maskedUrl, encoded: encodedUrl });
   } catch (error) {
     res.status(400).json({ error: "Invalid URL format" });
-  }
-});
-
-app.get("/link/:hex", (req, res) => {
-  const { hex } = req.params;
-  try {
-    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
-    new URL(targetUrl);
-    renderAntiBypassPage(res, targetUrl);
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
@@ -286,9 +302,8 @@ app.get("/mask/:encodedUrl", async (req, res) => {
 });
 
 // ========================
-// DOUBLE BYPASS ROUTES (Exit points back to Telegram)
+// DOUBLE BYPASS ROUTES
 // ========================
-
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
@@ -307,8 +322,6 @@ app.get("/generate/:userId", async (req, res) => {
 
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
-
-  // Anti-Bypass Referer Check
   const referer = req.get("referer") || "";
   if (!referer.includes("softurl.in")) {
     return res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh;"><h1 style="color:#ef4444;">🚫 Bypass Bot Detected!</h1><p>Please click the proper link in Telegram.</p></div>`);
@@ -319,7 +332,6 @@ app.get("/double/:userId/:token", async (req, res) => {
     { $set: { used: true, used_at: new Date() } }
   );
 
-  // Secure exit (no leaked URL)
   const finalBotLink = `https://t.me/MythoSerialBot?start=double_${userId}_${token}`;
   renderSecureFinalPage(res, finalBotLink);
 });
@@ -348,7 +360,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   const { t } = req.query;
   
-  // Anti-Bypass Referer Check
   const referer = req.get("referer") || "";
   if (!referer.includes("softurl.in")) {
       return res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh;"><h1 style="color:#ef4444;">🚫 Bypass Bot Detected!</h1><p>Nice try! But you must use the original SoftURL link to get your file.</p></div>`);
@@ -388,12 +399,14 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   res.redirect('https://t.me/MythoSerialBot');
 });
 
-// Fallback home route
 app.get("/", (req, res) => {
     res.redirect('https://t.me/MythoSerialBot');
 });
 
-// Start Server
+app.get("*", (req, res) => {
+    res.redirect('https://t.me/MythoSerialBot');
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
+  console.log(`🚀 Fully Tokenized Secure Anti-Bypass Server running on port ${PORT}`);
 });
