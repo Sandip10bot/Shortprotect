@@ -248,7 +248,6 @@ app.get("/link/:userId/:token", async (req, res) => {
     
     if (!adData) {
       console.log(`[DEBUG] FAILED: No record match for UserID ${userId}, Token ${token}`);
-      // Showing the error on screen instead of silent redirect for debugging
       return res.send(`
         <div style="font-family:sans-serif; text-align:center; padding:50px; background:#0f172a; color:white; height:100vh;">
           <h1 style="color:#ef4444;">Invalid or Expired Link</h1>
@@ -283,43 +282,36 @@ app.get("/link/:hex", (req, res) => {
   }
 });
 
-app.get("/api/mask", (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: "Missing url parameter" });
-  try {
-    new URL(url);
-    const encodedUrl = base62_encode(url);
-    const maskedUrl = `https://${req.hostname}/mask/${encodedUrl}`;
-    res.json({ success: true, original_url: url, masked_url: maskedUrl, encoded: encodedUrl });
-  } catch (error) {
-    res.status(400).json({ error: "Invalid URL format" });
-  }
-});
+// ========================
+// NEW: THE ULTIMATE FINISH LINE (Anti-Bypass Shield for Search Links)
+// ========================
+app.get("/verify/:prefix/:userId/:token", (req, res) => {
+  const { prefix, userId, token } = req.params;
 
-app.get("/mask/:encodedUrl", async (req, res) => {
-  const { encodedUrl } = req.params;
-  try {
-    let targetUrl;
-    try {
-      const padded = encodedUrl.padEnd(encodedUrl.length + (4 - encodedUrl.length % 4) % 4, '=');
-      targetUrl = Buffer.from(padded, 'base64').toString('utf-8');
-      if (!targetUrl.includes('://')) throw new Error('Not a URL');
-    } catch (e) {
-      targetUrl = base62_decode(encodedUrl);
-    }
-    
-    new URL(targetUrl);
-    
-    try {
-      if (maskCollection) {
-        await maskCollection.insertOne({ encoded: encodedUrl, target: targetUrl, clicked_at: new Date(), ip: req.ip });
-      }
-    } catch(e) {}
-    
-    renderAntiBypassPage(res, targetUrl);
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
+  // 1. Check referer header
+  const referer = req.get("referer") || "";
+  console.log(`[DEBUG] Verify Finish Line Hit! Referer: ${referer}`);
+
+  // 2. The Trap for Bypass Bots
+  if (!referer.includes("softurl")) {
+    return res.send(`
+      <div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+        <div style="font-size:70px; margin-bottom:20px;">🚫🤖</div>
+        <h1 style="color:#ef4444; margin-bottom:10px;">Bypass Bot Detected!</h1>
+        <p style="color:#cbd5e1; max-width:400px; line-height:1.6;">You attempted to use a bypass bot or external method to skip the verification ads.</p>
+        <div style="margin-top:30px; background:rgba(239,68,68,0.1); border:1px solid #ef4444; padding:20px; border-radius:10px; max-width:400px;">
+          <p style="color:#f87171; font-weight:bold; margin:0 0 10px 0;">To get your file:</p>
+          <p style="color:white; margin:0;">Please click the original link inside the bot and complete the verification process properly.</p>
+        </div>
+      </div>
+    `);
   }
+
+  // 3. The Reward for Honest Users (Safe redirect to Telegram)
+  const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${token}`;
+  
+  // Render the silent telegram intent popup
+  renderSecureFinalPage(res, finalBotLink);
 });
 
 // ========================
