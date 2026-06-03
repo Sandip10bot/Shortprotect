@@ -76,7 +76,7 @@ function base62_decode(encoded) {
 }
 
 // ========================
-// 1. THE ENTRY SHIELD (5-Sec Wait)
+// 1. THE ENTRY SHIELD (Iframe Mask + Telegram Check)
 // ========================
 function renderAntiBypassPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -88,45 +88,76 @@ function renderAntiBypassPage(res, targetUrl) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Link Verification</title>
           <style>
-              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              .container { text-align: center; background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 400px; width: 90%; }
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
+              .container { text-align: center; background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 400px; width: 90%; z-index: 10; }
               h2 { margin-bottom: 10px; font-size: 24px; }
               p { color: #94a3b8; font-size: 14px; margin-bottom: 30px; }
               .btn { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: not-allowed; opacity: 0.7; transition: transform 0.2s, background 0.2s; width: 100%; }
               .btn.active { cursor: pointer; opacity: 1; }
               .btn.active:hover { transform: translateY(-2px); background: linear-gradient(135deg, #2563eb, #1e40af); }
+              
+              /* Fullscreen Iframe hidden by default */
+              #content-frame { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; border: none; z-index: 999; background: white; }
+              
+              #error-box { display: none; background: #7f1d1d; border: 1px solid #ef4444; }
           </style>
       </head>
       <body>
-      <div class="container">
+      
+      <div class="container" id="verify-box">
           <h2>Verify You Are Human</h2>
           <p id="status-text">Please wait <span id="countdown">5</span> seconds to safely proceed.</p>
           <button id="verify-btn" class="btn" disabled>Wait...</button>
       </div>
+
+      <div class="container" id="error-box">
+          <h2>🚫 Access Denied</h2>
+          <p>You cannot use external browsers or bots. Please click this link directly inside the Telegram app.</p>
+      </div>
+
+      <iframe id="content-frame"></iframe>
+
       <script>
       const encodedUrl = "${b64Url}"; 
       let timeLeft = 5;
       const btn = document.getElementById('verify-btn');
       const statusText = document.getElementById('status-text');
       const countdownSpan = document.getElementById('countdown');
+      const verifyBox = document.getElementById('verify-box');
+      const contentFrame = document.getElementById('content-frame');
+      const errorBox = document.getElementById('error-box');
 
-      const timer = setInterval(() => {
-          timeLeft--;
-          if (countdownSpan) countdownSpan.textContent = timeLeft;
-          if (timeLeft <= 0) {
-              clearInterval(timer);
-              statusText.innerHTML = "Verification complete! Click below.";
-              btn.textContent = "Verify & Proceed";
-              btn.disabled = false;
-              btn.classList.add('active');
-          }
-      }, 1000);
+      // SECURITY: Block non-Telegram browsers and bots
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isTelegram = (userAgent.indexOf("Telegram") > -1) || document.referrer.includes("telegram");
 
-      btn.addEventListener('click', () => {
-          if (!btn.disabled) {
-              window.location.href = atob(encodedUrl);
-          }
-      });
+      if (!isTelegram) {
+          // If they copy-pasted the link to Chrome or a bot is hitting it, block them instantly.
+          verifyBox.style.display = 'none';
+          errorBox.style.display = 'block';
+      } else {
+          // If they are safely inside Telegram, start the timer
+          const timer = setInterval(() => {
+              timeLeft--;
+              if (countdownSpan) countdownSpan.textContent = timeLeft;
+              if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  statusText.innerHTML = "Verification complete! Click below.";
+                  btn.textContent = "Verify & Proceed";
+                  btn.disabled = false;
+                  btn.classList.add('active');
+              }
+          }, 1000);
+
+          btn.addEventListener('click', () => {
+              if (!btn.disabled) {
+                  // Hide the verification box and load SoftURL inside the iframe
+                  verifyBox.style.display = 'none';
+                  contentFrame.src = atob(encodedUrl);
+                  contentFrame.style.display = 'block';
+              }
+          });
+      }
       </script>
       </body>
       </html>
