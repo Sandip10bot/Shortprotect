@@ -231,23 +231,19 @@ function renderSecureFinalPage(res, targetUrl) {
 }
 
 // ========================
-// ENTRY POINTS (Dynamic Tokens)
+// ENTRY POINTS (Double Token Supported)
 // ========================
 app.get("/link/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
-  console.log(`[DEBUG] Attempting lookup -> UserID: ${userId}, Token: ${token}`);
   
   try {
     const adData = await searchAdsCollection.findOne({
-      token: token,
-      $or: [
-        { user_id: parseInt(userId) },
-        { user_id: userId.toString() }
-      ]
+      // Allow match for new verify_token OR old legacy token
+      $or: [ { verify_token: token }, { token: token } ],
+      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
     });
     
     if (!adData) {
-      console.log(`[DEBUG] FAILED: No record match for UserID ${userId}, Token ${token}`);
       return res.send(`
         <div style="font-family:sans-serif; text-align:center; padding:50px; background:#0f172a; color:white; height:100vh;">
           <h1 style="color:#ef4444;">Invalid or Expired Link</h1>
@@ -258,14 +254,11 @@ app.get("/link/:userId/:token", async (req, res) => {
     }
     
     const target = adData.short_url || adData.url; 
-    if (!target) {
-      return res.send("<h1 style='color:red;'>Error: SoftURL missing in database</h1>");
-    }
+    if (!target) return res.send("<h1 style='color:red;'>Error: SoftURL missing in database</h1>");
     
     renderAntiBypassPage(res, target);
     
   } catch (error) {
-    console.error("[DEBUG] DB Error:", error);
     res.redirect('https://t.me/MythoSerialBot');
   }
 });
@@ -283,14 +276,13 @@ app.get("/link/:hex", (req, res) => {
 });
 
 // ========================
-// NEW: THE ULTIMATE FINISH LINE (Anti-Bypass Shield for Search Links)
+// NEW: THE ULTIMATE FINISH LINE (Hidden Token Shield)
 // ========================
-app.get("/verify/:prefix/:userId/:token", (req, res) => {
+app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   const { prefix, userId, token } = req.params;
 
   // 1. Check referer header
   const referer = req.get("referer") || "";
-  console.log(`[DEBUG] Verify Finish Line Hit! Referer: ${referer}`);
 
   // 2. The Trap for Bypass Bots
   if (!referer.includes("softurl")) {
@@ -307,11 +299,27 @@ app.get("/verify/:prefix/:userId/:token", (req, res) => {
     `);
   }
 
-  // 3. The Reward for Honest Users (Safe redirect to Telegram)
-  const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${token}`;
-  
-  // Render the silent telegram intent popup
-  renderSecureFinalPage(res, finalBotLink);
+  try {
+      // 3. SECURE REWARD: Lookup the true bot_token from DB!
+      const adData = await searchAdsCollection.findOne({
+        $or: [ { verify_token: token }, { token: token } ],
+        $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+      });
+
+      if (!adData) {
+        return res.send("<h1 style='color:red;'>Verification record not found.</h1>");
+      }
+
+      // 4. Construct final link using the HIDDEN bot_token
+      const trueBotToken = adData.bot_token || adData.token || token;
+      const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${trueBotToken}`;
+      
+      // Render the silent telegram intent popup
+      renderSecureFinalPage(res, finalBotLink);
+
+  } catch (error) {
+      res.redirect('https://t.me/MythoSerialBot');
+  }
 });
 
 // ========================
