@@ -18,17 +18,19 @@ const client = new MongoClient(MONGO_URI);
 let doubleCollection;
 let urlShortenerCollection;
 let maskCollection;
-let searchAdsCollection; // Dynamic /link endpoint verification ke liye
+let searchAdsCollection; 
 
 async function connectDB() {
   try {
     await client.connect();
     const db = client.db("mythobot");
+    
     doubleCollection = db.collection("double_points");
     urlShortenerCollection = db.collection("url_shortener");
     maskCollection = db.collection("masked_links");
-    searchAdsCollection = db.collection("search_ads"); // Connected to search_ads
-    console.log("✅ MongoDB connected for Masking, Double, and Dynamic Search Ads");
+    searchAdsCollection = db.collection("search_ads"); 
+    
+    console.log("✅ MongoDB connected for Masking, Double, and Search Ads");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
   }
@@ -229,28 +231,47 @@ function renderSecureFinalPage(res, targetUrl) {
 }
 
 // ========================
-// NEW SECURE ENTRY POINT (Database Token Method)
+// ENTRY POINTS (Dynamic Tokens)
 // ========================
 app.get("/link/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
+  console.log(`[DEBUG] Attempting lookup -> UserID: ${userId}, Token: ${token}`);
+  
   try {
     const adData = await searchAdsCollection.findOne({
-      user_id: parseInt(userId),
       token: token,
-      used: false
+      $or: [
+        { user_id: parseInt(userId) },
+        { user_id: userId.toString() }
+      ]
     });
     
-    if (!adData || !adData.short_url) {
-      return res.redirect('https://t.me/MythoSerialBot');
+    if (!adData) {
+      console.log(`[DEBUG] FAILED: No record match for UserID ${userId}, Token ${token}`);
+      // Showing the error on screen instead of silent redirect for debugging
+      return res.send(`
+        <div style="font-family:sans-serif; text-align:center; padding:50px; background:#0f172a; color:white; height:100vh;">
+          <h1 style="color:#ef4444;">Invalid or Expired Link</h1>
+          <p>System couldn't find your record in database.</p>
+          <a href="https://t.me/MythoSerialBot" style="color:#3b82f6;">Return to Bot</a>
+        </div>
+      `);
     }
     
-    renderAntiBypassPage(res, adData.short_url);
+    const target = adData.short_url || adData.url; 
+    if (!target) {
+      return res.send("<h1 style='color:red;'>Error: SoftURL missing in database</h1>");
+    }
+    
+    renderAntiBypassPage(res, target);
+    
   } catch (error) {
+    console.error("[DEBUG] DB Error:", error);
     res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
-// Backward compatibility fallback for old hex links if any exist
+// Old Hex Fallback
 app.get("/link/:hex", (req, res) => {
   const { hex } = req.params;
   try {
@@ -302,7 +323,7 @@ app.get("/mask/:encodedUrl", async (req, res) => {
 });
 
 // ========================
-// DOUBLE BYPASS ROUTES
+// EXIT ROUTES (Double / Bypass Check)
 // ========================
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
@@ -322,6 +343,7 @@ app.get("/generate/:userId", async (req, res) => {
 
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
+
   const referer = req.get("referer") || "";
   if (!referer.includes("softurl.in")) {
     return res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh;"><h1 style="color:#ef4444;">🚫 Bypass Bot Detected!</h1><p>Please click the proper link in Telegram.</p></div>`);
@@ -399,14 +421,12 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   res.redirect('https://t.me/MythoSerialBot');
 });
 
-app.get("/", (req, res) => {
-    res.redirect('https://t.me/MythoSerialBot');
-});
-
+// Fallback home route
 app.get("*", (req, res) => {
     res.redirect('https://t.me/MythoSerialBot');
 });
 
+// Start Server
 app.listen(PORT, () => {
-  console.log(`🚀 Fully Tokenized Secure Anti-Bypass Server running on port ${PORT}`);
+  console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
 });
