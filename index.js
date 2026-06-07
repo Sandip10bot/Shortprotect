@@ -38,6 +38,96 @@ async function connectDB() {
 connectDB();
 
 // ========================
+// GLOBAL THEME (Glassmorphism & Cosmic Neon)
+// ========================
+const THEME_CSS = `
+  <style>
+      body { 
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+          margin: 0; height: 100vh; display: flex; justify-content: center; align-items: center; 
+          background: radial-gradient(circle at 50% 50%, #16002b 0%, #07000d 100%); 
+          color: #ffffff; overflow: hidden; 
+      }
+      body::before { 
+          content: ''; position: absolute; width: 150vw; height: 150vh; 
+          background: radial-gradient(circle, rgba(255, 0, 255, 0.05) 0%, transparent 60%); 
+          z-index: 0; animation: pulse 8s infinite alternate; 
+      }
+      @keyframes pulse { 
+          0% { transform: scale(1); opacity: 0.5; } 
+          100% { transform: scale(1.1); opacity: 1; } 
+      }
+      .container { 
+          position: relative; z-index: 1; background: rgba(30, 0, 50, 0.35); 
+          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); 
+          border: 1px solid rgba(255, 0, 255, 0.2); 
+          box-shadow: 0 8px 32px 0 rgba(255, 0, 255, 0.15), inset 0 0 15px rgba(138, 43, 226, 0.2); 
+          padding: 40px; border-radius: 16px; text-align: center; max-width: 400px; width: 90%; 
+      }
+      h1, h2 { 
+          margin-bottom: 15px; font-size: 26px; color: #ff66ff; 
+          text-shadow: 0 0 15px rgba(255, 105, 180, 0.8); 
+      }
+      .error-title { color: #ff1744 !important; text-shadow: 0 0 15px rgba(255, 23, 68, 0.8) !important; }
+      p { color: #d8b4e2; font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
+      
+      .btn { 
+          background: linear-gradient(135deg, #d500f9, #651fff); 
+          box-shadow: 0 0 15px rgba(213, 0, 249, 0.4); color: white; border: none; 
+          padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 8px; 
+          cursor: pointer; transition: all 0.3s ease; width: 100%; text-transform: uppercase; letter-spacing: 1px;
+      }
+      .btn:hover { 
+          transform: translateY(-2px); box-shadow: 0 0 25px rgba(213, 0, 249, 0.7); 
+      }
+      .loader { 
+          border: 3px solid rgba(255,255,255,0.05); border-top: 3px solid #ff66ff; 
+          border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; 
+          margin: 0 auto 20px auto; box-shadow: 0 0 15px rgba(255, 102, 255, 0.5); 
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      
+      .manual-box { 
+          display: none; background: rgba(213, 0, 249, 0.1); 
+          border: 1px solid rgba(213, 0, 249, 0.3); padding: 15px; border-radius: 8px; 
+          margin-top: 20px; text-align: left; box-shadow: inset 0 0 10px rgba(213, 0, 249, 0.15); 
+      }
+      a { color: #ea80fc; text-decoration: none; font-weight: bold; transition: 0.3s; }
+      a:hover { text-shadow: 0 0 8px rgba(234, 128, 252, 0.8); }
+  </style>
+`;
+
+// Helper Function for Bypass Error Template
+function renderBypassError(res) {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Access Denied</title>
+            ${THEME_CSS}
+        </head>
+        <body>
+            <div class="container">
+                <div style="font-size:60px; margin-bottom:10px;">🚫🤖</div>
+                <h2 class="error-title">Bypass Bot Detected!</h2>
+                <p>You attempted to use a bypass method or external script to skip verification.</p>
+                <div class="manual-box" style="display:block; text-align:center;">
+                    <p style="color:white; margin:0;">Please click the original <b>shortxlinks</b> link in Telegram to proceed securely.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+}
+
+// Helper Function to cleanly verify referer
+function isRefererValid(req) {
+    const referer = (req.get("referrer") || req.get("referer") || "").toLowerCase();
+    return referer.includes("shortxlinks");
+}
+
+// ========================
 // BASE62 ENCODING UTILS
 // ========================
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -80,7 +170,7 @@ function base62_decode(encoded) {
 }
 
 // ========================
-// 1. THE ENTRY SHIELD (5-Sec Wait - MYTHO PURPLE THEME)
+// 1. THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
 // ========================
 function renderAntiBypassPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -90,24 +180,8 @@ function renderAntiBypassPage(res, targetUrl) {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Securing Connection...</title>
-          <style>
-              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: radial-gradient(circle at 50% 50%, #2e1065, #090414); color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; text-align: center; }
-              .container { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(16px); padding: 40px; border-radius: 20px; border: 1px solid rgba(168, 85, 247, 0.3); box-shadow: 0 0 40px rgba(168, 85, 247, 0.2); max-width: 400px; width: 90%; }
-              h2 { margin-bottom: 10px; font-size: 24px; color: #d8b4fe; text-shadow: 0 0 10px rgba(216, 180, 254, 0.5); }
-              p { color: #cbd5e1; font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
-              
-              .loader {
-                  border: 4px solid rgba(255,255,255,0.05);
-                  border-top: 4px solid #a855f7;
-                  border-radius: 50%; width: 50px; height: 50px;
-                  animation: spin 1s linear infinite; margin: 0 auto 20px auto;
-                  box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
-              }
-              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-              
-              .manual-box { display: none; background: rgba(168, 85, 247, 0.1); border: 1px solid #a855f7; padding: 15px; border-radius: 12px; margin-top: 20px; }
-          </style>
+          <title>Secure Link Verification</title>
+          ${THEME_CSS}
       </head>
       <body>
       
@@ -117,7 +191,7 @@ function renderAntiBypassPage(res, targetUrl) {
           <p id="status-text">Checking browser environment...</p>
           
           <div class="manual-box" id="manual-box">
-              <b style="color:white; font-size:18px;">How to open:</b><br><br>
+              <b style="color:white; font-size:18px; text-shadow: 0 0 10px #ff66ff;">How to open:</b><br><br>
               1. Tap the three dots <b>(⋮)</b> at the top right corner.<br>
               2. Select <b>"Open in Chrome"</b> or <b>"Open in Browser"</b>.
           </div>
@@ -146,7 +220,7 @@ function renderAntiBypassPage(res, targetUrl) {
           window.location.replace(chromeIntent);
           
       } else {
-          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:#f3e8ff;">5</span> seconds...';
+          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:#ff66ff;font-size:18px;">5</span> seconds...';
           let timeLeft = 5;
           const countdownSpan = document.getElementById('countdown');
 
@@ -172,7 +246,7 @@ function renderAntiBypassPage(res, targetUrl) {
 }
 
 // ========================
-// 2. THE EXIT SHIELD (Silent Telegram Launcher - MYTHO THEME)
+// 2. THE EXIT SHIELD (Silent Telegram Launcher)
 // ========================
 function renderSecureFinalPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -182,20 +256,12 @@ function renderSecureFinalPage(res, targetUrl) {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Opening MythoBot...</title>
-          <style>
-              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: radial-gradient(circle at 50% 50%, #2e1065, #090414); color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              .container { text-align: center; background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(16px); padding: 40px; border-radius: 20px; border: 1px solid rgba(168, 85, 247, 0.3); box-shadow: 0 0 40px rgba(168, 85, 247, 0.2); max-width: 400px; width: 90%; }
-              h2 { font-size: 24px; margin-bottom: 10px; color: #d8b4fe; text-shadow: 0 0 10px rgba(216, 180, 254, 0.5); }
-              p { color: #cbd5e1; font-size: 14px; margin-bottom: 30px; line-height: 1.6; }
-              .btn { background: linear-gradient(135deg, #a855f7, #7e22ce); color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 10px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; width: 100%; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4); }
-              .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(168, 85, 247, 0.6); }
-          </style>
+          <title>Opening Bot...</title>
+          ${THEME_CSS}
       </head>
       <body>
       <div class="container">
-          <div style="font-size: 50px; margin-bottom: 15px; filter: drop-shadow(0 0 10px #a855f7);">✨</div>
-          <h2>Verification Complete!</h2>
+          <h2>🎉 Verification Complete!</h2>
           <p>Your file is ready. Click below to securely open it in Telegram.</p>
           <button id="open-btn" class="btn">Open in Telegram</button>
       </div>
@@ -230,259 +296,6 @@ function renderSecureFinalPage(res, targetUrl) {
 }
 
 // ========================
-// THE BYPASS TRAP (New Game: Mytho Runner with Trident Obstacle)
-// ========================
-function renderBypassPage(res) {
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-          <title>Access Denied - Bypasser Run 🛑</title>
-          <style>
-              @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
-              
-              body { 
-                  margin: 0; padding: 0; background: #090414; 
-                  font-family: 'Poppins', sans-serif; color: #fff; 
-                  display: flex; align-items: center; justify-content: center; 
-                  min-height: 100vh; overflow: hidden;
-                  background-image: radial-gradient(circle at 50% 50%, #2e1065, #090414);
-                  touch-action: manipulation;
-              }
-              
-              .glass-card { 
-                  background: rgba(255, 255, 255, 0.03); 
-                  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-                  border: 1px solid rgba(168, 85, 247, 0.3); 
-                  border-radius: 24px; padding: 30px; 
-                  text-align: center; max-width: 500px; width: 90%;
-                  box-shadow: 0 0 50px rgba(168, 85, 247, 0.15); 
-                  position: relative;
-              }
-              
-              h1 { color: #d8b4fe; margin: 0 0 5px 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 0 15px rgba(216, 180, 254, 0.5); }
-              .roast { font-size: 13px; color: #cbd5e1; margin-bottom: 20px; line-height: 1.5; }
-              .roast b { color: #f3e8ff; }
-
-              /* Game Screen */
-              #game-container {
-                  width: 100%; height: 180px; 
-                  background: rgba(15, 5, 24, 0.6); border: 2px dashed rgba(168, 85, 247, 0.4);
-                  border-radius: 12px; position: relative; overflow: hidden;
-                  margin-bottom: 20px; cursor: pointer;
-                  box-shadow: inset 0 0 20px rgba(168, 85, 247, 0.1);
-              }
-              
-              .ground {
-                  position: absolute; bottom: 0; left: 0; width: 100%; height: 2px;
-                  background: rgba(168, 85, 247, 0.5);
-                  box-shadow: 0 0 10px #a855f7;
-              }
-
-              #player {
-                  font-size: 45px; position: absolute;
-                  bottom: 2px; left: 30px; 
-                  line-height: 1; z-index: 10;
-                  filter: drop-shadow(0 0 8px rgba(255,255,255,0.4));
-              }
-
-              .jump {
-                  animation: jumpAnim 0.5s ease-out;
-              }
-
-              @keyframes jumpAnim {
-                  0% { bottom: 2px; }
-                  40% { bottom: 100px; }
-                  50% { bottom: 105px; }
-                  60% { bottom: 100px; }
-                  100% { bottom: 2px; }
-              }
-
-              #obstacle {
-                  font-size: 45px; position: absolute;
-                  bottom: 2px; right: -50px; 
-                  line-height: 1; z-index: 5;
-                  display: none; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.8));
-              }
-
-              .move-obstacle {
-                  animation: obstacleAnim 1.5s infinite linear;
-              }
-
-              @keyframes obstacleAnim {
-                  0% { right: -50px; }
-                  100% { right: 100%; }
-              }
-
-              .top-bar {
-                  display: flex; justify-content: space-between;
-                  font-weight: 600; font-size: 16px; color: #d8b4fe;
-                  margin-bottom: 15px; padding: 0 10px;
-              }
-
-              #start-overlay {
-                  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-                  background: rgba(9, 4, 20, 0.8); backdrop-filter: blur(3px);
-                  display: flex; flex-direction: column; align-items: center; justify-content: center;
-                  z-index: 20; border-radius: 12px;
-              }
-
-              .btn {
-                  background: linear-gradient(135deg, #a855f7, #7e22ce);
-                  color: white; border: none; padding: 10px 20px;
-                  border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px;
-                  font-family: 'Poppins', sans-serif;
-                  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
-                  transition: transform 0.2s;
-              }
-              .btn:active { transform: scale(0.95); }
-              
-              #message-box { display: none; margin-top: 15px; animation: fadeIn 0.5s; }
-              @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-          </style>
-      </head>
-      <body>
-          <div class="glass-card">
-              <h1>Bypass Detected 🚫</h1>
-              <p class="roast">
-                  Bot ko dhoka dene chale the? Server ne pakad liya! 
-                  <br>Ab chup chap <b>Tap/Space</b> dabao aur bhaago!
-              </p>
-              
-              <div class="top-bar">
-                  <span>Score: <span id="score">0</span></span>
-                  <span>Target: 100</span>
-              </div>
-              
-              <div id="game-container">
-                  <div id="start-overlay">
-                      <p style="margin:0 0 10px 0; color:#e9d5ff; font-weight:600;">Tap or Press Space to Jump</p>
-                      <button class="btn" id="start-btn">Start Running</button>
-                  </div>
-                  
-                  <div id="player">🏃‍♂️</div>
-                  <div id="obstacle">🔱</div>
-                  <div class="ground"></div>
-              </div>
-
-              <div id="message-box">
-                  <h2 id="msg-title" style="margin:0 0 5px 0; color:#ef4444;">Game Over!</h2>
-                  <p id="msg-desc" style="font-size: 14px; color: #cbd5e1; margin-bottom:15px; line-height: 1.5;">
-                      Pakde gaye! Tumhara bypass ka sapna toot gaya. Wapas Telegram jao aur sahi link par click karo.
-                  </p>
-                  <button class="btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);" onclick="window.location.href='https://t.me/MythoSerialBot'">Go Back To Bot</button>
-              </div>
-          </div>
-  
-          <script>
-              const player = document.getElementById("player");
-              const obstacle = document.getElementById("obstacle");
-              const startBtn = document.getElementById("start-btn");
-              const startOverlay = document.getElementById("start-overlay");
-              const scoreSpan = document.getElementById("score");
-              const messageBox = document.getElementById("message-box");
-              const msgTitle = document.getElementById("msg-title");
-              const msgDesc = document.getElementById("msg-desc");
-              const gameContainer = document.getElementById("game-container");
-
-              let isJumping = false;
-              let isGameOver = false;
-              let score = 0;
-              let checkCollision;
-              let scoreInterval;
-
-              function jump() {
-                  if (isJumping || isGameOver) return;
-                  
-                  isJumping = true;
-                  player.classList.add("jump");
-                  
-                  if (navigator.vibrate) navigator.vibrate(20);
-
-                  setTimeout(() => {
-                      player.classList.remove("jump");
-                      isJumping = false;
-                  }, 500); 
-              }
-
-              document.addEventListener("keydown", (e) => {
-                  if (e.code === "Space") jump();
-              });
-              gameContainer.addEventListener("touchstart", (e) => {
-                  e.preventDefault(); 
-                  jump();
-              }, { passive: false });
-              gameContainer.addEventListener("mousedown", jump);
-
-              function startGame() {
-                  isGameOver = false;
-                  score = 0;
-                  scoreSpan.innerText = score;
-                  startOverlay.style.display = "none";
-                  messageBox.style.display = "none";
-                  
-                  obstacle.style.display = "block";
-                  obstacle.style.animation = "obstacleAnim 1.5s infinite linear";
-
-                  scoreInterval = setInterval(() => {
-                      score++;
-                      scoreSpan.innerText = score;
-                      
-                      if(score === 30) obstacle.style.animationDuration = "1.3s";
-                      if(score === 60) obstacle.style.animationDuration = "1.1s";
-                      if(score === 90) obstacle.style.animationDuration = "0.9s";
-
-                      if (score >= 100) {
-                          endGame(true);
-                      }
-                  }, 100);
-
-                  checkCollision = setInterval(() => {
-                      let playerTop = parseInt(window.getComputedStyle(player).getPropertyValue("top"));
-                      let obstacleLeft = parseInt(window.getComputedStyle(obstacle).getPropertyValue("left"));
-                      
-                      // Adjusted hitbox for the Trident
-                      if (obstacleLeft > 10 && obstacleLeft < 60 && playerTop >= 100) {
-                          endGame(false);
-                      }
-                  }, 10);
-              }
-
-              function endGame(won) {
-                  isGameOver = true;
-                  clearInterval(checkCollision);
-                  clearInterval(scoreInterval);
-                  
-                  obstacle.style.animation = "none"; 
-                  obstacle.style.display = "none";
-                  
-                  messageBox.style.display = "block";
-                  
-                  if (won) {
-                      msgTitle.innerText = "🏆 You Won (Kinda)!";
-                      msgTitle.style.color = "#d8b4fe";
-                      msgDesc.innerHTML = "Bhaag toh bahut tez liye beta! <b>Par file tumhe abhi bhi nahi milegi.</b><br>Mehnat barbaad... chalo ab sahi link open karo Bot se!";
-                  } else {
-                      msgTitle.innerText = "💥 Boom! Pakde gaye!";
-                      msgTitle.style.color = "#ef4444";
-                      msgDesc.innerHTML = "Trishul se takra gaye! Bypass bot fail ho gaya.<br><b>Sahi tarike se SoftUrl verify karo!</b>";
-                  }
-                  
-                  startOverlay.style.display = "flex";
-                  startBtn.innerText = "Try Again?";
-              }
-
-              startBtn.addEventListener("click", startGame);
-          </script>
-      </body>
-      </html>
-    `);
-}
-
-// ========================
 // ENTRY POINTS
 // ========================
 app.get("/link/:userId/:token", async (req, res) => {
@@ -496,16 +309,17 @@ app.get("/link/:userId/:token", async (req, res) => {
     
     if (!adData) {
       return res.send(`
-        <div style="font-family:sans-serif; text-align:center; padding:50px; background:#090414; color:white; height:100vh;">
-          <h1 style="color:#ef4444;">Invalid or Expired Link</h1>
+        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+        <div class="container">
+          <h2 class="error-title">Invalid or Expired Link</h2>
           <p>System couldn't find your record in database.</p>
-          <a href="https://t.me/MythoSerialBot" style="color:#a855f7;">Return to Bot</a>
-        </div>
+          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
+        </div></body></html>
       `);
     }
     
     const target = adData.short_url || adData.url; 
-    if (!target) return res.send("<h1 style='color:red;'>Error: SoftURL missing in database</h1>");
+    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
     
     renderAntiBypassPage(res, target);
     
@@ -526,14 +340,14 @@ app.get("/link/:hex", (req, res) => {
 });
 
 // ========================
-// EXIT ROUTES (Hidden Token Shield & Double)
+// THE ULTIMATE FINISH LINE
 // ========================
 app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   const { prefix, userId, token } = req.params;
-  const referer = req.get("referer") || "";
 
-  if (referer && !referer.includes("shortxlinks")) {
-    return renderBypassPage(res);
+  // STRICT SHORTXLINKS REFERER CHECK
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
   }
 
   try {
@@ -543,7 +357,7 @@ app.get("/verify/:prefix/:userId/:token", async (req, res) => {
       });
 
       if (!adData) {
-        return res.send("<h1 style='color:red;'>Verification record not found.</h1>");
+        return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
       }
 
       const trueBotToken = adData.bot_token || adData.token || token;
@@ -556,6 +370,9 @@ app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   }
 });
 
+// ========================
+// EXIT ROUTES
+// ========================
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
@@ -566,20 +383,23 @@ app.get("/generate/:userId", async (req, res) => {
 
   const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
   res.send(`
-    <div style="background:#090414; color:white; padding:20px; font-family:sans-serif;">
-      ✅ Token generated!<br><br>
-      Copy this link and shorten it with Softurl:<br><br>
-      <code style="color:#a855f7;">${protectedLink}</code>
-    </div>
+    <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+    <div class="container">
+      <h2>✅ Token generated!</h2>
+      <p>Copy this link and shorten it with shortxlinks:</p>
+      <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; word-wrap:break-word; color:#ea80fc;">
+        <code>${protectedLink}</code>
+      </div>
+    </div></body></html>
   `);
 });
 
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
-  const referer = req.get("referer") || "";
-  
-  if (referer && !referer.includes("shortxlinks")) {
-    return renderBypassPage(res);
+
+  // STRICT SHORTXLINKS REFERER CHECK
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
   }
 
   await doubleCollection.updateOne(
@@ -615,9 +435,9 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   const { t } = req.query;
   
-  const referer = req.get("referer") || "";
-  if (referer && !referer.includes("shortxlinks")) {
-      return renderBypassPage(res);
+  // STRICT SHORTXLINKS REFERER CHECK
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
   }
 
   let dbRecord = null;
@@ -661,5 +481,5 @@ app.get("*", (req, res) => {
 
 // Start Server
 app.listen(PORT, () => {
-  console.log(`🚀 Mystical Anti-Bypass Server running on port ${PORT}`);
+  console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
 });
