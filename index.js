@@ -345,7 +345,7 @@ app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
 
   const referer = req.get("referer") || "";
-  if (!referer.includes("softurl.in")) {
+  if (!referer.includes("shortxlinks.com")) {
     return res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh;"><h1 style="color:#ef4444;">🚫 Bypass Bot Detected!</h1><p>Please click the proper link in Telegram.</p></div>`);
   }
 
@@ -383,7 +383,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   const { t } = req.query;
   
   const referer = req.get("referer") || "";
-  if (!referer.includes("softurl.in")) {
+  if (!referer.includes("shortxlinks.com")) {
       return res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif; background-color:#0f172a; color:white; height:100vh;"><h1 style="color:#ef4444;">🚫 Bypass Bot Detected!</h1><p>Nice try! But you must use the original SoftURL link to get your file.</p></div>`);
   }
 
