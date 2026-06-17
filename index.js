@@ -295,6 +295,83 @@ function renderSecureFinalPage(res, targetUrl) {
     `);
 }
 
+// ==========================================
+// MINI APP IP-BASED ANTI-CHEAT VERIFICATION
+// ==========================================
+
+app.get("/verify-miniapp/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const parsedUserId = parseInt(userId);
+  
+  if (isNaN(parsedUserId)) {
+    return res.status(400).send("Invalid User ID format.");
+  }
+
+  // Cloudflare ya reverse proxy ke real client IP ko fetch karne ke liye
+  let userIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  if (userIp && userIp.includes(",")) {
+    userIp = userIp.split(",")[0].trim();
+  }
+
+  try {
+    const db = client.db("Mytho");
+    const ipVerificationCollection = db.collection("ip_verification");
+    const usersCollection = db.collection("users"); // Adjust according to your exact users collection name
+
+    // Check karein ki ye IP kisi DOOSRE Telegram User ID ke sath linked toh nahi hai
+    const duplicateIpRecord = await ipVerificationCollection.findOne({
+      ip: userIp,
+      userId: { $ne: parsedUserId }
+    });
+
+    if (duplicateIpRecord) {
+      // Agar IP kisi dusre account se match ho jata hai -> Block and Show Error Page
+      return res.send(`
+        ${THEME_CSS}
+        <div class="container">
+          <div class="card" style="border-color: #ff4757; box-shadow: 0 8px 32px 0 rgba(255, 71, 87, 0.37);">
+            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">❌ Access Denied</h2>
+            <p>Multiple account usage detected from this network connection.</p>
+            <p style="font-size: 13px; color: #ccc; margin-top: 15px;">Your Activity Has Been Logged.</p>
+            <p style="font-size: 11px; color: #888;">Network Node: ${userIp}</p>
+          </div>
+        </div>
+      `);
+    }
+
+    // Agar IP clear hai, toh database mein is user ke liye entry save/update karein
+    await ipVerificationCollection.updateOne(
+      { userId: parsedUserId },
+      { $set: { ip: userIp, verified_at: new Date() } },
+      { upsert: true }
+    );
+
+    // Bot ko notify karne ke liye users collection mein flag true set karein
+    await usersCollection.updateOne(
+      { user_id: parsedUserId },
+      { $set: { is_verified: true, verification_ip: userIp } },
+      { upsert: true }
+    );
+
+    // Success Screen Render Karein
+    return res.send(`
+      ${THEME_CSS}
+      <div class="container">
+        <div class="card" style="border-color: #00ffcc; box-shadow: 0 8px 32px 0 rgba(0, 255, 204, 0.2);">
+          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">✅ Verified Successfully</h2>
+          <p>Your device integrity check passed.</p>
+          <p style="color: #aaa; font-size: 14px;">You can now close this Mini App and return to the bot to continue.</p>
+        </div>
+      </div>
+    `);
+
+  } catch (error) {
+    console.error("Error during Mini App validation:", error);
+    return res.status(500).send("Internal Server Error verification check.");
+  }
+});
+
+
 // ========================
 // ENTRY POINTS
 // ========================
