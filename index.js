@@ -24,6 +24,7 @@ let maskCollection;
 let searchAdsCollection; 
 let scratchCollection;
 let usersCollection;
+let mpHistoryCollection;
 
 async function connectDB() {
   try {
@@ -385,7 +386,7 @@ app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     renderSecureFinalPage(res, finalBotLink);
 });
 
-// 2. Serve Web App Render HTML
+// 2. Serve Web App Render HTML (Ultra-Premium Cinematic Edition)
 function renderScratchAppHTML(userId, token, currentPoints, reward) {
     return `
     <!DOCTYPE html>
@@ -393,83 +394,187 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Scratch & Win</title>
+        <title>Premium Scratch Card</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             :root {
                 --primary: #d500f9;
-                --bg-dark: #07000d;
-                --panel-bg: rgba(30, 0, 50, 0.6);
+                --gold-light: #FFDF00;
+                --gold-dark: #D4AF37;
+                --bg-dark: #0a0011;
             }
+            
+            * { box-sizing: border-box; }
+            
             body {
-                margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif;
-                background: radial-gradient(circle at 50% 50%, #16002b 0%, var(--bg-dark) 100%);
-                color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh;
-                overflow: hidden; user-select: none;
+                margin: 0; padding: 0; font-family: 'Poppins', sans-serif;
+                background: radial-gradient(circle at 50% -20%, #2b004a 0%, var(--bg-dark) 80%);
+                color: #fff; display: flex; flex-direction: column; align-items: center; 
+                min-height: 100vh; overflow: hidden; user-select: none;
             }
+
+            /* --- Cinematic Background Elements --- */
+            .bg-glow {
+                position: absolute; width: 100vw; height: 100vh;
+                background: radial-gradient(circle at 50% 40%, rgba(213, 0, 249, 0.15) 0%, transparent 60%);
+                animation: pulseGlow 4s ease-in-out infinite alternate;
+                z-index: 0; pointer-events: none;
+            }
+
+            @keyframes pulseGlow {
+                0% { opacity: 0.5; }
+                100% { opacity: 1; }
+            }
+
+            /* --- Premium Glassmorphism Dashboard --- */
             .profile-card {
-                background: var(--panel-bg); width: 90%; max-width: 400px;
-                border-radius: 16px; padding: 15px; margin-top: 20px;
-                border: 1px solid rgba(255, 0, 255, 0.2);
-                box-shadow: 0 4px 15px rgba(213, 0, 249, 0.2);
+                position: relative; z-index: 10;
+                background: rgba(255, 255, 255, 0.04);
+                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                width: 90%; max-width: 400px; border-radius: 20px; 
+                padding: 18px 20px; margin-top: 25px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(255, 255, 255, 0.02);
                 display: flex; align-items: center; gap: 15px;
             }
+
             .profile-img {
-                width: 60px; height: 60px; border-radius: 50%;
-                border: 2px solid var(--primary); object-fit: cover;
-                background: #333;
+                width: 55px; height: 55px; border-radius: 14px;
+                border: 2px solid rgba(213, 0, 249, 0.5); object-fit: cover;
+                background: #1a1a1a; box-shadow: 0 4px 15px rgba(213, 0, 249, 0.4);
             }
-            .profile-info h3 { margin: 0 0 5px 0; font-size: 18px; color: #ff66ff; }
-            .profile-info p { margin: 0; font-size: 13px; color: #d8b4e2; }
-            .stats { margin-top: 5px; font-weight: bold; color: #00e676; }
+
+            .profile-info { flex-grow: 1; }
+            .profile-info h3 { margin: 0 0 2px 0; font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+            .profile-info p { margin: 0; font-size: 11px; color: #bbb; }
             
-            .scratch-container {
-                position: relative; width: 300px; height: 300px; margin-top: 40px;
-                border-radius: 20px; box-shadow: 0 0 30px rgba(213, 0, 249, 0.4);
-                background: #1a1a1a; overflow: hidden;
+            .stats-badge {
+                background: rgba(0, 230, 118, 0.1); border: 1px solid rgba(0, 230, 118, 0.3);
+                color: #00e676; padding: 6px 12px; border-radius: 10px;
+                font-size: 13px; font-weight: 800; display: inline-flex; align-items: center; gap: 5px;
+                margin-top: 8px; transition: all 0.3s ease;
             }
+
+            /* --- LIVE INCREMENT ANIMATIONS --- */
+            .stats-badge.points-updating {
+                background: rgba(255, 223, 0, 0.2);
+                border-color: var(--gold-light);
+                color: var(--gold-light);
+                box-shadow: 0 0 20px rgba(255, 223, 0, 0.6);
+                transform: scale(1.1);
+            }
+
+            .floating-points {
+                position: absolute; top: 50%; left: 50%;
+                transform: translate(-50%, -50%); z-index: 100;
+                font-size: 28px; font-weight: 800; color: var(--gold-light);
+                text-shadow: 0 0 15px rgba(255, 223, 0, 0.8), 0 5px 15px rgba(0,0,0,0.5);
+                pointer-events: none; opacity: 0;
+            }
+
+            @keyframes floatToWallet {
+                0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+                20% { opacity: 1; transform: translate(-50%, -80%) scale(1.2); }
+                80% { opacity: 1; transform: translate(-50%, -200px) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -250px) scale(0.8); }
+            }
+
+            /* --- The Scratch Card Container --- */
+            .scratch-wrapper {
+                position: relative; z-index: 10; margin-top: 50px;
+                width: 280px; height: 280px; border-radius: 24px;
+                background: linear-gradient(135deg, #3a0088, #d500f9);
+                padding: 4px; box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(213, 0, 249, 0.3);
+                animation: float 6s ease-in-out infinite;
+            }
+
+            @keyframes float {
+                0%, 100% { transform: translateY(0px); }
+                50% { transform: translateY(-15px); box-shadow: 0 35px 70px rgba(0,0,0,0.9), 0 0 50px rgba(213, 0, 249, 0.5); }
+            }
+
+            .scratch-inner {
+                position: relative; width: 100%; height: 100%;
+                border-radius: 20px; background: radial-gradient(circle at top, #1a0033, #000);
+                overflow: hidden;
+            }
+
+            /* --- The Reward Reveal Layer --- */
             .reward-layer {
                 position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 display: flex; flex-direction: column; justify-content: center; align-items: center;
-                background: radial-gradient(circle, #3a005c, #16002b);
+                opacity: 0; transform: scale(0.5); transition: all 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             }
-            .reward-layer h1 { font-size: 40px; margin: 0; color: #ffd700; text-shadow: 0 0 20px rgba(255,215,0,0.8); }
-            .reward-layer p { margin: 5px 0 0 0; font-size: 18px; color: #fff; }
+
+            .reward-layer.revealed { opacity: 1; transform: scale(1); }
+
+            .reward-layer h1 { 
+                font-size: 65px; margin: 0; 
+                background: linear-gradient(to bottom, #FFFDE4, #FFDF00, #D4AF37);
+                -webkit-background-clip: text; color: transparent;
+                text-shadow: 0 15px 25px rgba(0,0,0,0.5);
+                line-height: 1;
+            }
+            .reward-layer p { 
+                margin: 8px 0 0 0; font-size: 15px; color: #fff; 
+                letter-spacing: 4px; text-transform: uppercase; font-weight: 800;
+                background: rgba(213, 0, 249, 0.2); padding: 6px 16px; border-radius: 20px;
+                border: 1px solid rgba(213, 0, 249, 0.4);
+            }
             
             canvas {
-                position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; cursor: pointer;
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+                z-index: 2; cursor: pointer; border-radius: 20px;
             }
-            
+
+            /* --- Premium Close Button --- */
             .btn-close {
-                margin-top: 30px; background: linear-gradient(135deg, var(--primary), #651fff);
-                border: none; padding: 12px 30px; color: white; font-weight: bold;
-                border-radius: 8px; font-size: 16px; display: none; cursor: pointer;
+                position: relative; z-index: 10; margin-top: 45px;
+                background: linear-gradient(135deg, #d500f9, #651fff);
+                border: none; padding: 16px 40px; color: white; font-weight: 800;
+                border-radius: 30px; font-size: 16px; letter-spacing: 1.5px;
+                box-shadow: 0 10px 25px rgba(213, 0, 249, 0.5);
+                text-transform: uppercase; cursor: pointer; display: none;
+                transition: transform 0.2s, box-shadow 0.2s;
+                opacity: 0; transform: translateY(20px);
             }
+
+            .btn-close.show { display: block; animation: slideUpFade 0.6s forwards ease-out; }
+            @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
+            .btn-close:active { transform: scale(0.95); }
         </style>
     </head>
     <body>
+
+        <div class="bg-glow"></div>
 
         <div class="profile-card">
             <img src="" alt="DP" class="profile-img" id="user-dp">
             <div class="profile-info">
                 <h3 id="user-name">Loading...</h3>
                 <p id="user-username-id">ID: ...</p>
-                <div class="stats">
-                    💠 Points: <span id="user-points">${currentPoints}</span><br>
-                    🎟️ Available Cards: <span id="card-count">1</span>
+                <div class="stats-badge" id="stats-badge">
+                    💠 <span id="user-points">${currentPoints}</span> MP
                 </div>
             </div>
         </div>
 
-        <div class="scratch-container" id="scratch-container">
-            <div class="reward-layer">
-                <h1>+${reward}</h1>
-                <p>MythoPoints</p>
+        <!-- Floating text element for live point transfer -->
+        <div id="floating-reward" class="floating-points">+${reward} MythoPoints!</div>
+
+        <div class="scratch-wrapper">
+            <div class="scratch-inner" id="scratch-container">
+                <div class="reward-layer" id="reward-layer">
+                    <h1 id="reward-text">+${reward}</h1>
+                    <p>Earned</p>
+                </div>
+                <canvas id="scratchCanvas" width="280" height="280"></canvas>
             </div>
-            <canvas id="scratchCanvas" width="300" height="300"></canvas>
         </div>
 
-        <button class="btn-close" id="closeBtn" onclick="Telegram.WebApp.close()">Close & Return</button>
+        <button class="btn-close" id="closeBtn" onclick="Telegram.WebApp.close()">Awesome! Return to Bot</button>
 
         <script>
             const tg = window.Telegram.WebApp;
@@ -485,27 +590,60 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 }
             }
 
-            // Canvas Scratch Logic
             const canvas = document.getElementById('scratchCanvas');
             const ctx = canvas.getContext('2d');
             let isDrawing = false;
             let isRevealed = false;
+            let lastHapticTime = 0;
             
-            ctx.fillStyle = '#2c2c2c';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = '24px Arial';
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.fillText('SCRATCH HERE', canvas.width/2, canvas.height/2);
+            // Cinematic Foil Generation
+            function drawPremiumFoil() {
+                const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                grad.addColorStop(0, "#D4AF37");
+                grad.addColorStop(0.3, "#FFFDE4");
+                grad.addColorStop(0.5, "#AA8000");
+                grad.addColorStop(0.7, "#FFFDE4");
+                grad.addColorStop(1, "#8A6300");
+                
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imgData.data;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const noise = (Math.random() - 0.5) * 40; 
+                    pixels[i] += noise;     
+                    pixels[i+1] += noise;   
+                    pixels[i+2] += noise;   
+                }
+                ctx.putImageData(imgData, 0, 0);
+
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+                ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
+
+                ctx.shadowColor = "rgba(0,0,0,0.6)";
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetY = 4;
+                
+                ctx.font = '800 28px "Poppins", sans-serif';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText('SCRATCH ME', canvas.width/2, canvas.height/2 + 10);
+                
+                ctx.shadowColor = "transparent";
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
+            }
+
+            drawPremiumFoil();
 
             function getPosition(e) {
                 const rect = canvas.getBoundingClientRect();
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                return {
-                    x: clientX - rect.left,
-                    y: clientY - rect.top
-                };
+                return { x: clientX - rect.left, y: clientY - rect.top };
             }
 
             function scratch(e) {
@@ -515,8 +653,14 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 
                 ctx.globalCompositeOperation = 'destination-out';
                 ctx.beginPath();
-                ctx.arc(pos.x, pos.y, 25, 0, Math.PI * 2); 
+                ctx.arc(pos.x, pos.y, 24, 0, Math.PI * 2); 
                 ctx.fill();
+                
+                const now = Date.now();
+                if (now - lastHapticTime > 70) {
+                    tg.HapticFeedback.impactOccurred('light');
+                    lastHapticTime = now;
+                }
                 
                 checkReveal();
             }
@@ -524,7 +668,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             canvas.addEventListener('mousedown', (e) => { isDrawing = true; scratch(e); });
             canvas.addEventListener('mousemove', scratch);
             window.addEventListener('mouseup', () => isDrawing = false);
-            
             canvas.addEventListener('touchstart', (e) => { isDrawing = true; scratch(e); }, {passive: false});
             canvas.addEventListener('touchmove', scratch, {passive: false});
             window.addEventListener('touchend', () => isDrawing = false);
@@ -533,20 +676,31 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const pixels = imageData.data;
                 let transparentCount = 0;
-                
-                for (let i = 3; i < pixels.length; i += 4) {
-                    if (pixels[i] === 0) transparentCount++;
-                }
+                for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] === 0) transparentCount++; }
                 
                 const percent = (transparentCount / (pixels.length / 4)) * 100;
                 if (percent > 45 && !isRevealed) {
                     isRevealed = true;
-                    canvas.style.transition = 'opacity 0.5s';
+                    canvas.style.transition = 'opacity 0.4s ease-out';
                     canvas.style.opacity = '0';
-                    setTimeout(() => canvas.style.display = 'none', 500);
                     
-                    claimReward();
+                    setTimeout(() => {
+                        canvas.style.display = 'none';
+                        document.getElementById('reward-layer').classList.add('revealed');
+                        triggerCelebration();
+                        claimReward();
+                    }, 400);
                 }
+            }
+
+            function triggerCelebration() {
+                tg.HapticFeedback.notificationOccurred('success');
+                const end = Date.now() + 2000;
+                (function frame() {
+                    confetti({ particleCount: 6, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#FFDF00', '#d500f9', '#00e676'] });
+                    confetti({ particleCount: 6, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#FFDF00', '#d500f9', '#00e676'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
             }
 
             async function claimReward() {
@@ -559,11 +713,40 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                     const data = await response.json();
                     
                     if (data.success) {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        const currentPoints = parseInt(document.getElementById('user-points').innerText);
-                        document.getElementById('user-points').innerText = currentPoints + data.reward;
-                        document.getElementById('card-count').innerText = '0';
-                        document.getElementById('closeBtn').style.display = 'block';
+                        const badge = document.getElementById('stats-badge');
+                        const pointsEl = document.getElementById('user-points');
+                        const floater = document.getElementById('floating-reward');
+                        const reward = data.reward;
+                        
+                        // 1. Trigger the floating text animation
+                        floater.style.animation = 'floatToWallet 1.8s forwards cubic-bezier(0.2, 0.8, 0.2, 1)';
+                        
+                        // 2. Wait for text to "hit" the wallet, then pulse the wallet and start counting
+                        setTimeout(() => {
+                            badge.classList.add('points-updating');
+                            
+                            let current = parseInt(pointsEl.innerText);
+                            const target = current + reward;
+                            
+                            const interval = setInterval(() => {
+                                if (current >= target) {
+                                    clearInterval(interval);
+                                    pointsEl.innerText = target;
+                                    
+                                    // Heavy haptic on completion
+                                    tg.HapticFeedback.impactOccurred('heavy');
+                                    
+                                    // Remove glowing state after a brief moment
+                                    setTimeout(() => badge.classList.remove('points-updating'), 800);
+                                    document.getElementById('closeBtn').classList.add('show');
+                                } else {
+                                    current++;
+                                    pointsEl.innerText = current;
+                                    // Light coin-tick haptic for each point
+                                    tg.HapticFeedback.impactOccurred('light');
+                                }
+                            }, 60); // Speed of the live increment
+                        }, 800); // Delay syncing with the floating text animation
                     }
                 } catch (error) {
                     console.error("Failed to claim:", error);
