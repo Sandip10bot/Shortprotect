@@ -5,6 +5,9 @@ import crypto from "crypto";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Enable JSON parsing for API requests (Required for Scratch Card Claiming)
+app.use(express.json());
+
 // ========================
 // MONGODB SETUP
 // ========================
@@ -19,6 +22,8 @@ let doubleCollection;
 let urlShortenerCollection;
 let maskCollection;
 let searchAdsCollection; 
+let scratchCollection;
+let usersCollection;
 
 async function connectDB() {
   try {
@@ -29,8 +34,10 @@ async function connectDB() {
     urlShortenerCollection = db.collection("url_shortener");
     maskCollection = db.collection("masked_links");
     searchAdsCollection = db.collection("search_ads"); 
+    scratchCollection = db.collection("scratch_cards");
+    usersCollection = db.collection("users");
     
-    console.log("✅ MongoDB connected for Masking, Double, and Search Ads");
+    console.log("✅ MongoDB connected for Main, Masking, Double, Search Ads, and Scratch Cards");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
   }
@@ -97,7 +104,9 @@ const THEME_CSS = `
   </style>
 `;
 
-// Helper Function for Bypass Error Template
+// ========================
+// HELPER FUNCTIONS
+// ========================
 function renderBypassError(res) {
     res.send(`
         <!DOCTYPE html>
@@ -121,15 +130,11 @@ function renderBypassError(res) {
     `);
 }
 
-// Helper Function to cleanly verify referer
 function isRefererValid(req) {
     const referer = (req.get("referrer") || req.get("referer") || "").toLowerCase();
     return referer.includes("shortxlinks");
 }
 
-// ========================
-// BASE62 ENCODING UTILS
-// ========================
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function base62_encode(data) {
@@ -170,7 +175,7 @@ function base62_decode(encoded) {
 }
 
 // ========================
-// 1. THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
+// THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
 // ========================
 function renderAntiBypassPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -246,7 +251,7 @@ function renderAntiBypassPage(res, targetUrl) {
 }
 
 // ========================
-// 2. THE EXIT SHIELD (Silent Telegram Launcher)
+// THE EXIT SHIELD (Silent Telegram Launcher)
 // ========================
 function renderSecureFinalPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -298,7 +303,6 @@ function renderSecureFinalPage(res, targetUrl) {
 // ==========================================
 // MINI APP IP-BASED ANTI-CHEAT VERIFICATION
 // ==========================================
-
 app.get("/verify-miniapp/:userId", async (req, res) => {
   const { userId } = req.params;
   const parsedUserId = parseInt(userId);
@@ -307,7 +311,6 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
     return res.status(400).send("Invalid User ID format.");
   }
 
-  // Cloudflare ya reverse proxy ke real client IP ko fetch karne ke liye
   let userIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
   if (userIp && userIp.includes(",")) {
     userIp = userIp.split(",")[0].trim();
@@ -316,16 +319,13 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
   try {
     const db = client.db("Mytho");
     const ipVerificationCollection = db.collection("ip_verification");
-    const usersCollection = db.collection("users"); // Adjust according to your exact users collection name
 
-    // Check karein ki ye IP kisi DOOSRE Telegram User ID ke sath linked toh nahi hai
     const duplicateIpRecord = await ipVerificationCollection.findOne({
       ip: userIp,
       userId: { $ne: parsedUserId }
     });
 
     if (duplicateIpRecord) {
-      // Agar IP kisi dusre account se match ho jata hai -> Block and Show Error Page
       return res.send(`
         ${THEME_CSS}
         <div class="container">
@@ -339,21 +339,18 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
       `);
     }
 
-    // Agar IP clear hai, toh database mein is user ke liye entry save/update karein
     await ipVerificationCollection.updateOne(
       { userId: parsedUserId },
       { $set: { ip: userIp, verified_at: new Date() } },
       { upsert: true }
     );
 
-    // Bot ko notify karne ke liye users collection mein flag true set karein
     await usersCollection.updateOne(
       { user_id: parsedUserId },
       { $set: { is_verified: true, verification_ip: userIp } },
       { upsert: true }
     );
 
-    // Success Screen Render Karein
     return res.send(`
       ${THEME_CSS}
       <div class="container">
@@ -371,6 +368,264 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
   }
 });
 
+// ==========================================
+// SCRATCH CARD ROUTES
+// ==========================================
+
+// 1. Verify Scratch Ad Route
+app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
+    const { userId, token } = req.params;
+
+    if (!isRefererValid(req)) {
+        return renderBypassError(res);
+    }
+
+    const finalBotLink = `https://t.me/MythoSerialBot?start=scratch_${token}`;
+    renderSecureFinalPage(res, finalBotLink);
+});
+
+// 2. Serve Web App Render HTML
+function renderScratchAppHTML(userId, token, currentPoints, reward) {
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Scratch & Win</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            :root {
+                --primary: #d500f9;
+                --bg-dark: #07000d;
+                --panel-bg: rgba(30, 0, 50, 0.6);
+            }
+            body {
+                margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif;
+                background: radial-gradient(circle at 50% 50%, #16002b 0%, var(--bg-dark) 100%);
+                color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+                overflow: hidden; user-select: none;
+            }
+            .profile-card {
+                background: var(--panel-bg); width: 90%; max-width: 400px;
+                border-radius: 16px; padding: 15px; margin-top: 20px;
+                border: 1px solid rgba(255, 0, 255, 0.2);
+                box-shadow: 0 4px 15px rgba(213, 0, 249, 0.2);
+                display: flex; align-items: center; gap: 15px;
+            }
+            .profile-img {
+                width: 60px; height: 60px; border-radius: 50%;
+                border: 2px solid var(--primary); object-fit: cover;
+                background: #333;
+            }
+            .profile-info h3 { margin: 0 0 5px 0; font-size: 18px; color: #ff66ff; }
+            .profile-info p { margin: 0; font-size: 13px; color: #d8b4e2; }
+            .stats { margin-top: 5px; font-weight: bold; color: #00e676; }
+            
+            .scratch-container {
+                position: relative; width: 300px; height: 300px; margin-top: 40px;
+                border-radius: 20px; box-shadow: 0 0 30px rgba(213, 0, 249, 0.4);
+                background: #1a1a1a; overflow: hidden;
+            }
+            .reward-layer {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                display: flex; flex-direction: column; justify-content: center; align-items: center;
+                background: radial-gradient(circle, #3a005c, #16002b);
+            }
+            .reward-layer h1 { font-size: 40px; margin: 0; color: #ffd700; text-shadow: 0 0 20px rgba(255,215,0,0.8); }
+            .reward-layer p { margin: 5px 0 0 0; font-size: 18px; color: #fff; }
+            
+            canvas {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; cursor: pointer;
+            }
+            
+            .btn-close {
+                margin-top: 30px; background: linear-gradient(135deg, var(--primary), #651fff);
+                border: none; padding: 12px 30px; color: white; font-weight: bold;
+                border-radius: 8px; font-size: 16px; display: none; cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+
+        <div class="profile-card">
+            <img src="" alt="DP" class="profile-img" id="user-dp">
+            <div class="profile-info">
+                <h3 id="user-name">Loading...</h3>
+                <p id="user-username-id">ID: ...</p>
+                <div class="stats">
+                    💠 Points: <span id="user-points">${currentPoints}</span><br>
+                    🎟️ Available Cards: <span id="card-count">1</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="scratch-container" id="scratch-container">
+            <div class="reward-layer">
+                <h1>+${reward}</h1>
+                <p>MythoPoints</p>
+            </div>
+            <canvas id="scratchCanvas" width="300" height="300"></canvas>
+        </div>
+
+        <button class="btn-close" id="closeBtn" onclick="Telegram.WebApp.close()">Close & Return</button>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            // Populate User Data
+            const user = tg.initDataUnsafe?.user;
+            if (user) {
+                document.getElementById('user-name').innerText = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+                document.getElementById('user-username-id').innerText = (user.username ? '@' + user.username + ' | ' : '') + 'ID: ' + user.id;
+                if (user.photo_url) {
+                    document.getElementById('user-dp').src = user.photo_url;
+                }
+            }
+
+            // Canvas Scratch Logic
+            const canvas = document.getElementById('scratchCanvas');
+            const ctx = canvas.getContext('2d');
+            let isDrawing = false;
+            let isRevealed = false;
+            
+            ctx.fillStyle = '#2c2c2c';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '24px Arial';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.fillText('SCRATCH HERE', canvas.width/2, canvas.height/2);
+
+            function getPosition(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return {
+                    x: clientX - rect.left,
+                    y: clientY - rect.top
+                };
+            }
+
+            function scratch(e) {
+                if (!isDrawing || isRevealed) return;
+                e.preventDefault();
+                const pos = getPosition(e);
+                
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 25, 0, Math.PI * 2); 
+                ctx.fill();
+                
+                checkReveal();
+            }
+
+            canvas.addEventListener('mousedown', (e) => { isDrawing = true; scratch(e); });
+            canvas.addEventListener('mousemove', scratch);
+            window.addEventListener('mouseup', () => isDrawing = false);
+            
+            canvas.addEventListener('touchstart', (e) => { isDrawing = true; scratch(e); }, {passive: false});
+            canvas.addEventListener('touchmove', scratch, {passive: false});
+            window.addEventListener('touchend', () => isDrawing = false);
+
+            function checkReveal() {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imageData.data;
+                let transparentCount = 0;
+                
+                for (let i = 3; i < pixels.length; i += 4) {
+                    if (pixels[i] === 0) transparentCount++;
+                }
+                
+                const percent = (transparentCount / (pixels.length / 4)) * 100;
+                if (percent > 45 && !isRevealed) {
+                    isRevealed = true;
+                    canvas.style.transition = 'opacity 0.5s';
+                    canvas.style.opacity = '0';
+                    setTimeout(() => canvas.style.display = 'none', 500);
+                    
+                    claimReward();
+                }
+            }
+
+            async function claimReward() {
+                try {
+                    const response = await fetch('/api/claim-scratch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: ${userId}, token: '${token}' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        const currentPoints = parseInt(document.getElementById('user-points').innerText);
+                        document.getElementById('user-points').innerText = currentPoints + data.reward;
+                        document.getElementById('card-count').innerText = '0';
+                        document.getElementById('closeBtn').style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error("Failed to claim:", error);
+                }
+            }
+        </script>
+    </body>
+    </html>
+    `;
+}
+
+// 3. Mini App Display
+app.get("/scratch-app/:userId/:token", async (req, res) => {
+    const { userId, token } = req.params;
+    const uid = parseInt(userId);
+
+    const session = await scratchCollection.findOne({ user_id: uid, token: token });
+    if (!session || !session.ad_completed) {
+        return res.send(`<h2>Access Denied. Please complete the ad link first.</h2>`);
+    }
+    if (session.scratched) {
+        return res.send(`<h2>You have already claimed this scratch card!</h2>`);
+    }
+
+    let reward = session.reward;
+    if (!reward) {
+        reward = Math.floor(Math.random() * 15) + 1; 
+        await scratchCollection.updateOne({ _id: session._id }, { $set: { reward } });
+    }
+
+    const user = await usersCollection.findOne({ user_id: uid }) || {};
+    const mythopoints = user.mythopoints || 0;
+
+    res.send(renderScratchAppHTML(uid, token, mythopoints, reward));
+});
+
+// 4. API for claiming the reward
+app.post("/api/claim-scratch", async (req, res) => {
+    const { userId, token } = req.body;
+    const uid = parseInt(userId);
+
+    const session = await scratchCollection.findOne({ user_id: uid, token: token });
+    
+    if (!session || session.scratched || !session.ad_completed) {
+        return res.status(400).json({ success: false, error: "Invalid session or already claimed." });
+    }
+
+    const reward = session.reward;
+    const today = new Date().toISOString().split('T')[0];
+
+    await scratchCollection.updateOne({ _id: session._id }, { $set: { scratched: true } });
+    
+    await usersCollection.updateOne(
+        { user_id: uid },
+        { 
+            $inc: { mythopoints: reward },
+            $set: { last_scratch_date: today }
+        },
+        { upsert: true }
+    );
+
+    res.json({ success: true, reward: reward });
+});
 
 // ========================
 // ENTRY POINTS
@@ -422,7 +677,6 @@ app.get("/link/:hex", (req, res) => {
 app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   const { prefix, userId, token } = req.params;
 
-  // STRICT SHORTXLINKS REFERER CHECK
   if (!isRefererValid(req)) {
     return renderBypassError(res);
   }
@@ -474,7 +728,6 @@ app.get("/generate/:userId", async (req, res) => {
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
 
-  // STRICT SHORTXLINKS REFERER CHECK
   if (!isRefererValid(req)) {
     return renderBypassError(res);
   }
@@ -512,7 +765,6 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   const { t } = req.query;
   
-  // STRICT SHORTXLINKS REFERER CHECK
   if (!isRefererValid(req)) {
     return renderBypassError(res);
   }
