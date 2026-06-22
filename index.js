@@ -809,11 +809,11 @@ app.post("/api/claim-scratch", async (req, res) => {
     );
     try {
         await mpHistoryCollection.insertOne({
-            user_id: userId.toString(), 
+            user_id: parseInt(userId),            // Bot 'int' expect karta hai
             amount: reward,
             type: "EARNED",
-            description: "Daily Scratch Card Reward",
-            timestamp: new Date() // Logs the exact time of the transaction
+            reason: "Daily Scratch Card Reward",  // 🔴 'description' ko change karke 'reason' kiya
+            date: new Date()                      // 🔴 'timestamp' ko change karke 'date' kiya
         });
         console.log(`✅ Logged ${reward} MythoPoints for user ${uid}`);
     } catch (err) {
