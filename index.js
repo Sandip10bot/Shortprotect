@@ -809,7 +809,7 @@ app.post("/api/claim-scratch", async (req, res) => {
     );
     try {
         await mpHistoryCollection.insertOne({
-            user_id: uid,
+            user_id: userId.toString(), 
             amount: reward,
             type: "EARNED",
             description: "Daily Scratch Card Reward",
