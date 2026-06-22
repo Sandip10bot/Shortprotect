@@ -36,6 +36,7 @@ async function connectDB() {
     searchAdsCollection = db.collection("search_ads"); 
     scratchCollection = db.collection("scratch_cards");
     usersCollection = db.collection("users");
+    mpHistoryCollection = db.collection("mphistory");
     
     console.log("✅ MongoDB connected for Main, Masking, Double, Search Ads, and Scratch Cards");
   } catch (error) {
@@ -623,6 +624,18 @@ app.post("/api/claim-scratch", async (req, res) => {
         },
         { upsert: true }
     );
+    try {
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: reward,
+            type: "EARNED",
+            description: "Daily Scratch Card Reward",
+            timestamp: new Date() // Logs the exact time of the transaction
+        });
+        console.log(`✅ Logged ${reward} MythoPoints for user ${uid}`);
+    } catch (err) {
+        console.error("Failed to log transaction:", err);
+    }
 
     res.json({ success: true, reward: reward });
 });
