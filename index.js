@@ -561,7 +561,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             </div>
         </div>
 
-        <!-- Floating text element for live point transfer -->
         <div id="floating-reward" class="floating-points">+${reward} MythoPoints!</div>
 
         <div class="scratch-wrapper">
@@ -584,7 +583,14 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             const user = tg.initDataUnsafe?.user;
             if (user) {
                 document.getElementById('user-name').innerText = user.first_name + (user.last_name ? ' ' + user.last_name : '');
-                document.getElementById('user-username-id').innerText = (user.username ? '@' + user.username + ' | ' : '') + 'ID: ' + user.id;
+                
+                // Username + ID Integration
+                if (user.username) {
+                    document.getElementById('user-username-id').innerText = '@' + user.username + ' | ID: ' + user.id;
+                } else {
+                    document.getElementById('user-username-id').innerText = 'ID: ' + user.id;
+                }
+
                 if (user.photo_url) {
                     document.getElementById('user-dp').src = user.photo_url;
                 }
@@ -997,6 +1003,708 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
     }
   }
   res.redirect('https://t.me/MythoSerialBot');
+});
+
+// ==========================================
+// UNIFIED APPLE iOS PROFILE MINI APP
+// ==========================================
+
+// 1. API: Fetch Unified User Data & Activity History
+app.get("/api/ios-profile-data/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        // Fetch user info for Mythopoints
+        const user = await usersCollection.findOne({ user_id: uid });
+        
+        // Fetch latest activity history from mpHistoryCollection
+        const history = await mpHistoryCollection
+            .find({ user_id: uid })
+            .sort({ date: -1 })
+            .limit(15) // Limit to 15 recent transactions for the UI
+            .toArray();
+
+        res.json({
+            success: true,
+            mythopoints: user?.mythopoints || 0,
+            is_verified: user?.is_verified || false,
+            history: history
+        });
+    } catch (error) {
+        console.error("Profile API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch unified data" });
+    }
+});
+
+// 2. RENDER: The Apple iPhone UI
+app.get("/ios-app/:userId", (req, res) => {
+    const { userId } = req.params;
+    
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>My Profile</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            /* iOS System Variables */
+            :root {
+                --ios-bg: #F2F2F7;
+                --ios-card: #FFFFFF;
+                --ios-blue: #007AFF;
+                --ios-green: #34C759;
+                --ios-red: #FF3B30;
+                --ios-text: #000000;
+                --ios-gray: #8E8E93;
+                --ios-light-gray: #E5E5EA;
+                --safe-area-bottom: env(safe-area-inset-bottom, 20px);
+            }
+            
+            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, sans-serif;
+                background-color: var(--ios-bg); margin: 0; padding: 0; padding-bottom: calc(85px + var(--safe-area-bottom));
+                color: var(--ios-text); -webkit-font-smoothing: antialiased; user-select: none;
+            }
+
+            /* Frosted Glass Header */
+            .header {
+                position: sticky; top: 0; z-index: 50;
+                background: rgba(255, 255, 255, 0.75);
+                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                border-bottom: 0.5px solid rgba(0,0,0,0.1);
+                padding: 16px; text-align: center; font-weight: 600; font-size: 17px;
+                letter-spacing: -0.4px;
+            }
+
+            /* iOS Card Style */
+            .card {
+                background: var(--ios-card); border-radius: 12px; margin: 16px; padding: 16px;
+            }
+
+            /* Profile Section */
+            .profile-header { 
+                display: flex; align-items: center; gap: 15px; 
+                border-bottom: 0.5px solid var(--ios-light-gray); 
+                padding-bottom: 16px; margin-bottom: 16px; 
+            }
+            .profile-pic { 
+                width: 64px; height: 64px; border-radius: 50%; 
+                object-fit: cover; background: var(--ios-light-gray); 
+            }
+            .profile-info h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.5px; }
+            .profile-info p { margin: 4px 0 0 0; color: var(--ios-gray); font-size: 13px; }
+            
+            /* Mythopoints Balance */
+            .balance-box { text-align: center; padding: 5px 0; }
+            .balance-box h3 { margin: 0; font-size: 13px; color: var(--ios-gray); font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
+            .balance-box .amount { font-size: 38px; font-weight: 700; color: var(--ios-blue); margin: 8px 0; letter-spacing: -1px; }
+            
+            /* Activity List */
+            .activity-item { 
+                display: flex; justify-content: space-between; align-items: center; 
+                padding: 12px 0; border-bottom: 0.5px solid var(--ios-light-gray); 
+            }
+            .activity-item:last-child { border-bottom: none; padding-bottom: 0; }
+            .act-left p { margin: 0; font-size: 16px; font-weight: 500; letter-spacing: -0.3px; }
+            .act-left span { font-size: 13px; color: var(--ios-gray); margin-top: 4px; display: inline-block; }
+            .act-right { font-weight: 600; font-size: 16px; }
+            .earn { color: var(--ios-green); }
+            .spend { color: var(--ios-red); }
+
+            /* Frosted Glass Bottom Tab Bar */
+            .tab-bar {
+                position: fixed; bottom: 0; width: 100%;
+                background: rgba(242, 242, 247, 0.85); 
+                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                border-top: 0.5px solid rgba(0,0,0,0.1);
+                display: flex; justify-content: space-around; 
+                padding: 10px 0 calc(10px + var(--safe-area-bottom)) 0; z-index: 100;
+            }
+            .tab-item { 
+                display: flex; flex-direction: column; align-items: center; 
+                color: var(--ios-gray); cursor: pointer; font-size: 10px; font-weight: 500;
+                transition: 0.2s;
+            }
+            .tab-item svg { width: 28px; height: 28px; margin-bottom: 3px; fill: currentColor; }
+            .tab-item.active { color: var(--ios-blue); }
+            
+            .tab-content { display: none; }
+            .tab-content.active { display: block; animation: fadeUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+            
+            @keyframes fadeUp { 
+                from { opacity: 0; transform: translateY(10px); } 
+                to { opacity: 1; transform: translateY(0); } 
+            }
+            
+            .empty-state { text-align: center; padding: 40px 20px; color: var(--ios-gray); }
+        </style>
+    </head>
+    <body>
+        <div class="header" id="header-title">Profile</div>
+
+        <div id="tab-profile" class="tab-content active">
+            <div class="card">
+                <div class="profile-header">
+                    <img id="user-dp" class="profile-pic" src="https://via.placeholder.com/100" alt="DP">
+                    <div class="profile-info">
+                        <h2 id="user-name">Loading...</h2>
+                        <p id="user-id">ID: ...</p>
+                    </div>
+                </div>
+                <div class="balance-box">
+                    <h3>Available Balance</h3>
+                    <div class="amount" id="mp-balance">0.00</div>
+                    <p style="font-size:13px; margin:0;" id="verification-status">Checking Status...</p>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top:0;">
+                <h3 style="font-size:16px; margin:0 0 12px 0; font-weight:600;">System Information</h3>
+                <div style="display:flex; justify-content:space-between; padding: 12px 0; border-bottom:0.5px solid var(--ios-light-gray);">
+                    <span style="font-size:16px;">Daily Rate</span>
+                    <span style="color:var(--ios-gray); font-size:16px;">0.0015</span>
+                </div>
+                 <div style="display:flex; justify-content:space-between; padding: 12px 0;">
+                    <span style="font-size:16px;">Bot Node</span>
+                    <span style="color:var(--ios-gray); font-size:16px;">Mytho Serial</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-activity" class="tab-content">
+            <div style="padding: 0 16px 8px 24px; font-size: 13px; color: var(--ios-gray); text-transform: uppercase;">Recent Transactions</div>
+            <div class="card" id="activity-list" style="margin-top: 0;">
+                <div class="empty-state">Loading history...</div>
+            </div>
+        </div>
+
+        <div class="tab-bar">
+            <div class="tab-item active" onclick="switchTab('profile', 'Profile', this)">
+                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                Profile
+            </div>
+            <div class="tab-item" onclick="switchTab('activity', 'Activity History', this)">
+                <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                Activity
+            </div>
+        </div>
+
+        <script>
+            // Initialize Telegram Web App
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.setHeaderColor('#F2F2F7'); 
+            
+            const userId = ${userId};
+
+            // Setup User Data from Telegram (Including Username)
+            const tgUser = tg.initDataUnsafe?.user;
+            if (tgUser) {
+                document.getElementById('user-name').innerText = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
+                
+                const uiIdElement = document.getElementById('user-id');
+                if (tgUser.username) {
+                    uiIdElement.innerText = '@' + tgUser.username + ' | ID: ' + tgUser.id;
+                } else {
+                    uiIdElement.innerText = 'ID: ' + tgUser.id; 
+                }
+
+                if (tgUser.photo_url) {
+                    document.getElementById('user-dp').src = tgUser.photo_url;
+                }
+            } else {
+                document.getElementById('user-id').innerText = 'ID: ' + userId;
+            }
+
+            // Tab Switching Logic
+            function switchTab(tabId, title, element) {
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+                
+                document.getElementById('tab-' + tabId).classList.add('active');
+                element.classList.add('active');
+                document.getElementById('header-title').innerText = title;
+                
+                // Light iOS Haptic Tick
+                tg.HapticFeedback.selectionChanged();
+            }
+
+            // Fetch Unified Data from Backend
+            async function fetchUserData() {
+                try {
+                    const res = await fetch('/api/ios-profile-data/' + userId);
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        const formattedBalance = Number.isInteger(data.mythopoints) ? 
+                            data.mythopoints.toLocaleString() : 
+                            data.mythopoints.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
+                        
+                        document.getElementById('mp-balance').innerText = formattedBalance;
+
+                        // Set Verification Badge
+                        document.getElementById('verification-status').innerHTML = data.is_verified ? 
+                            '<span style="color:var(--ios-green);">✓ Node Verified</span>' : 
+                            '<span style="color:var(--ios-red);">! Unverified Device</span>';
+
+                        // Render History List
+                        const list = document.getElementById('activity-list');
+                        if (data.history.length === 0) {
+                            list.innerHTML = '<div class="empty-state">No recent activity found.</div>';
+                        } else {
+                            list.innerHTML = data.history.map(item => {
+                                const isEarn = item.type === "EARNED";
+                                const sign = isEarn ? '+' : '-';
+                                const colorClass = isEarn ? 'earn' : 'spend';
+                                const dateString = new Date(item.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                                
+                                return \`
+                                <div class="activity-item">
+                                    <div class="act-left">
+                                        <p>\${item.reason || item.type}</p>
+                                        <span>\${dateString}</span>
+                                    </div>
+                                    <div class="act-right \${colorClass}">
+                                        \${sign}\${item.amount}
+                                    </div>
+                                </div>
+                                \`;
+                            }).join('');
+                        }
+                    }
+                } catch (e) {
+                    console.error("Fetch error:", e);
+                    document.getElementById('activity-list').innerHTML = '<div class="empty-state" style="color:var(--ios-red);">Failed to connect to database.</div>';
+                }
+            }
+            
+            // Execute on load
+            fetchUserData();
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// ==========================================
+// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES)
+// ==========================================
+
+// 1. API: Extract all user data across multiple collections
+app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const db = client.db("Mytho");
+        const now = Math.floor(Date.now() / 1000);
+
+        const [user, bank, search, premium, stats, history] = await Promise.all([
+            db.collection("users").findOne({ user_id: uid }),
+            db.collection("bank").findOne({ user_id: uid }),
+            db.collection("search_limits").findOne({ user_id: uid }),
+            db.collection("premium_users").findOne({ user_id: uid }),
+            db.collection("user_stats").findOne({ user_id: uid }),
+            db.collection("mphistory").find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray()
+        ]);
+
+        let pendingInterest = 0;
+        let activeLoan = false;
+        let loanDue = 0;
+
+        if (bank) {
+            // Invest calculations
+            if (bank.invested > 0) {
+                const cycles = Math.floor((now - bank.last_claim_time) / 86400);
+                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.0015 * cycles);
+            }
+            // Loan calculations
+            if (bank.loan_active && bank.loan_principal > 0) {
+                activeLoan = true;
+                let loanCycles = Math.floor((now - bank.loan_taken_at) / 86400);
+                loanCycles = Math.max(1, loanCycles); 
+                const calculated_interest = Math.floor(bank.loan_principal * 0.10 * loanCycles);
+                loanDue = Math.min(bank.loan_principal + calculated_interest, bank.loan_principal * 5); 
+            }
+        }
+
+        let isPremium = false;
+        let premiumDaysLeft = 0;
+        if (premium && premium.expiry_time > now) {
+            isPremium = true;
+            premiumDaysLeft = Math.ceil((premium.expiry_time - now) / 86400);
+        }
+
+        res.json({
+            success: true,
+            profile: {
+                mythopoints: user?.mythopoints || 0,
+                streak: user?.streak || 0,
+                is_verified: user?.is_verified || false
+            },
+            bank: {
+                invested: bank?.invested || 0,
+                pendingInterest: pendingInterest,
+                activeLoan: activeLoan,
+                loanDue: loanDue
+            },
+            search: {
+                credits: search?.credits || 0,
+                max_credits: 5
+            },
+            premium: {
+                active: isPremium,
+                daysLeft: premiumDaysLeft,
+                plan: premium?.duration === 30 ? "Gold" : (premium?.duration === 28 ? "Silver" : "Premium")
+            },
+            stats: {
+                lifetimeEarned: stats?.total_points_earned || 0,
+                lifetimeSpent: stats?.total_points_spent || 0,
+                totalFiles: stats?.lifetime_files || 0
+            },
+            history: history
+        });
+    } catch (error) {
+        console.error("Dashboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch dashboard data" });
+    }
+});
+
+// 2. RENDER: The Premium iOS Dark Purple UI
+app.get("/dashboard/:userId", (req, res) => {
+    const { userId } = req.params;
+    
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>Mytho Dashboard</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            /* Apple iOS Dark Purple System Variables */
+            :root {
+                --ios-bg: #000000;
+                --ios-card: rgba(45, 10, 80, 0.4);
+                --ios-card-solid: #1c0a2b;
+                --ios-purple: #d500f9;
+                --ios-purple-light: #ea80fc;
+                --ios-purple-dark: #651fff;
+                --ios-green: #30d158;
+                --ios-red: #ff453a;
+                --ios-blue: #0a84ff;
+                --ios-gold: #ffd60a;
+                --ios-text: #ffffff;
+                --ios-gray: #ebebf599;
+                --safe-area-bottom: env(safe-area-inset-bottom, 20px);
+            }
+            
+            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+                background-color: var(--ios-bg);
+                background-image: radial-gradient(circle at 50% 0%, rgba(101, 31, 255, 0.25) 0%, transparent 60%);
+                margin: 0; padding: 0; padding-bottom: calc(90px + var(--safe-area-bottom));
+                color: var(--ios-text); -webkit-font-smoothing: antialiased; user-select: none;
+                min-height: 100vh; overflow-x: hidden;
+            }
+
+            /* iOS Frosted Navigation Bar */
+            .navbar {
+                position: sticky; top: 0; z-index: 50;
+                background: rgba(10, 0, 20, 0.65);
+                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                border-bottom: 0.5px solid rgba(255,255,255,0.1);
+                padding: 16px; text-align: center; font-weight: 600; font-size: 17px;
+                letter-spacing: -0.4px; color: #fff;
+            }
+
+            /* Container & Grid System */
+            .container { padding: 16px; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+            
+            /* iOS Widget Cards */
+            .widget {
+                background: var(--ios-card);
+                border: 0.5px solid rgba(255, 255, 255, 0.08);
+                border-radius: 22px; padding: 16px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 10px rgba(213,0,249,0.05);
+                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                display: flex; flex-direction: column; justify-content: center;
+            }
+            .widget-full { grid-column: span 2; }
+            
+            .widget-icon { font-size: 24px; margin-bottom: 8px; }
+            .widget-title { font-size: 13px; color: var(--ios-gray); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+            .widget-value { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+            .widget-sub { font-size: 12px; color: var(--ios-purple-light); margin-top: 4px; font-weight: 500; }
+
+            /* Specific Widget Colors */
+            .w-premium { border: 0.5px solid rgba(255, 214, 10, 0.3); background: rgba(255, 214, 10, 0.05); }
+            .w-premium .widget-value { color: var(--ios-gold); }
+            
+            .w-bank { border: 0.5px solid rgba(48, 209, 88, 0.3); background: rgba(48, 209, 88, 0.05); }
+            .w-bank .widget-value { color: var(--ios-green); }
+
+            /* Profile Header */
+            .profile-hdr { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+            .profile-pic { width: 70px; height: 70px; border-radius: 50%; border: 2px solid var(--ios-purple); object-fit: cover; background: var(--ios-card-solid); }
+            .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+            .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: var(--ios-purple-light); font-weight: 500; }
+            .badge { display: inline-block; padding: 3px 8px; background: rgba(213,0,249,0.2); border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; margin-top: 6px;}
+
+            /* History List */
+            .list-card { background: var(--ios-card); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.08); overflow: hidden; }
+            .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.05); }
+            .list-item:last-child { border-bottom: none; }
+            .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
+            .item-left span { font-size: 12px; color: var(--ios-gray); margin-top: 4px; display: inline-block; }
+            .item-right { font-weight: 600; font-size: 16px; }
+            .val-pos { color: var(--ios-green); }
+            .val-neg { color: var(--ios-red); }
+
+            /* Tab Bar */
+            .tab-bar {
+                position: fixed; bottom: 0; width: 100%;
+                background: rgba(15, 0, 30, 0.85); 
+                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                border-top: 0.5px solid rgba(255,255,255,0.1);
+                display: flex; justify-content: space-around; 
+                padding: 12px 0 calc(12px + var(--safe-area-bottom)) 0; z-index: 100;
+            }
+            .tab-btn { display: flex; flex-direction: column; align-items: center; color: var(--ios-gray); font-size: 10px; font-weight: 500; transition: 0.2s; }
+            .tab-btn svg { width: 26px; height: 26px; margin-bottom: 4px; fill: currentColor; }
+            .tab-btn.active { color: var(--ios-purple-light); }
+            
+            .tab-content { display: none; animation: fadeIn 0.3s ease; }
+            .tab-content.active { display: block; }
+            @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+            
+            /* Loading Spinner */
+            .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.2); border-top-color: var(--ios-purple); border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .empty { text-align: center; color: var(--ios-gray); padding: 30px 20px; font-size: 14px; }
+        </style>
+    </head>
+    <body>
+        <div class="navbar" id="nav-title">Overview</div>
+
+        <div class="container">
+            <div id="tab-overview" class="tab-content active">
+                <div class="profile-hdr">
+                    <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+                    <div class="profile-info">
+                        <h1 id="ui-name">Loading...</h1>
+                        <p id="ui-id">ID: ${userId}</p>
+                        <div class="badge" id="ui-verified">Checking Node...</div>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="widget widget-full">
+                        <div class="widget-title">Wallet Balance</div>
+                        <div class="widget-value" style="font-size:36px; color:var(--ios-purple-light);" id="ui-pts">0</div>
+                        <div class="widget-sub" id="ui-streak">🔥 0 Day Streak</div>
+                    </div>
+                    
+                    <div class="widget w-premium">
+                        <div class="widget-icon">💎</div>
+                        <div class="widget-title">Premium</div>
+                        <div class="widget-value" id="ui-prem-status">Free</div>
+                        <div class="widget-sub" id="ui-prem-days">Upgrade Now</div>
+                    </div>
+
+                    <div class="widget">
+                        <div class="widget-icon">🔍</div>
+                        <div class="widget-title">Search Credits</div>
+                        <div class="widget-value"><span id="ui-credits" style="color:var(--ios-blue);">0</span><span style="font-size:16px; color:var(--ios-gray)">/5</span></div>
+                        <div class="widget-sub">Auto-Refill Active</div>
+                    </div>
+                </div>
+
+                <h3 style="font-size:18px; margin: 24px 0 12px 4px; font-weight:600;">Lifetime Statistics</h3>
+                <div class="grid-2">
+                    <div class="widget" style="padding: 12px 16px;">
+                        <div class="widget-title">Total Earned</div>
+                        <div class="widget-value" style="font-size:20px; color:var(--ios-green);" id="ui-life-earn">0</div>
+                    </div>
+                    <div class="widget" style="padding: 12px 16px;">
+                        <div class="widget-title">Total Spent</div>
+                        <div class="widget-value" style="font-size:20px; color:var(--ios-red);" id="ui-life-spent">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-bank" class="tab-content">
+                <div class="widget widget-full w-bank" style="margin-bottom:16px;">
+                    <div class="widget-icon">📈</div>
+                    <div class="widget-title">MythoFund Vault</div>
+                    <div class="widget-value" id="ui-bank-invest">0</div>
+                    <div class="widget-sub" style="color:#fff;">Active Investment</div>
+                </div>
+                
+                <div class="grid-2">
+                    <div class="widget">
+                        <div class="widget-title">Pending Yield</div>
+                        <div class="widget-value" style="color:var(--ios-gold);" id="ui-bank-yield">+0</div>
+                        <div class="widget-sub">Ready to claim</div>
+                    </div>
+                    <div class="widget">
+                        <div class="widget-title">Active Loan</div>
+                        <div class="widget-value" style="color:var(--ios-red);" id="ui-bank-loan">0</div>
+                        <div class="widget-sub" id="ui-loan-status">No Debt</div>
+                    </div>
+                </div>
+                <div style="margin-top:20px; text-align:center; font-size:13px; color:var(--ios-gray);">
+                    Manage deposits and repayments directly via the /mythobank command in the bot.
+                </div>
+            </div>
+
+            <div id="tab-history" class="tab-content">
+                <div class="list-card" id="ui-history-list">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-bar">
+            <div class="tab-btn active" onclick="switchTab('overview', 'Overview', this)">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+                Overview
+            </div>
+            <div class="tab-btn" onclick="switchTab('bank', 'MythoBank', this)">
+                <svg viewBox="0 0 24 24"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72l5 2.73 5-2.73v3.72z"/></svg>
+                Bank
+            </div>
+            <div class="tab-btn" onclick="switchTab('history', 'Activity', this)">
+                <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                Activity
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.setHeaderColor('#0A0014');
+            tg.setBackgroundColor('#000000');
+
+            const userId = ${userId};
+
+            // Setup User Data from Telegram (Including Username)
+            const tgUser = tg.initDataUnsafe?.user;
+            if (tgUser) {
+                document.getElementById('ui-name').innerText = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
+                
+                const uiIdElement = document.getElementById('ui-id');
+                if (tgUser.username) {
+                    uiIdElement.innerText = '@' + tgUser.username + ' | ID: ' + tgUser.id;
+                } else {
+                    uiIdElement.innerText = 'ID: ' + tgUser.id; 
+                }
+
+                if (tgUser.photo_url) {
+                    document.getElementById('ui-dp').src = tgUser.photo_url;
+                }
+            } else {
+                document.getElementById('ui-id').innerText = 'ID: ' + userId;
+            }
+
+            function switchTab(tabId, title, el) {
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.getElementById('tab-' + tabId).classList.add('active');
+                el.classList.add('active');
+                document.getElementById('nav-title').innerText = title;
+                tg.HapticFeedback.selectionChanged();
+            }
+
+            async function loadData() {
+                try {
+                    const res = await fetch('/api/ios-dashboard-data/' + userId);
+                    const data = await res.json();
+                    
+                    if(data.success) {
+                        // Overview Tab
+                        document.getElementById('ui-pts').innerText = data.profile.mythopoints.toLocaleString();
+                        document.getElementById('ui-streak').innerText = '🔥 ' + data.profile.streak + ' Day Streak';
+                        
+                        const badge = document.getElementById('ui-verified');
+                        if(data.profile.is_verified) {
+                            badge.innerText = '✓ Secured Node';
+                            badge.style.background = 'rgba(48, 209, 88, 0.2)';
+                            badge.style.color = 'var(--ios-green)';
+                        } else {
+                            badge.innerText = '! Unverified';
+                            badge.style.background = 'rgba(255, 69, 58, 0.2)';
+                            badge.style.color = 'var(--ios-red)';
+                        }
+
+                        // Premium Data
+                        if(data.premium.active) {
+                            document.getElementById('ui-prem-status').innerText = data.premium.plan;
+                            document.getElementById('ui-prem-days').innerText = data.premium.daysLeft + ' Days Left';
+                        }
+                        
+                        // Search Credits
+                        document.getElementById('ui-credits').innerText = data.search.credits;
+
+                        // Lifetime Stats
+                        document.getElementById('ui-life-earn').innerText = data.stats.lifetimeEarned.toLocaleString();
+                        document.getElementById('ui-life-spent').innerText = data.stats.lifetimeSpent.toLocaleString();
+
+                        // Bank Tab
+                        document.getElementById('ui-bank-invest').innerText = data.bank.invested.toLocaleString() + ' pts';
+                        document.getElementById('ui-bank-yield').innerText = '+' + data.bank.pendingInterest.toLocaleString();
+                        
+                        if(data.bank.activeLoan) {
+                            document.getElementById('ui-bank-loan').innerText = data.bank.loanDue.toLocaleString();
+                            document.getElementById('ui-loan-status').innerText = 'Accumulating 10%/day';
+                        } else {
+                            document.getElementById('ui-bank-loan').innerText = '0';
+                            document.getElementById('ui-bank-loan').style.color = 'var(--ios-green)';
+                            document.getElementById('ui-loan-status').innerText = 'Eligible for loan';
+                        }
+
+                        // History Tab
+                        const list = document.getElementById('ui-history-list');
+                        if (data.history.length === 0) {
+                            list.innerHTML = '<div class="empty">No recent transactions found.</div>';
+                        } else {
+                            list.innerHTML = data.history.map(item => {
+                                const isEarn = item.type === "EARNED";
+                                const sign = isEarn ? '+' : '-';
+                                const colorClass = isEarn ? 'val-pos' : 'val-neg';
+                                const dateString = new Date(item.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                                
+                                return \`
+                                <div class="list-item">
+                                    <div class="item-left">
+                                        <p>\${item.reason || item.type}</p>
+                                        <span>\${dateString}</span>
+                                    </div>
+                                    <div class="item-right \${colorClass}">
+                                        \${sign}\${item.amount}
+                                    </div>
+                                </div>
+                                \`;
+                            }).join('');
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                    document.getElementById('ui-history-list').innerHTML = '<div class="empty" style="color:var(--ios-red);">Connection Error. Please restart the app.</div>';
+                }
+            }
+
+            loadData();
+        </script>
+    </body>
+    </html>
+    `);
 });
 
 // Fallback home route
