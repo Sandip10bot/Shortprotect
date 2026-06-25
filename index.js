@@ -1888,8 +1888,8 @@ app.post("/api/ai", async (req, res) => {
         // Store user message in memory
         await addToMemory(userId, `User: ${message}`);
 
-        // Build system prompt (Minified to save URL space for GET request)
-        let sysPrompt = "Role: MythoBot. Tone: Gen-Z Hinglish. Rules: Short replies (<500c), use <b>bold</b>, no markdown.";
+        // Restoring the "vibe" while keeping it URL-friendly
+        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
 
         // Serial detection (copied from cai.py)
         const SERIAL_COMMANDS = {
@@ -1951,25 +1951,29 @@ app.post("/api/ai", async (req, res) => {
         } else {
             let history = await getMemory(userId);
             
-            // Limit history length strictly to prevent 'URI Too Long' errors
+            // Keep history concise to avoid URL length issues (last ~400 chars)
             if (history && history.length > 400) {
                 history = "..." + history.slice(-400);
             }
             
-            // Compact structure to save character space
             if (history) {
-                finalPrompt = `${sysPrompt} Hist: ${history} Msg: ${message}`;
+                finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
             } else {
-                finalPrompt = `${sysPrompt} Msg: ${message}`;
+                finalPrompt = `${sysPrompt} User says: ${message}`;
             }
         }
 
-        // Call external GPT-5 API (same as cai.py)
+        // Call external GPT-5 API 
         const encoded = encodeURIComponent(finalPrompt);
         const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
-        const fetch = (await import('node-fetch')).default;
-        const response = await fetch(apiUrl);
+        
+        // Supports both built-in Node fetch and node-fetch
+        let fetchModule;
+        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
+        
+        const response = await fetchModule(apiUrl);
         let reply = null;
+        
         if (response.ok) {
             const data = await response.json();
             reply = data.text || data.reply || data.response || data.message || data.data || null;
@@ -1993,7 +1997,7 @@ app.post("/api/ai", async (req, res) => {
         res.status(500).json({ success: false, error: "AI service unavailable" });
     }
 });
-            
+
 
 // ==========================================
 // AI MEMORY ENDPOINTS
