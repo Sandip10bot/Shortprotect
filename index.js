@@ -1714,6 +1714,10 @@ app.get("/dashboard/:userId", (req, res) => {
 // ==========================================
 // LEADERBOARD API (Updated)
 // ==========================================
+
+// ==========================================
+// LEADERBOARD API (Mirrors lead.py Logic)
+// ==========================================
 app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -1721,7 +1725,6 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         const limit = 10;
         const skip = (parseInt(page) - 1) * limit;
 
-        // Map timeframe to DB field
         let pointField = "mythopoints";
         if (timeframe === "weekly") pointField = "weekly_points";
         if (timeframe === "monthly") pointField = "monthly_points";
@@ -1729,27 +1732,55 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         const query = {};
         query[pointField] = { $gt: 0 };
 
-        // Pagination calculations
         const totalUsers = await usersCollection.countDocuments(query);
         const totalPages = Math.ceil(totalUsers / limit) || 1;
 
-        // Fetch top users – include username, first_name, name
+        // Fetching without .project() to ensure no fields are accidentally blocked
         const users = await usersCollection
             .find(query)
             .sort({ [pointField]: -1 })
             .skip(skip)
             .limit(limit)
-            .project({ user_id: 1, username: 1, name: 1, first_name: 1, [pointField]: 1 })
             .toArray();
 
-        // Format data for the frontend – prioritise username, then first_name, then name
-        const formattedUsers = users.map(u => ({
-            user_id: u.user_id,
-            name: u.first_name || u.name || (u.username ? `@${u.username}` : "Unknown"),
-            points: u[pointField]
-        }));
+        const formattedUsers = users.map(u => {
+            // 1. Safely extract Username
+            let rawUsername = u.username || u.user_name || null;
+            let safeUsername = null;
+            
+            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
+                safeUsername = rawUsername.trim().startsWith('@') 
+                    ? rawUsername.trim() 
+                    : `@${rawUsername.trim()}`;
+            }
 
-        // Calculate current user's rank
+            // 2. Safely extract Name (Mimicking lead.py)
+            let rawName = u.name || u.first_name || null;
+            
+            // 3. Apply lead.py's fallback logic (No live API calls allowed here!)
+            if (!rawName) {
+                if (safeUsername) {
+                    rawName = safeUsername; // Fallback to Username if Name is missing
+                } else {
+                    rawName = `User ${u.user_id}`; // Ultimate lead.py fallback
+                }
+            }
+
+            // 4. Apply lead.py's exact truncation logic: name[:15] + ".."
+            let finalName = rawName;
+            if (finalName.length > 15) {
+                finalName = finalName.substring(0, 15) + "..";
+            }
+
+            return {
+                user_id: u.user_id,
+                name: finalName,
+                username: safeUsername,
+                points: u[pointField] || 0,
+                title: getRankTitle(u[pointField] || 0)
+            };
+        });
+
         let currentUser = null;
         const userDoc = await usersCollection.findOne({ user_id: uid });
         
@@ -1759,7 +1790,8 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
             const higherCount = await usersCollection.countDocuments(rankQuery);
             currentUser = {
                 points: userDoc[pointField],
-                rank: higherCount + 1
+                rank: higherCount + 1,
+                title: getRankTitle(userDoc[pointField])
             };
         }
 
@@ -1775,6 +1807,7 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
     }
 });
+
 
 // ==========================================
 // HISTORY API (Added)
