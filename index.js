@@ -110,6 +110,17 @@ const THEME_CSS = `
   </style>
 `;
 
+// ==========================================
+// RANK TITLE HELPER (Required for the route)
+// ==========================================
+function getRankTitle(points) {
+    if (points < 100) return "🌱 Novice";
+    if (points < 500) return "⚔️ Warrior";
+    if (points < 1500) return "🛡️ Knight";
+    if (points < 3000) return "🐉 Dragon Slayer";
+    return "👑 Mythic Lord";
+}
+
 // ========================
 // HELPER FUNCTIONS
 // ========================
@@ -1715,8 +1726,12 @@ app.get("/dashboard/:userId", (req, res) => {
 // LEADERBOARD API (Updated)
 // ==========================================
 
+
+
+
+
 // ==========================================
-// LEADERBOARD API (Mirrors lead.py Logic)
+// LEADERBOARD API (Bulletproof + Python Fallbacks)
 // ==========================================
 app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
@@ -1725,6 +1740,7 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         const limit = 10;
         const skip = (parseInt(page) - 1) * limit;
 
+        // Map timeframe to DB field
         let pointField = "mythopoints";
         if (timeframe === "weekly") pointField = "weekly_points";
         if (timeframe === "monthly") pointField = "monthly_points";
@@ -1735,7 +1751,6 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         const totalUsers = await usersCollection.countDocuments(query);
         const totalPages = Math.ceil(totalUsers / limit) || 1;
 
-        // Fetching without .project() to ensure no fields are accidentally blocked
         const users = await usersCollection
             .find(query)
             .sort({ [pointField]: -1 })
@@ -1745,7 +1760,7 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
 
         const formattedUsers = users.map(u => {
             // 1. Safely extract Username
-            let rawUsername = u.username || u.user_name || null;
+            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
             let safeUsername = null;
             
             if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
@@ -1754,10 +1769,10 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
                     : `@${rawUsername.trim()}`;
             }
 
-            // 2. Safely extract Name (Mimicking lead.py)
+            // 2. Safely extract Name
             let rawName = u.name || u.first_name || null;
-            
-            // 3. Apply lead.py's fallback logic (No live API calls allowed here!)
+
+            // 3. Apply lead.py's fallback logic
             if (!rawName) {
                 if (safeUsername) {
                     rawName = safeUsername; // Fallback to Username if Name is missing
@@ -1766,8 +1781,8 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
                 }
             }
 
-            // 4. Apply lead.py's exact truncation logic: name[:15] + ".."
-            let finalName = rawName;
+            // 4. Apply lead.py's exact truncation logic safely
+            let finalName = String(rawName); 
             if (finalName.length > 15) {
                 finalName = finalName.substring(0, 15) + "..";
             }
@@ -1777,10 +1792,12 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
                 name: finalName,
                 username: safeUsername,
                 points: u[pointField] || 0,
-                title: getRankTitle(u[pointField] || 0)
+                // Now this function will work perfectly because it's defined right above!
+                title: getRankTitle(u[pointField] || 0) 
             };
         });
 
+        // Calculate current user's rank
         let currentUser = null;
         const userDoc = await usersCollection.findOne({ user_id: uid });
         
