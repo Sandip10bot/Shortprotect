@@ -1712,7 +1712,7 @@ app.get("/dashboard/:userId", (req, res) => {
 });
 
 // ==========================================
-// LEADERBOARD API (Added)
+// LEADERBOARD API (Updated)
 // ==========================================
 app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
@@ -1733,19 +1733,19 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         const totalUsers = await usersCollection.countDocuments(query);
         const totalPages = Math.ceil(totalUsers / limit) || 1;
 
-        // Fetch top users
+        // Fetch top users – include username, first_name, name
         const users = await usersCollection
             .find(query)
             .sort({ [pointField]: -1 })
             .skip(skip)
             .limit(limit)
-            .project({ user_id: 1, name: 1, first_name: 1, [pointField]: 1 })
+            .project({ user_id: 1, username: 1, name: 1, first_name: 1, [pointField]: 1 })
             .toArray();
 
-        // Format data for the frontend
+        // Format data for the frontend – prioritise username, then first_name, then name
         const formattedUsers = users.map(u => ({
             user_id: u.user_id,
-            name: u.name || u.first_name || "Unknown",
+            name: u.username || u.first_name || u.name || "Unknown",
             points: u[pointField]
         }));
 
@@ -2331,6 +2331,53 @@ app.get("/mini/:userId", (req, res) => {
       .ai-chat-panel { height: 90vh; border-radius: 20px 20px 0 0; }
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
     }
+
+    /* ----- UPDATED LEADERBOARD STYLES ----- */
+    .lb-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 16px;
+      border-bottom: 0.5px solid rgba(255,255,255,0.05);
+      transition: background 0.2s;
+    }
+    .lb-item:last-child { border-bottom: none; }
+    .lb-rank {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      background: rgba(255,255,255,0.05);
+      color: #aaa;
+      flex-shrink: 0;
+      margin-right: 14px;
+    }
+    .lb-rank.gold { background: linear-gradient(135deg, #ffd700, #b8860b); color: #fff; box-shadow: 0 0 15px rgba(255,215,0,0.4); }
+    .lb-rank.silver { background: linear-gradient(135deg, #c0c0c0, #808080); color: #fff; box-shadow: 0 0 15px rgba(192,192,192,0.3); }
+    .lb-rank.bronze { background: linear-gradient(135deg, #cd7f32, #8b5a2b); color: #fff; box-shadow: 0 0 15px rgba(205,127,50,0.3); }
+    .lb-rank.self { background: #d500f9; color: #fff; box-shadow: 0 0 15px rgba(213,0,249,0.5); }
+
+    .lb-info { flex: 1; }
+    .lb-name { font-weight: 600; font-size: 16px; }
+    .lb-name.self-highlight { color: #ea80fc; }
+    .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.3); padding: 1px 8px; border-radius: 10px; margin-left: 8px; color: #ea80fc; }
+    .lb-pts { font-weight: 600; color: #ea80fc; font-size: 15px; }
+
+    .lb-self-row {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: rgba(213,0,249,0.08);
+      border-radius: 16px;
+      border: 1px solid rgba(213,0,249,0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .lb-self-rank { font-weight: 700; color: #fff; }
+    .lb-self-pts { font-weight: 700; color: #ffd60a; }
   </style>
 </head>
 <body>
@@ -2415,7 +2462,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: LEADERBOARD -->
+  <!-- TAB: LEADERBOARD (UPDATED UI) -->
   <div id="tab-leaderboard" class="tab-content">
     <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.5);">🏆 MythoPoints Leaderboard</div>
     <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -2632,7 +2679,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── LOAD LEADERBOARD ───
+    // ─── LOAD LEADERBOARD (UPDATED RENDERING) ───
     let lbPage = 1, lbFilter = 'all', lbTotalPages = 1;
     async function loadLeaderboard() {
       const list = document.getElementById('lb-list');
@@ -2650,24 +2697,32 @@ app.get("/mini/:userId", (req, res) => {
         let html = '<div class="list-card">';
         data.users.forEach((u, idx) => {
           const rank = (data.page - 1) * 10 + idx + 1;
-          const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : \`#\${rank}\`;
+          let rankClass = 'lb-rank';
+          let medal = '';
+          if (rank === 1) { rankClass += ' gold'; medal = '🥇'; }
+          else if (rank === 2) { rankClass += ' silver'; medal = '🥈'; }
+          else if (rank === 3) { rankClass += ' bronze'; medal = '🥉'; }
           const isSelf = u.user_id == userId;
+          if (isSelf) rankClass += ' self';
+          const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
+          const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
           html += \`
-            <div class="list-item" style="\${isSelf ? 'background:rgba(213,0,249,0.1);' : ''}">
-              <div class="item-left">
-                <p>\${medal} \${u.name || 'User'} \${isSelf ? '👤' : ''}</p>
-                <span>ID: \${u.user_id}</span>
+            <div class="lb-item" style="\${isSelf ? 'background:rgba(213,0,249,0.08); border-left:3px solid #d500f9;' : ''}">
+              <div class="\${rankClass}">\${medal || rank}</div>
+              <div class="lb-info">
+                <span class="\${nameClass}">\${u.name || 'Unknown'} \${youTag}</span>
               </div>
-              <div class="item-right" style="color:#ea80fc;">\${u.points} pts</div>
+              <div class="lb-pts">\${u.points} pts</div>
             </div>
           \`;
         });
+        // Your rank section
         if (data.currentUser) {
           const cu = data.currentUser;
           html += \`
-            <div class="list-item" style="border-top:1px solid rgba(255,255,255,0.1); background:rgba(213,0,249,0.05);">
-              <div class="item-left"><p>👤 Your Rank: \${cu.rank || 'Unranked'}</p></div>
-              <div class="item-right" style="color:#ffd60a;">\${cu.points} pts</div>
+            <div class="lb-self-row">
+              <span>👤 Your Rank: <strong class="lb-self-rank">#\${cu.rank || 'Unranked'}</strong></span>
+              <span class="lb-self-pts">\${cu.points} pts</span>
             </div>
           \`;
         }
