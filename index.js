@@ -1745,7 +1745,7 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
         // Format data for the frontend – prioritise username, then first_name, then name
         const formattedUsers = users.map(u => ({
             user_id: u.user_id,
-            name: u.username || u.first_name || u.name || "Unknown",
+            name: u.first_name || u.name || (u.username ? `@${u.username}` : "Unknown"),
             points: u[pointField]
         }));
 
