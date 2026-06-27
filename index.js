@@ -2836,7 +2836,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
 
     <!-- Leaderboard -->
-    <div style="padding:16px 16px 8px; font-size:16px; font-weight:600;">🏆 Leaderboard</div>
+    <div style="padding:16px 16px 8px; font-size:16px; font-weight:600;">🏆 Mythopoints Leaderboard</div>
     <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
       <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:rgba(213,0,249,0.1); color:#fff; font-weight:600;">All-Time</button>
       <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4);">Weekly</button>
@@ -3322,7 +3322,7 @@ app.get("/mini/:userId", (req, res) => {
           const cu = data.currentUser;
           html += \`
             <div class="lb-self-row">
-              <span>👤 Your Rank: <strong class="lb-self-rank">#\${cu.rank || 'Unranked'}</strong></span>
+              <span>🕵️‍♀️ Your Rank: <strong class="lb-self-rank">#\${cu.rank || 'Unranked'}</strong></span>
               <span class="lb-self-pts">\${cu.points} pts</span>
             </div>
           \`;
