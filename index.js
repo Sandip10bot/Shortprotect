@@ -2004,7 +2004,7 @@ app.get("/api/withdraw/history/:userId", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (No Emojis, SVG Icons, Mythopoints Label)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2170,6 +2170,7 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center; 
       gap: 6px; 
       position: relative;
+      color: #ffffff; /* All points white */
     }
     .widget-value .mytho-label {
       position: absolute;
@@ -2198,10 +2199,10 @@ app.get("/mini/:userId", (req, res) => {
       width: 72px;
       height: 72px;
       border-radius: 50%;
-      border: 2px solid #d500f9;
+      border: 2px solid #00e676; /* Green border */
       object-fit: cover;
       background: #1c0a2b;
-      box-shadow: 0 0 20px rgba(213,0,249,0.25);
+      box-shadow: 0 0 20px rgba(0,230,118,0.25);
     }
     .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
     .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: #ea80fc; font-weight: 500; }
@@ -2236,7 +2237,7 @@ app.get("/mini/:userId", (req, res) => {
     .item-left { display: flex; flex-direction: column; gap: 2px; }
     .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
     .item-left span { font-size: 12px; color: rgba(255,255,255,0.4); }
-    .item-right { font-weight: 600; font-size: 16px; }
+    .item-right { font-weight: 600; font-size: 16px; color: #fff; } /* white points */
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
@@ -2400,8 +2401,23 @@ app.get("/mini/:userId", (req, res) => {
       border-bottom: 0.5px solid rgba(255,255,255,0.04);
       transition: all 0.2s;
       cursor: default;
+      gap: 8px;
     }
     .lb-item:last-child { border-bottom: none; }
+    .lb-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+      color: #fff;
+      background: #651fff;
+      flex-shrink: 0;
+      text-transform: uppercase;
+    }
     .lb-rank {
       width: 32px;
       height: 32px;
@@ -2414,7 +2430,7 @@ app.get("/mini/:userId", (req, res) => {
       background: rgba(255,255,255,0.04);
       color: #aaa;
       flex-shrink: 0;
-      margin-right: 14px;
+      margin-right: 4px;
       position: relative;
     }
     .lb-rank .medal {
@@ -2430,7 +2446,7 @@ app.get("/mini/:userId", (req, res) => {
     .lb-name { font-weight: 600; font-size: 16px; }
     .lb-name.self-highlight { color: #ea80fc; }
     .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.15); padding: 2px 8px; border-radius: 30px; margin-left: 8px; color: #ea80fc; }
-    .lb-pts { font-weight: 600; color: #ea80fc; font-size: 15px; }
+    .lb-pts { font-weight: 600; color: #ffffff; font-size: 15px; } /* white points */
 
     .lb-self-row {
       margin-top: 12px;
@@ -2591,6 +2607,90 @@ app.get("/mini/:userId", (req, res) => {
       display: inline-flex;
       align-items: center;
     }
+
+    /* === Confirm Modal === */
+    .confirm-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(10px);
+      z-index: 500;
+      justify-content: center;
+      align-items: center;
+    }
+    .confirm-overlay.open { display: flex; }
+    .confirm-box {
+      background: #1a0a2b;
+      border-radius: 24px;
+      padding: 24px 28px;
+      max-width: 340px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+    }
+    .confirm-box p { font-size: 16px; margin-bottom: 24px; color: #ddd; }
+    .confirm-box .btn-row { display: flex; gap: 12px; justify-content: center; }
+    .confirm-box .btn-row button {
+      padding: 10px 28px;
+      border-radius: 30px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .confirm-box .btn-row button:active { transform: scale(0.94); }
+    .confirm-box .btn-cancel { background: rgba(255,255,255,0.06); color: #aaa; }
+    .confirm-box .btn-confirm { background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; }
+
+    /* === Success Overlay === */
+    .success-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      z-index: 600;
+      justify-content: center;
+      align-items: center;
+      animation: fadeIn 0.3s;
+    }
+    .success-overlay.open { display: flex; }
+    .success-box {
+      background: #0a0014;
+      border-radius: 32px;
+      padding: 30px 28px;
+      max-width: 340px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(0,230,118,0.2);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .success-box .check-circle {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #00e676;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+    .success-box .check-circle svg { fill: #fff; width: 36px; height: 36px; }
+    .success-box h3 { font-size: 22px; margin: 0; color: #fff; }
+    .success-box p { color: rgba(255,255,255,0.5); font-size: 14px; margin: 8px 0 0; }
+    @keyframes popIn {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* points white override for specific elements */
+    #ui-pts, #profile-pts, .lb-pts, .item-right, .widget-value, .lb-self-pts {
+      color: #ffffff !important;
+    }
   </style>
 </head>
 <body>
@@ -2612,7 +2712,7 @@ app.get("/mini/:userId", (req, res) => {
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget widget-full">
         <div class="widget-title">Wallet Balance</div>
-        <div class="widget-value" style="font-size:36px; color:#ea80fc; position:relative;">
+        <div class="widget-value" style="font-size:36px; position:relative;">
           <span id="ui-pts">0</span>
           <span class="mytho-label">Mythopoints</span>
         </div>
@@ -2628,7 +2728,7 @@ app.get("/mini/:userId", (req, res) => {
           <svg viewBox="0 0 24 24" width="24" height="24" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
         </div>
         <div class="widget-title">Premium</div>
-        <div class="widget-value" id="ui-prem-status">Free</div>
+        <div class="widget-value" id="ui-prem-status" style="color:#ffffff;">Free</div>
         <div class="widget-sub" id="ui-prem-days">Upgrade</div>
       </div>
       <div class="widget">
@@ -2799,7 +2899,7 @@ app.get("/mini/:userId", (req, res) => {
       </div>
       <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
         <span>Mythopoints</span>
-        <span id="profile-pts" style="color:#ea80fc;">0</span>
+        <span id="profile-pts" style="color:#ffffff;">0</span>
       </div>
       <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
         <span>Streak</span>
@@ -2867,7 +2967,8 @@ app.get("/mini/:userId", (req, res) => {
       <span>Store</span>
     </div>
     <div class="tab-btn" data-tab="pay">
-      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+      <!-- Payment / Wallet SVG -->
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
       <span>Pay</span>
     </div>
     <div class="tab-btn" data-tab="profile">
@@ -2920,6 +3021,68 @@ app.get("/mini/:userId", (req, res) => {
       if (tgUser.photo_url) {
         document.querySelectorAll('#ui-dp, #profile-dp').forEach(el => el.src = tgUser.photo_url);
       }
+    }
+
+    // ─── CONFIRM & SUCCESS MODALS ───
+    // Confirm overlay
+    const confirmOverlay = document.createElement('div');
+    confirmOverlay.className = 'confirm-overlay';
+    confirmOverlay.innerHTML = \`
+      <div class="confirm-box">
+        <p id="confirm-text">Are you sure?</p>
+        <div class="btn-row">
+          <button class="btn-cancel" id="confirm-no">Cancel</button>
+          <button class="btn-confirm" id="confirm-yes">Yes</button>
+        </div>
+      </div>
+    \`;
+    document.body.appendChild(confirmOverlay);
+    let confirmCallback = null;
+    document.getElementById('confirm-yes').addEventListener('click', () => {
+      confirmOverlay.classList.remove('open');
+      if (confirmCallback) confirmCallback(true);
+    });
+    document.getElementById('confirm-no').addEventListener('click', () => {
+      confirmOverlay.classList.remove('open');
+      if (confirmCallback) confirmCallback(false);
+    });
+
+    function showConfirm(text) {
+      return new Promise((resolve) => {
+        document.getElementById('confirm-text').innerText = text;
+        confirmOverlay.classList.add('open');
+        confirmCallback = (result) => {
+          resolve(result);
+          confirmCallback = null;
+        };
+      });
+    }
+
+    // Success overlay
+    const successOverlay = document.createElement('div');
+    successOverlay.className = 'success-overlay';
+    successOverlay.innerHTML = \`
+      <div class="success-box">
+        <div class="check-circle">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+        <h3 id="success-title">Success!</h3>
+        <p id="success-message">Transaction completed.</p>
+      </div>
+    \`;
+    document.body.appendChild(successOverlay);
+
+    function showSuccess(message, title = 'Success!') {
+      return new Promise((resolve) => {
+        document.getElementById('success-title').innerText = title;
+        document.getElementById('success-message').innerText = message;
+        successOverlay.classList.add('open');
+        tg.HapticFeedback.notificationOccurred('success');
+        setTimeout(() => {
+          successOverlay.classList.remove('open');
+          resolve();
+        }, 2000);
+      });
     }
 
     // ─── TAB SWITCHING ───
@@ -3021,7 +3184,7 @@ app.get("/mini/:userId", (req, res) => {
         const data = await res.json();
         if (data.success) {
           tg.HapticFeedback.notificationOccurred('success');
-          alert('Claimed ' + data.claimed + ' MythoPoints!');
+          await showSuccess('Claimed ' + data.claimed + ' MythoPoints!', 'Interest Claimed');
           loadBankData();
           loadDashboard();
         } else {
@@ -3033,6 +3196,8 @@ app.get("/mini/:userId", (req, res) => {
     document.getElementById('invest-btn').addEventListener('click', async () => {
       const amount = parseInt(document.getElementById('invest-amount').value);
       if (!amount || amount < 1) return alert('Enter a valid amount.');
+      const confirmed = await showConfirm(\`Invest \${amount} Mythopoints into MythoFund?\`);
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/bank/invest/' + userId, {
           method: 'POST',
@@ -3041,8 +3206,7 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Investment Successful');
           loadBankData();
           loadDashboard();
         } else {
@@ -3054,6 +3218,8 @@ app.get("/mini/:userId", (req, res) => {
     document.getElementById('withdraw-btn').addEventListener('click', async () => {
       const amount = parseInt(document.getElementById('invest-amount').value);
       if (!amount || amount < 1) return alert('Enter a valid amount.');
+      const confirmed = await showConfirm(\`Withdraw \${amount} Mythopoints from investment?\`);
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/bank/withdraw/' + userId, {
           method: 'POST',
@@ -3062,8 +3228,7 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Withdrawal Successful');
           loadBankData();
           loadDashboard();
         } else {
@@ -3073,12 +3238,13 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     document.getElementById('loan-apply-btn').addEventListener('click', async () => {
+      const confirmed = await showConfirm('Apply for a loan of 100 Mythopoints? (10% daily interest)');
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/bank/loan/apply/' + userId, { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Loan Granted');
           loadBankData();
           loadDashboard();
         } else {
@@ -3088,12 +3254,13 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     document.getElementById('loan-repay-btn').addEventListener('click', async () => {
+      const confirmed = await showConfirm('Repay your active loan with interest?');
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/bank/loan/repay/' + userId, { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Loan Repaid');
           loadBankData();
           loadDashboard();
         } else {
@@ -3130,6 +3297,8 @@ app.get("/mini/:userId", (req, res) => {
       const method = document.getElementById('withdraw-method').value.trim();
       if (!amount || amount < 10) return alert('Minimum withdraw is ₹10.');
       if (!method) return alert('Please enter a payment method.');
+      const confirmed = await showConfirm(\`Withdraw ₹\${amount} via \${method}? This will deduct \${amount*10000} Mythopoints.\`);
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/withdraw/request/' + userId, {
           method: 'POST',
@@ -3138,8 +3307,7 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Withdraw Requested');
           loadDashboard();
           loadWithdrawHistory();
           document.getElementById('withdraw-amount').value = '';
@@ -3151,7 +3319,31 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     // ─── STORE ───
+    const storeCosts = {
+      'credits': 50,
+      'skip_cooldown': 50,
+      'mystery': 100,
+      'coupon_10': 200,
+      'coupon_20': 500,
+      'coupon_30': 800,
+      'coupon_50': 1500
+    };
+    const storeNames = {
+      'credits': '5 Search Credits',
+      'skip_cooldown': 'Skip Cooldown',
+      'mystery': 'Mystery Box',
+      'coupon_10': '10% OFF Coupon',
+      'coupon_20': '20% OFF Coupon',
+      'coupon_30': '30% OFF Coupon',
+      'coupon_50': '50% OFF Coupon'
+    };
+
     async function purchase(item) {
+      const cost = storeCosts[item];
+      const name = storeNames[item] || item;
+      if (!cost) return alert('Invalid item.');
+      const confirmed = await showConfirm(\`Purchase \${name} for \${cost} Mythopoints?\`);
+      if (!confirmed) return;
       try {
         const res = await fetch('/api/store/purchase/' + userId, {
           method: 'POST',
@@ -3160,8 +3352,7 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(data.message, 'Purchase Successful');
           loadDashboard();
         } else {
           alert(data.error);
@@ -3212,6 +3403,8 @@ app.get("/mini/:userId", (req, res) => {
       const amount = parseInt(document.getElementById('payment-amount').value);
       if (!selectedReceiver) return alert('Select a receiver first.');
       if (!amount || amount < 200) return alert('Minimum 200 Mythopoints.');
+      const confirmed = await showConfirm(\`Send \${amount} Mythopoints to user \${selectedReceiver}?\`);
+      if (!confirmed) return;
       
       try {
         const res = await fetch('/api/payment/send', {
@@ -3225,8 +3418,7 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
+          await showSuccess(\`Payment of \${amount} Mythopoints sent successfully!\`, 'Payment Successful');
           loadDashboard();
           loadPaymentStatus();
           document.getElementById('payment-amount').value = '';
@@ -3308,11 +3500,16 @@ app.get("/mini/:userId", (req, res) => {
           if (isSelf) rankClass += ' self';
           const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
           const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
+          // Generate avatar
+          const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
+          const hue = (u.user_id * 137) % 360;
+          const bgColor = \`hsl(\${hue}, 70%, 40%)\`;
           html += \`
             <div class="lb-item" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
+              <div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>
               <div class="\${rankClass}">\${medalHtml || rank}</div>
               <div class="lb-info">
-                <span class="\${nameClass}">\${u.name || 'Unknown'} \${youTag}</span>
+                <span class="\${nameClass}">\${u.name} \${youTag}</span>
               </div>
               <div class="lb-pts">\${u.points} pts</div>
             </div>
@@ -3404,6 +3601,8 @@ app.get("/mini/:userId", (req, res) => {
       star.addEventListener('click', async function() {
         if (userRated) return;
         const rating = parseInt(this.dataset.value);
+        const confirmed = await showConfirm(\`Rate MythoBot \${rating} stars? You'll earn 10 Mythopoints.\`);
+        if (!confirmed) return;
         try {
           const res = await fetch('/api/rating/submit/' + userId, {
             method: 'POST',
@@ -3412,8 +3611,7 @@ app.get("/mini/:userId", (req, res) => {
           });
           const data = await res.json();
           if (data.success) {
-            tg.HapticFeedback.notificationOccurred('success');
-            alert(data.message);
+            await showSuccess(data.message, 'Rating Submitted');
             loadRatingStatus();
             loadDashboard();
           } else {
