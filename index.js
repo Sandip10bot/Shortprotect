@@ -1,5 +1,5 @@
 // ============================================================
-// index.js – Full Express Server with Premium Mini App UI
+// index.js – Full Express Server with Rating & Withdraw Integration
 // ============================================================
 
 import express from "express";
@@ -35,6 +35,8 @@ let couponsCollection;
 let searchLimitCollection;
 let paymentLimitCollection;
 let ipVerificationCollection;
+let ratingsCollection;
+let withdrawsCollection;
 
 async function connectDB() {
   try {
@@ -54,6 +56,8 @@ async function connectDB() {
     searchLimitCollection = db.collection("search_limits");
     paymentLimitCollection = db.collection("payment_limits");
     ipVerificationCollection = db.collection("ip_verification");
+    ratingsCollection = db.collection("ratings");
+    withdrawsCollection = db.collection("withdraws");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -1275,7 +1279,7 @@ app.get("/ios-app/:userId", (req, res) => {
 });
 
 // ==========================================
-// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES) – UPDATED WITH CORRECT INTEREST RATE
+// UNIFIED iOS PURPLE DASHBOARD – ADD RATING & WITHDRAW
 // ==========================================
 
 app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
@@ -1284,13 +1288,14 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         const db = client.db("Mytho");
         const now = Math.floor(Date.now() / 1000);
 
-        const [user, bank, search, premium, stats, history] = await Promise.all([
+        const [user, bank, search, premium, stats, history, rating] = await Promise.all([
             db.collection("users").findOne({ user_id: uid }),
             db.collection("bank").findOne({ user_id: uid }),
             db.collection("search_limits").findOne({ user_id: uid }),
             db.collection("premium_users").findOne({ user_id: uid }),
             db.collection("user_stats").findOne({ user_id: uid }),
-            db.collection("mphistory").find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray()
+            db.collection("mphistory").find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray(),
+            db.collection("ratings").findOne({ _id: uid })
         ]);
 
         let pendingInterest = 0;
@@ -1300,7 +1305,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         if (bank) {
             if (bank.invested > 0) {
                 const cycles = Math.floor((now - bank.last_claim_time) / 86400);
-                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.025 * cycles); // 2.5% daily
+                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.025 * cycles);
             }
             if (bank.loan_active && bank.loan_principal > 0) {
                 activeLoan = true;
@@ -1323,6 +1328,11 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
             user_id: uid,
             date: today
         });
+
+        // Get overall rating stats
+        const allRatings = await db.collection("ratings").find({ rating: { $exists: true } }).toArray();
+        const totalRatings = allRatings.length;
+        const avgRating = totalRatings > 0 ? (allRatings.reduce((sum, r) => sum + r.rating, 0) / totalRatings) : 0;
 
         res.json({
             success: true,
@@ -1355,6 +1365,11 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
             payment: {
                 dailyLimit: 1,
                 usedToday: paymentCount
+            },
+            rating: {
+                userRating: rating?.rating || null,
+                totalRatings: totalRatings,
+                average: avgRating
             }
         });
     } catch (error) {
@@ -1440,15 +1455,12 @@ app.post("/api/bank/invest/:userId", async (req, res) => {
         if (!user) return res.status(404).json({ success: false, error: "User not found" });
         if (user.mythopoints < amount) return res.status(400).json({ success: false, error: "Insufficient balance" });
 
-        // Check if pending interest exists – if so, force claim first
         const pending = calculateInterest(bank.invested, bank.last_claim_time);
         if (pending > 0) {
             return res.status(400).json({ success: false, error: "Claim pending interest before investing" });
         }
 
-        // Deduct from wallet
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -amount } });
-        // Update bank: increase invested, reset timer
         await bankCollection.updateOne(
             { user_id: uid },
             {
@@ -1457,7 +1469,6 @@ app.post("/api/bank/invest/:userId", async (req, res) => {
             }
         );
 
-        // Log transaction
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: amount,
@@ -1482,13 +1493,11 @@ app.post("/api/bank/withdraw/:userId", async (req, res) => {
         const bank = await getBank(uid);
         if (bank.invested < amount) return res.status(400).json({ success: false, error: "Not enough invested" });
 
-        // Check pending interest
         const pending = calculateInterest(bank.invested, bank.last_claim_time);
         if (pending > 0) {
             return res.status(400).json({ success: false, error: "Claim pending interest before withdrawing" });
         }
 
-        // Update bank
         await bankCollection.updateOne(
             { user_id: uid },
             {
@@ -1497,10 +1506,8 @@ app.post("/api/bank/withdraw/:userId", async (req, res) => {
             }
         );
 
-        // Add to wallet
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: amount } });
 
-        // Log
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: amount,
@@ -1524,7 +1531,6 @@ app.post("/api/bank/claim/:userId", async (req, res) => {
 
         if (pending < 1) return res.status(400).json({ success: false, error: "No interest to claim" });
 
-        // Update: advance last_claim_time by cycles
         const now = Math.floor(Date.now() / 1000);
         const cycles = Math.floor((now - bank.last_claim_time) / 86400);
         const newClaimTime = bank.last_claim_time + (cycles * 86400);
@@ -1534,10 +1540,8 @@ app.post("/api/bank/claim/:userId", async (req, res) => {
             { $set: { last_claim_time: newClaimTime, notified_for_claim: false } }
         );
 
-        // Add to wallet
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: pending } });
 
-        // Log
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: pending,
@@ -1559,7 +1563,7 @@ app.post("/api/bank/loan/apply/:userId", async (req, res) => {
         const bank = await getBank(uid);
         if (bank.loan_active) return res.status(400).json({ success: false, error: "Loan already active" });
 
-        const principal = 100; // LOAN_PRINCIPAL
+        const principal = 100;
         await bankCollection.updateOne(
             { user_id: uid },
             {
@@ -1571,10 +1575,8 @@ app.post("/api/bank/loan/apply/:userId", async (req, res) => {
             }
         );
 
-        // Credit user
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: principal } });
 
-        // Log
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: principal,
@@ -1600,10 +1602,8 @@ app.post("/api/bank/loan/repay/:userId", async (req, res) => {
         const user = await usersCollection.findOne({ user_id: uid });
         if (!user || user.mythopoints < due) return res.status(400).json({ success: false, error: "Insufficient balance" });
 
-        // Deduct
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -due } });
 
-        // Clear loan
         await bankCollection.updateOne(
             { user_id: uid },
             {
@@ -1615,7 +1615,6 @@ app.post("/api/bank/loan/repay/:userId", async (req, res) => {
             }
         );
 
-        // Log
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: due,
@@ -1896,6 +1895,152 @@ app.get("/api/users/search", async (req, res) => {
 });
 
 // ==========================================
+// ⭐ RATING API
+// ==========================================
+
+// GET rating status and overall stats
+app.get("/api/rating/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const userRating = await ratingsCollection.findOne({ _id: uid });
+        const allRatings = await ratingsCollection.find({ rating: { $exists: true } }).toArray();
+        const total = allRatings.length;
+        const avg = total > 0 ? (allRatings.reduce((sum, r) => sum + r.rating, 0) / total) : 0;
+
+        res.json({
+            success: true,
+            userRating: userRating?.rating || null,
+            totalRatings: total,
+            average: avg
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// POST: Submit rating
+app.post("/api/rating/submit/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { rating } = req.body;
+        if (!rating || rating < 1 || rating > 5) {
+            return res.status(400).json({ success: false, error: "Rating must be 1-5." });
+        }
+
+        // Check if already rated
+        const existing = await ratingsCollection.findOne({ _id: uid });
+        if (existing && existing.rating) {
+            return res.status(400).json({ success: false, error: "You already rated." });
+        }
+
+        // Give 10 MythoPoints
+        const pointsToAdd = 10;
+        const user = await usersCollection.findOne({ user_id: uid });
+        const currentPoints = user?.mythopoints || 0;
+        const newPoints = currentPoints + pointsToAdd;
+
+        // Store rating and update points
+        await ratingsCollection.updateOne(
+            { _id: uid },
+            { $set: { rating: rating } },
+            { upsert: true }
+        );
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $set: { mythopoints: newPoints } }
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pointsToAdd,
+            type: "EARNED",
+            reason: `Rated Bot ${rating} Stars`,
+            date: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Thanks for rating ${rating} ⭐! You earned ${pointsToAdd} MythoPoints.`,
+            newPoints: newPoints
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// 💰 WITHDRAW API (cwithdraw.py logic)
+// ==========================================
+
+const CONVERSION_RATE = 10000; // 10,000 pts = ₹1
+
+// POST: Create withdraw request
+app.post("/api/withdraw/request/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount, method } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount." });
+        if (!method) return res.status(400).json({ success: false, error: "Method required." });
+
+        const pointsNeeded = amount * CONVERSION_RATE;
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found." });
+        if (user.mythopoints < pointsNeeded) {
+            return res.status(400).json({ success: false, error: `Insufficient points. Need ${pointsNeeded}.` });
+        }
+
+        // Deduct points
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -pointsNeeded } });
+
+        // Create withdraw request
+        const withdrawId = `${uid}_${Date.now()}`;
+        const request = {
+            _id: withdrawId,
+            user_id: uid,
+            amount: amount,
+            points: pointsNeeded,
+            method: method,
+            status: "Pending",
+            created_at: new Date().toISOString()
+        };
+        await withdrawsCollection.insertOne(request);
+
+        // Log
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pointsNeeded,
+            type: "SPENT",
+            reason: `Withdraw Request (₹${amount} via ${method})`,
+            date: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Withdraw request created! ₹${amount} via ${method} (Pending).`,
+            requestId: withdrawId
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// GET: User's withdraw history
+app.get("/api/withdraw/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const requests = await withdrawsCollection.find({ user_id: uid })
+            .sort({ created_at: -1 })
+            .limit(10)
+            .toArray();
+
+        res.json({ success: true, requests });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
 // MINI APP ROUTE – PREMIUM, CLEAN, 5-TAB DESIGN
 // ==========================================
 
@@ -1921,6 +2066,8 @@ app.get("/mini/:userId", (req, res) => {
       padding-bottom: 80px;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
+      user-select: none; /* Disable text selection */
+      -webkit-touch-callout: none;
     }
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
@@ -1936,6 +2083,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 16px;
       margin: 12px 16px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 10px rgba(213,0,249,0.05);
+      transition: all 0.3s ease;
     }
     .glass-title {
       font-size: 16px;
@@ -2015,6 +2163,7 @@ app.get("/mini/:userId", (req, res) => {
       display: flex;
       flex-direction: column;
       justify-content: center;
+      transition: transform 0.2s;
     }
     .widget-full { grid-column: span 2; }
     .widget-icon { font-size: 24px; margin-bottom: 8px; }
@@ -2216,13 +2365,14 @@ app.get("/mini/:userId", (req, res) => {
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
     }
 
-    /* === LEADERBOARD === */
+    /* === LEADERBOARD PREMIUM STYLES === */
     .lb-item {
       display: flex;
       align-items: center;
       padding: 10px 16px;
       border-bottom: 0.5px solid rgba(255,255,255,0.05);
-      transition: background 0.2s;
+      transition: all 0.3s ease;
+      cursor: default;
     }
     .lb-item:last-child { border-bottom: none; }
     .lb-rank {
@@ -2259,29 +2409,17 @@ app.get("/mini/:userId", (req, res) => {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      animation: fadeSlideUp 0.5s ease;
     }
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === STORE & PAYMENT === */
-    .store-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.05);
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    .store-item:last-child { border-bottom: none; }
-    .store-item button {
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      border: none;
-      padding: 6px 16px;
-      border-radius: 30px;
-      color: white;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .store-item button:active { transform: scale(0.95); }
+
+    /* === PAYMENT PREMIUM STYLES === */
     .search-user-input {
       width: 100%;
       padding: 12px 16px;
@@ -2291,7 +2429,9 @@ app.get("/mini/:userId", (req, res) => {
       color: #fff;
       font-size: 16px;
       margin-bottom: 16px;
+      transition: border 0.3s;
     }
+    .search-user-input:focus { border-color: #d500f9; outline: none; }
     .search-user-input::placeholder { color: rgba(255,255,255,0.3); }
     .user-result {
       display: flex;
@@ -2300,6 +2440,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 12px 0;
       border-bottom: 0.5px solid rgba(255,255,255,0.05);
       cursor: pointer;
+      transition: background 0.2s;
     }
     .user-result:active { background: rgba(255,255,255,0.05); }
     .quick-action-grid {
@@ -2316,7 +2457,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 12px;
       text-align: center;
       cursor: pointer;
-      transition: 0.2s;
+      transition: transform 0.2s;
     }
     .quick-action:active { transform: scale(0.95); }
     .quick-action .icon { font-size: 28px; }
@@ -2324,6 +2465,68 @@ app.get("/mini/:userId", (req, res) => {
     .quick-action.bank { border-color: rgba(48,209,88,0.3); }
     .quick-action.store { border-color: rgba(255,214,10,0.3); }
     .quick-action.pay { border-color: rgba(10,132,255,0.3); }
+
+    /* === STORE ITEMS === */
+    .store-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.05);
+    }
+    .store-item:last-child { border-bottom: none; }
+    .store-item button {
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      border: none;
+      padding: 6px 16px;
+      border-radius: 30px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .store-item button:active { transform: scale(0.95); }
+
+    /* === RATING STARS === */
+    .star-rating {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin: 12px 0;
+    }
+    .star {
+      font-size: 32px;
+      color: rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: color 0.2s, transform 0.2s;
+    }
+    .star.active { color: #ffd60a; }
+    .star:active { transform: scale(1.2); }
+
+    /* === WITHDRAW SECTION === */
+    .withdraw-input {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 30px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    .withdraw-input:focus { border-color: #d500f9; outline: none; }
+    .withdraw-btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 30px;
+      border: none;
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .withdraw-btn:active { transform: scale(0.95); }
   </style>
 </head>
 <body>
@@ -2391,7 +2594,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: BANK ========== -->
+  <!-- ========== TAB: BANK (includes Withdraw) ========== -->
   <div id="tab-bank" class="tab-content">
     <div class="glass w-bank" style="margin:16px;">
       <div class="widget-icon">📈</div>
@@ -2421,6 +2624,16 @@ app.get("/mini/:userId", (req, res) => {
         <button id="loan-apply-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Apply Loan (100 pts)</button>
         <button id="loan-repay-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:rgba(255,69,58,0.3); color:#ff453a; font-weight:600;">Repay Loan</button>
       </div>
+    </div>
+
+    <!-- Withdraw Section -->
+    <div class="glass" style="margin:16px; margin-top:20px;">
+      <div class="glass-title">💰 Withdraw to Real Money</div>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">10,000 pts = ₹1 | Min ₹10</p>
+      <input type="number" id="withdraw-amount" class="withdraw-input" placeholder="Amount in INR (e.g., 50)" />
+      <input type="text" id="withdraw-method" class="withdraw-input" placeholder="Payment Method (e.g., UPI, Bank)" />
+      <button id="withdraw-request-btn" class="withdraw-btn">Request Withdraw</button>
+      <div id="withdraw-history" style="margin-top:16px;"></div>
     </div>
   </div>
 
@@ -2477,7 +2690,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: PROFILE (History + Leaderboard) ========== -->
+  <!-- ========== TAB: PROFILE (History, Leaderboard, Rating) ========== -->
   <div id="tab-profile" class="tab-content">
     <div class="glass" style="margin:16px;">
       <div class="profile-hdr" style="margin-bottom:16px;">
@@ -2499,6 +2712,21 @@ app.get("/mini/:userId", (req, res) => {
         <span>Verification</span>
         <span id="profile-verified" style="color:#ff453a;">Unverified</span>
       </div>
+    </div>
+
+    <!-- Rating Section -->
+    <div class="glass" style="margin:16px;">
+      <div class="glass-title">⭐ Rate MythoBot</div>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Earn 10 MythoPoints for rating!</p>
+      <div id="rating-status"></div>
+      <div class="star-rating" id="star-container">
+        <span class="star" data-value="1">☆</span>
+        <span class="star" data-value="2">☆</span>
+        <span class="star" data-value="3">☆</span>
+        <span class="star" data-value="4">☆</span>
+        <span class="star" data-value="5">☆</span>
+      </div>
+      <div id="rating-message" style="text-align:center; font-size:14px; margin-top:8px;"></div>
     </div>
 
     <!-- History -->
@@ -2613,8 +2841,8 @@ app.get("/mini/:userId", (req, res) => {
       });
       navTitle.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
       tg.HapticFeedback.selectionChanged();
-      if (tabId === 'bank') loadBankData();
-      if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); }
+      if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
+      if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
       if (tabId === 'pay') loadPaymentStatus();
     }
     window.switchTab = switchTab;
@@ -2767,6 +2995,54 @@ app.get("/mini/:userId", (req, res) => {
           alert(data.message);
           loadBankData();
           loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    // ─── WITHDRAW ───
+    async function loadWithdrawHistory() {
+      try {
+        const res = await fetch('/api/withdraw/history/' + userId);
+        const data = await res.json();
+        if (data.success && data.requests.length) {
+          let html = '<div style="font-size:13px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Recent Withdrawals</div>';
+          data.requests.forEach(w => {
+            const statusColor = w.status === 'Pending' ? '#ffd60a' : (w.status === 'Paid' ? '#30d158' : '#ff453a');
+            html += \`
+              <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.05);">
+                <span>₹\${w.amount} via \${w.method}</span>
+                <span style="color:\${statusColor};">\${w.status}</span>
+              </div>
+            \`;
+          });
+          document.getElementById('withdraw-history').innerHTML = html;
+        } else {
+          document.getElementById('withdraw-history').innerHTML = '<div class="empty">No withdrawals yet.</div>';
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('withdraw-request-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('withdraw-amount').value);
+      const method = document.getElementById('withdraw-method').value.trim();
+      if (!amount || amount < 10) return alert('Minimum withdraw is ₹10.');
+      if (!method) return alert('Please enter a payment method.');
+      try {
+        const res = await fetch('/api/withdraw/request/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, method })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadDashboard();
+          loadWithdrawHistory();
+          document.getElementById('withdraw-amount').value = '';
+          document.getElementById('withdraw-method').value = '';
         } else {
           alert(data.error);
         }
@@ -2997,6 +3273,55 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     }
 
+    // ─── RATING ───
+    let userRated = false;
+    async function loadRatingStatus() {
+      try {
+        const res = await fetch('/api/rating/status/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const statusDiv = document.getElementById('rating-status');
+          const starContainer = document.getElementById('star-container');
+          const msgDiv = document.getElementById('rating-message');
+          if (data.userRating) {
+            userRated = true;
+            statusDiv.innerHTML = \`<p style="color:#ffd60a;">You rated \${data.userRating} ⭐ | Avg: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            starContainer.style.display = 'none';
+            msgDiv.innerText = 'Thanks for rating!';
+          } else {
+            userRated = false;
+            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.6);">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            starContainer.style.display = 'flex';
+            msgDiv.innerText = 'Tap a star to rate!';
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Star click
+    document.querySelectorAll('.star').forEach(star => {
+      star.addEventListener('click', async function() {
+        if (userRated) return;
+        const rating = parseInt(this.dataset.value);
+        try {
+          const res = await fetch('/api/rating/submit/' + userId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating })
+          });
+          const data = await res.json();
+          if (data.success) {
+            tg.HapticFeedback.notificationOccurred('success');
+            alert(data.message);
+            loadRatingStatus();
+            loadDashboard();
+          } else {
+            alert(data.error);
+          }
+        } catch (e) {}
+      });
+    });
+
     // ─── AI CHAT ───
     const aiFab = document.getElementById('aiFab');
     const aiOverlay = document.getElementById('aiChatOverlay');
@@ -3070,8 +3395,8 @@ app.get("/mini/:userId", (req, res) => {
 
     // ─── INIT ───
     loadDashboard();
-    if (document.getElementById('tab-bank').classList.contains('active')) loadBankData();
-    if (document.getElementById('tab-profile').classList.contains('active')) { loadHistory(); loadLeaderboard(); loadProfile(); }
+    if (document.getElementById('tab-bank').classList.contains('active')) { loadBankData(); loadWithdrawHistory(); }
+    if (document.getElementById('tab-profile').classList.contains('active')) { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
     if (document.getElementById('tab-pay').classList.contains('active')) loadPaymentStatus();
   </script>
 </body>
