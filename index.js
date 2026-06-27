@@ -1,5 +1,5 @@
 // ============================================================
-// index.js – Full Express Server with Banking, Store & Payments
+// index.js – Full Express Server with Premium Mini App UI
 // ============================================================
 
 import express from "express";
@@ -1009,10 +1009,8 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
 });
 
 // ==========================================
-// UNIFIED APPLE iOS PROFILE MINI APP
+// UNIFIED APPLE iOS PROFILE MINI APP (unchanged)
 // ==========================================
-
-// 1. API: Fetch Unified User Data & Activity History (unchanged)
 app.get("/api/ios-profile-data/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -1037,7 +1035,6 @@ app.get("/api/ios-profile-data/:userId", async (req, res) => {
     }
 });
 
-// 2. RENDER: The Apple iPhone UI (unchanged)
 app.get("/ios-app/:userId", (req, res) => {
     const { userId } = req.params;
     
@@ -1278,10 +1275,9 @@ app.get("/ios-app/:userId", (req, res) => {
 });
 
 // ==========================================
-// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES) – ADDED NEW TABS
+// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES) – UPDATED WITH CORRECT INTEREST RATE
 // ==========================================
 
-// 1. API: Extract all user data across multiple collections (updated to include bank/store)
 app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -1304,7 +1300,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         if (bank) {
             if (bank.invested > 0) {
                 const cycles = Math.floor((now - bank.last_claim_time) / 86400);
-                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.05 * cycles); // 5% daily
+                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.025 * cycles); // 2.5% daily
             }
             if (bank.loan_active && bank.loan_principal > 0) {
                 activeLoan = true;
@@ -1322,7 +1318,6 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
             premiumDaysLeft = Math.ceil((premium.expiry_time - now) / 86400);
         }
 
-        // Get daily payment count for today
         const today = new Date().toISOString().split('T')[0];
         const paymentCount = await db.collection("payment_limits").countDocuments({
             user_id: uid,
@@ -1369,7 +1364,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 🏦 BANKING API (cbank.py logic)
+// 🏦 BANKING API (cbank.py logic) – CORRECTED INTEREST RATE
 // ==========================================
 
 // Helper: Get or create bank document
@@ -1390,13 +1385,13 @@ async function getBank(userId) {
     return bank;
 }
 
-// Helper: Calculate pending interest
+// Helper: Calculate pending interest – CORRECT RATE 2.5%
 function calculateInterest(invested, lastClaimTime) {
     if (invested <= 0) return 0;
     const now = Math.floor(Date.now() / 1000);
     const cycles = Math.floor((now - lastClaimTime) / 86400);
     if (cycles < 1) return 0;
-    return Math.floor(invested * 0.05 * cycles); // 5% daily
+    return Math.floor(invested * 0.025 * cycles); // 2.5% daily
 }
 
 // Helper: Calculate loan due
@@ -1636,10 +1631,9 @@ app.post("/api/bank/loan/repay/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 🛍️ STORE API (cstore.py logic)
+// 🛍️ STORE API (cstore.py logic) – unchanged
 // ==========================================
 
-// Helper: Generate coupon
 async function generateCoupon(userId, discount) {
     const code = crypto.randomBytes(4).toString('hex').toUpperCase();
     await couponsCollection.insertOne({
@@ -1653,27 +1647,23 @@ async function generateCoupon(userId, discount) {
     return code;
 }
 
-// POST: Purchase store item
 app.post("/api/store/purchase/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
-        const { item } = req.body; // 'credits', 'skip_cooldown', 'mystery', 'coupon_10', etc.
+        const { item } = req.body;
 
         const user = await usersCollection.findOne({ user_id: uid });
         if (!user) return res.status(404).json({ success: false, error: "User not found" });
 
-        // Define items and costs
         const items = {
             credits: { cost: 50, name: "5 Search Credits" },
             skip_cooldown: { cost: 50, name: "Skip Cooldown" },
             mystery: { cost: 100, name: "Mystery Box" },
         };
-        // Coupons: discount% -> cost mapping
         const couponCosts = { 10: 200, 20: 500, 30: 800, 40: 1000, 50: 1500 };
 
         let cost = 0;
         let action = null;
-        let reward = null;
 
         if (item === 'credits') {
             cost = items.credits.cost;
@@ -1698,7 +1688,6 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
         } else if (item === 'mystery') {
             cost = items.mystery.cost;
             action = async () => {
-                // Gacha
                 const rewards = ["jackpot", "credits", "coupon", "nothing"];
                 const weights = [10, 40, 30, 20];
                 const outcome = rewards[weights.reduce((acc, w, i) => {
@@ -1734,16 +1723,11 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
             return res.status(400).json({ success: false, error: "Invalid item" });
         }
 
-        // Check balance
         if (user.mythopoints < cost) return res.status(400).json({ success: false, error: "Insufficient Mythopoints" });
 
-        // Deduct cost
         await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -cost } });
-
-        // Execute action
         const result = await action();
 
-        // Log spend
         await mpHistoryCollection.insertOne({
             user_id: uid,
             amount: cost,
@@ -1759,20 +1743,18 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 💸 PAYMENT API with IP verification, tax, daily limit
+// 💸 PAYMENT API – unchanged
 // ==========================================
 
-// Helper: Check daily payment limit
 async function canMakePayment(userId) {
     const today = new Date().toISOString().split('T')[0];
     const count = await paymentLimitCollection.countDocuments({
         user_id: userId,
         date: today
     });
-    return count < 1; // daily limit = 1
+    return count < 1;
 }
 
-// POST /api/payment/send
 app.post("/api/payment/send", async (req, res) => {
     try {
         const { senderId, receiverId, amount } = req.body;
@@ -1781,7 +1763,6 @@ app.post("/api/payment/send", async (req, res) => {
         const receiver = parseInt(receiverId);
         const amt = parseInt(amount);
 
-        // Basic validations
         if (!sender || !receiver || !amt) {
             return res.status(400).json({ success: false, error: "Missing fields." });
         }
@@ -1792,20 +1773,17 @@ app.post("/api/payment/send", async (req, res) => {
             return res.status(400).json({ success: false, error: "Minimum payment is 200 Mythopoints." });
         }
 
-        // Check daily limit for sender
         const canPay = await canMakePayment(sender);
         if (!canPay) {
             return res.status(400).json({ success: false, error: "Daily payment limit reached (1 per day)." });
         }
 
-        // Get sender and receiver details
         const senderDoc = await usersCollection.findOne({ user_id: sender });
         const receiverDoc = await usersCollection.findOne({ user_id: receiver });
         if (!senderDoc || !receiverDoc) {
             return res.status(404).json({ success: false, error: "User not found." });
         }
 
-        // Check IP verification (anti-multiple accounts)
         const senderIpRecord = await ipVerificationCollection.findOne({ userId: sender });
         const receiverIpRecord = await ipVerificationCollection.findOne({ userId: receiver });
         if (!senderIpRecord || !receiverIpRecord) {
@@ -1815,32 +1793,26 @@ app.post("/api/payment/send", async (req, res) => {
             return res.status(400).json({ success: false, error: "Same IP detected. Multiple accounts not allowed." });
         }
 
-        // Check balance (sender)
         if (senderDoc.mythopoints < amt) {
             return res.status(400).json({ success: false, error: "Insufficient balance." });
         }
 
-        // Calculate tax (15%) – receiver gets 85%
         const tax = Math.floor(amt * 0.15);
         const receiverAmount = amt - tax;
 
-        // Perform atomic transactions
         const session = client.startSession();
         try {
             await session.withTransaction(async () => {
-                // Deduct from sender
                 await usersCollection.updateOne(
                     { user_id: sender },
                     { $inc: { mythopoints: -amt } },
                     { session }
                 );
-                // Add to receiver
                 await usersCollection.updateOne(
                     { user_id: receiver },
                     { $inc: { mythopoints: receiverAmount } },
                     { session }
                 );
-                // Record payment limit
                 const today = new Date().toISOString().split('T')[0];
                 await paymentLimitCollection.insertOne({
                     user_id: sender,
@@ -1851,7 +1823,6 @@ app.post("/api/payment/send", async (req, res) => {
                     receiverAmount: receiverAmount,
                     timestamp: new Date()
                 }, { session });
-                // Log sender spend
                 await mpHistoryCollection.insertOne({
                     user_id: sender,
                     amount: amt,
@@ -1859,7 +1830,6 @@ app.post("/api/payment/send", async (req, res) => {
                     reason: `Payment to ${receiver}`,
                     date: new Date()
                 }, { session });
-                // Log receiver earn
                 await mpHistoryCollection.insertOne({
                     user_id: receiver,
                     amount: receiverAmount,
@@ -1867,9 +1837,8 @@ app.post("/api/payment/send", async (req, res) => {
                     reason: `Payment from ${sender}`,
                     date: new Date()
                 }, { session });
-                // Log tax (optional: log to system account)
                 await mpHistoryCollection.insertOne({
-                    user_id: 0, // system account
+                    user_id: 0,
                     amount: tax,
                     type: "TAX",
                     reason: `Tax on payment ${sender}->${receiver}`,
@@ -1892,7 +1861,6 @@ app.post("/api/payment/send", async (req, res) => {
     }
 });
 
-// GET /api/users/search?q=...
 app.get("/api/users/search", async (req, res) => {
     try {
         const { q } = req.query;
@@ -1902,7 +1870,6 @@ app.get("/api/users/search", async (req, res) => {
             $or: [
                 { username: { $regex: q, $options: 'i' } },
                 { first_name: { $regex: q, $options: 'i' } },
-                // also allow search by user_id if q is numeric
             ]
         };
         const numericQ = parseInt(q);
@@ -1929,28 +1896,26 @@ app.get("/api/users/search", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE (with AI floating button) – UPDATED WITH NEW TABS
+// MINI APP ROUTE – PREMIUM, CLEAN, 5-TAB DESIGN
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
     const userId = req.params.userId;
-    // Full Mini App HTML (as provided earlier) but we need to add new tabs: Store & Payment.
-    // We'll embed the updated HTML with additional tabs.
     res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Mytho Mini</title>
+  <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    /* ----- RESET & GLOBAL ----- */
+    /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
       background: #0a0014;
-      background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.2) 0%, transparent 60%);
+      background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.15) 0%, transparent 60%);
       color: #ffffff;
       min-height: 100vh;
       padding-bottom: 80px;
@@ -1961,7 +1926,7 @@ app.get("/mini/:userId", (req, res) => {
     ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
     ::-webkit-scrollbar-thumb { background: #d500f9; border-radius: 10px; }
 
-    /* ----- GLASS CARD ----- */
+    /* === GLASS CARD === */
     .glass {
       background: rgba(255,255,255,0.04);
       backdrop-filter: blur(20px);
@@ -1971,9 +1936,15 @@ app.get("/mini/:userId", (req, res) => {
       padding: 16px;
       margin: 12px 16px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 10px rgba(213,0,249,0.05);
-      transition: all 0.3s ease;
+    }
+    .glass-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      letter-spacing: -0.3px;
     }
 
+    /* === NAVBAR === */
     .navbar {
       position: sticky;
       top: 0;
@@ -1990,10 +1961,12 @@ app.get("/mini/:userId", (req, res) => {
       color: #fff;
     }
 
+    /* === TAB CONTENT === */
     .tab-content { display: none; animation: fadeIn 0.3s ease; }
     .tab-content.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
 
+    /* === TAB BAR (5 items) === */
     .tab-bar {
       position: fixed;
       bottom: 0;
@@ -2004,26 +1977,32 @@ app.get("/mini/:userId", (req, res) => {
       border-top: 0.5px solid rgba(255,255,255,0.1);
       display: flex;
       justify-content: space-around;
-      padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 20px)) 0;
+      padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 20px)) 0;
       z-index: 100;
-      overflow-x: auto;
     }
     .tab-btn {
       display: flex;
       flex-direction: column;
       align-items: center;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.4);
       font-size: 10px;
       font-weight: 500;
       transition: 0.2s;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
-      padding: 0 6px;
-      min-width: 56px;
+      min-width: 48px;
     }
-    .tab-btn svg { width: 26px; height: 26px; margin-bottom: 4px; fill: currentColor; }
+    .tab-btn svg {
+      width: 26px;
+      height: 26px;
+      margin-bottom: 3px;
+      fill: currentColor;
+      transition: 0.2s;
+    }
     .tab-btn.active { color: #ea80fc; }
+    .tab-btn.active svg { fill: #ea80fc; }
 
+    /* === WIDGETS === */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
     .widget {
       background: rgba(45,10,80,0.4);
@@ -2047,11 +2026,12 @@ app.get("/mini/:userId", (req, res) => {
     .w-bank { border: 0.5px solid rgba(48,209,88,0.3); background: rgba(48,209,88,0.05); }
     .w-bank .widget-value { color: #30d158; }
 
+    /* === PROFILE HEADER === */
     .profile-hdr {
       display: flex;
       align-items: center;
       gap: 16px;
-      margin-bottom: 24px;
+      margin: 16px 16px 8px;
     }
     .profile-pic {
       width: 70px;
@@ -2074,6 +2054,7 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 6px;
     }
 
+    /* === LIST CARD === */
     .list-card { background: rgba(45,10,80,0.4); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.08); overflow: hidden; }
     .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.05); }
     .list-item:last-child { border-bottom: none; }
@@ -2083,10 +2064,12 @@ app.get("/mini/:userId", (req, res) => {
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
+    /* === LOADING === */
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.2); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.5); padding: 30px 20px; font-size: 14px; }
 
+    /* === AI FAB === */
     .ai-fab {
       position: fixed;
       bottom: 100px;
@@ -2114,6 +2097,7 @@ app.get("/mini/:userId", (req, res) => {
       100% { box-shadow: 0 4px 40px rgba(213,0,249,0.9); }
     }
 
+    /* === AI CHAT OVERLAY === */
     .ai-chat-overlay {
       display: none;
       position: fixed;
@@ -2232,6 +2216,7 @@ app.get("/mini/:userId", (req, res) => {
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
     }
 
+    /* === LEADERBOARD === */
     .lb-item {
       display: flex;
       align-items: center;
@@ -2278,7 +2263,7 @@ app.get("/mini/:userId", (req, res) => {
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* Payment & Store specific */
+    /* === STORE & PAYMENT === */
     .store-item {
       display: flex;
       justify-content: space-between;
@@ -2317,15 +2302,38 @@ app.get("/mini/:userId", (req, res) => {
       cursor: pointer;
     }
     .user-result:active { background: rgba(255,255,255,0.05); }
+    .quick-action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin: 12px 16px;
+    }
+    .quick-action {
+      background: rgba(45,10,80,0.4);
+      backdrop-filter: blur(20px);
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .quick-action:active { transform: scale(0.95); }
+    .quick-action .icon { font-size: 28px; }
+    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 4px; }
+    .quick-action.bank { border-color: rgba(48,209,88,0.3); }
+    .quick-action.store { border-color: rgba(255,214,10,0.3); }
+    .quick-action.pay { border-color: rgba(10,132,255,0.3); }
   </style>
 </head>
 <body>
 
+  <!-- NAVBAR -->
   <div class="navbar" id="navTitle">Home</div>
 
-  <!-- TAB: HOME -->
+  <!-- ========== TAB: HOME ========== -->
   <div id="tab-home" class="tab-content active">
-    <div class="profile-hdr" style="margin: 16px 16px 8px;">
+    <div class="profile-hdr">
       <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
       <div class="profile-info">
         <h1 id="ui-name">Loading...</h1>
@@ -2354,6 +2362,22 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
+    <!-- Quick Actions -->
+    <div class="quick-action-grid">
+      <div class="quick-action bank" onclick="switchTab('bank')">
+        <div class="icon">🏦</div>
+        <div class="label">Bank</div>
+      </div>
+      <div class="quick-action store" onclick="switchTab('store')">
+        <div class="icon">🛍️</div>
+        <div class="label">Store</div>
+      </div>
+      <div class="quick-action pay" onclick="switchTab('pay')">
+        <div class="icon">💸</div>
+        <div class="label">Pay</div>
+      </div>
+    </div>
+
     <h3 style="font-size:18px; margin: 12px 16px 8px; font-weight:600;">Lifetime Stats</h3>
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget" style="padding:12px 16px;">
@@ -2367,7 +2391,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: BANK -->
+  <!-- ========== TAB: BANK ========== -->
   <div id="tab-bank" class="tab-content">
     <div class="glass w-bank" style="margin:16px;">
       <div class="widget-icon">📈</div>
@@ -2400,10 +2424,10 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: STORE -->
+  <!-- ========== TAB: STORE ========== -->
   <div id="tab-store" class="tab-content">
     <div class="glass" style="margin:16px;">
-      <h3 style="margin-bottom:12px;">🛍️ MythoStore</h3>
+      <div class="glass-title">🛍️ MythoStore</div>
       <div id="store-items">
         <div class="store-item">
           <span>🔑 5 Search Credits</span>
@@ -2437,10 +2461,10 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: PAYMENT -->
-  <div id="tab-payment" class="tab-content">
+  <!-- ========== TAB: PAY ========== -->
+  <div id="tab-pay" class="tab-content">
     <div class="glass" style="margin:16px;">
-      <h3 style="margin-bottom:12px;">💸 Send Mythopoints</h3>
+      <div class="glass-title">💸 Send Mythopoints</div>
       <p style="font-size:13px; color:rgba(255,255,255,0.6);">Min 200 pts | 15% tax | 1 payment/day</p>
       <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
       <div id="search-results"></div>
@@ -2453,33 +2477,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: HISTORY -->
-  <div id="tab-history" class="tab-content">
-    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Recent Transactions</div>
-    <div class="list-card" id="ui-history-list" style="margin:0 16px;">
-      <div class="spinner"></div>
-    </div>
-  </div>
-
-  <!-- TAB: LEADERBOARD -->
-  <div id="tab-leaderboard" class="tab-content">
-    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.5);">🏆 MythoPoints Leaderboard</div>
-    <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:rgba(213,0,249,0.2); color:#fff; font-weight:600;">All-Time</button>
-      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:rgba(255,255,255,0.7);">Weekly</button>
-      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:rgba(255,255,255,0.7);">Monthly</button>
-    </div>
-    <div id="lb-list" style="margin:12px 16px;">
-      <div class="spinner"></div>
-    </div>
-    <div style="display:flex; justify-content:center; gap:16px; padding:8px 16px;">
-      <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:#fff;">⬅️</button>
-      <span id="lb-page-info" style="color:rgba(255,255,255,0.5);">Page 1</span>
-      <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:#fff;">➡️</button>
-    </div>
-  </div>
-
-  <!-- TAB: PROFILE -->
+  <!-- ========== TAB: PROFILE (History + Leaderboard) ========== -->
   <div id="tab-profile" class="tab-content">
     <div class="glass" style="margin:16px;">
       <div class="profile-hdr" style="margin-bottom:16px;">
@@ -2502,9 +2500,31 @@ app.get("/mini/:userId", (req, res) => {
         <span id="profile-verified" style="color:#ff453a;">Unverified</span>
       </div>
     </div>
+
+    <!-- History -->
+    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Recent Transactions</div>
+    <div class="list-card" id="ui-history-list" style="margin:0 16px;">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div style="padding:16px 16px 8px; font-size:16px; font-weight:600;">🏆 Leaderboard</div>
+    <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:rgba(213,0,249,0.2); color:#fff; font-weight:600;">All-Time</button>
+      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:rgba(255,255,255,0.7);">Weekly</button>
+      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:rgba(255,255,255,0.7);">Monthly</button>
+    </div>
+    <div id="lb-list" style="margin:12px 16px;">
+      <div class="spinner"></div>
+    </div>
+    <div style="display:flex; justify-content:center; gap:16px; padding:8px 16px;">
+      <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:#fff;">⬅️</button>
+      <span id="lb-page-info" style="color:rgba(255,255,255,0.5);">Page 1</span>
+      <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:#fff;">➡️</button>
+    </div>
   </div>
 
-  <!-- TAB BAR -->
+  <!-- ========== TAB BAR ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
       <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
@@ -2518,17 +2538,9 @@ app.get("/mini/:userId", (req, res) => {
       <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
       <span>Store</span>
     </div>
-    <div class="tab-btn" data-tab="payment">
+    <div class="tab-btn" data-tab="pay">
       <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
       <span>Pay</span>
-    </div>
-    <div class="tab-btn" data-tab="history">
-      <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
-      <span>History</span>
-    </div>
-    <div class="tab-btn" data-tab="leaderboard">
-      <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-      <span>Leaderboard</span>
     </div>
     <div class="tab-btn" data-tab="profile">
       <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
@@ -2536,10 +2548,10 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- FLOATING AI BUTTON -->
+  <!-- ========== AI FAB ========== -->
   <button class="ai-fab" id="aiFab">AI</button>
 
-  <!-- AI CHAT OVERLAY -->
+  <!-- ========== AI CHAT OVERLAY ========== -->
   <div class="ai-chat-overlay" id="aiChatOverlay">
     <div class="ai-chat-panel">
       <div class="ai-chat-header">
@@ -2588,28 +2600,28 @@ app.get("/mini/:userId", (req, res) => {
       home: document.getElementById('tab-home'),
       bank: document.getElementById('tab-bank'),
       store: document.getElementById('tab-store'),
-      payment: document.getElementById('tab-payment'),
-      history: document.getElementById('tab-history'),
-      leaderboard: document.getElementById('tab-leaderboard'),
+      pay: document.getElementById('tab-pay'),
       profile: document.getElementById('tab-profile')
     };
     const navTitle = document.getElementById('navTitle');
 
+    function switchTab(tabId) {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      document.querySelector(\`.tab-btn[data-tab="\${tabId}"]\`).classList.add('active');
+      Object.keys(tabContents).forEach(key => {
+        tabContents[key].classList.toggle('active', key === tabId);
+      });
+      navTitle.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+      tg.HapticFeedback.selectionChanged();
+      if (tabId === 'bank') loadBankData();
+      if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); }
+      if (tabId === 'pay') loadPaymentStatus();
+    }
+    window.switchTab = switchTab;
+
     tabBtns.forEach(btn => {
       btn.addEventListener('click', function() {
-        tabBtns.forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        const tab = this.dataset.tab;
-        Object.keys(tabContents).forEach(key => {
-          tabContents[key].classList.toggle('active', key === tab);
-        });
-        navTitle.innerText = tab.charAt(0).toUpperCase() + tab.slice(1);
-        tg.HapticFeedback.selectionChanged();
-        if (tab === 'bank') loadBankData();
-        if (tab === 'leaderboard') loadLeaderboard();
-        if (tab === 'history') loadHistory();
-        if (tab === 'profile') loadProfile();
-        if (tab === 'payment') loadPaymentStatus();
+        switchTab(this.dataset.tab);
       });
     });
 
@@ -2642,7 +2654,6 @@ app.get("/mini/:userId", (req, res) => {
         document.getElementById('ui-credits').innerText = data.search.credits;
         document.getElementById('ui-life-earn').innerText = data.stats.lifetimeEarned.toLocaleString();
         document.getElementById('ui-life-spent').innerText = data.stats.lifetimeSpent.toLocaleString();
-        // Bank tab will be loaded when selected
       } catch (e) {
         console.error('Dashboard error:', e);
       }
@@ -2664,7 +2675,6 @@ app.get("/mini/:userId", (req, res) => {
           document.getElementById('ui-bank-loan').style.color = '#30d158';
           document.getElementById('ui-loan-status').innerText = 'Eligible for loan';
         }
-        // Set claim button
         const claimBtn = document.getElementById('bank-claim-btn');
         if (data.pendingInterest > 0) {
           claimBtn.style.display = 'block';
@@ -3061,9 +3071,8 @@ app.get("/mini/:userId", (req, res) => {
     // ─── INIT ───
     loadDashboard();
     if (document.getElementById('tab-bank').classList.contains('active')) loadBankData();
-    if (document.getElementById('tab-history').classList.contains('active')) loadHistory();
-    if (document.getElementById('tab-leaderboard').classList.contains('active')) loadLeaderboard();
-    if (document.getElementById('tab-payment').classList.contains('active')) loadPaymentStatus();
+    if (document.getElementById('tab-profile').classList.contains('active')) { loadHistory(); loadLeaderboard(); loadProfile(); }
+    if (document.getElementById('tab-pay').classList.contains('active')) loadPaymentStatus();
   </script>
 </body>
 </html>
