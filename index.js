@@ -2004,6 +2004,32 @@ app.get("/api/withdraw/history/:userId", async (req, res) => {
 });
 
 // ==========================================
+// NEW: SYNC PROFILE API
+// ==========================================
+app.post("/api/sync-profile", async (req, res) => {
+    try {
+        const { userId, photo_url } = req.body;
+        if (!userId || !photo_url) {
+            return res.status(400).json({ success: false, error: "Missing userId or photo_url" });
+        }
+        const uid = parseInt(userId);
+        if (isNaN(uid)) {
+            return res.status(400).json({ success: false, error: "Invalid userId" });
+        }
+
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $set: { photo_url: photo_url } },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Sync profile error:", error);
+        res.status(500).json({ success: false, error: "Failed to sync profile" });
+    }
+});
+
+// ==========================================
 // MINI APP ROUTE – PREMIUM FRONTEND (UPDATED)
 // ==========================================
 
@@ -3079,6 +3105,12 @@ app.get("/mini/:userId", (req, res) => {
       }
       if (tgUser.photo_url) {
         document.querySelectorAll('#ui-dp, #profile-dp').forEach(el => el.src = tgUser.photo_url);
+        // Silently sync photo URL to backend
+        fetch('/api/sync-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, photo_url: tgUser.photo_url })
+        }).catch(err => console.warn('Sync profile failed:', err));
       }
     }
 
@@ -3576,17 +3608,21 @@ app.get("/mini/:userId", (req, res) => {
           if (isSelf) rankClass += ' self';
           const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
           const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
-          // Avatar: use photo from Telegram if available? We can't store per-user photo in this simple list.
-          // We'll use initials with a color derived from user_id.
-          const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
-          const hue = (u.user_id * 137) % 360;
-          const bgColor = \`hsl(\${hue}, 70%, 40%)\`;
-          // Rank badge
+          // Avatar: use photo_url if available, else initials
+          let avatarHtml = '';
+          if (u.photo_url) {
+            avatarHtml = \`<img src="\${u.photo_url}" class="lb-avatar" style="object-fit: cover;" />\`;
+          } else {
+            const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
+            const hue = (u.user_id * 137) % 360;
+            const bgColor = \`hsl(\${hue}, 70%, 40%)\`;
+            avatarHtml = \`<div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>\`;
+          }
           const rankBadge = \`#\${rank}\`;
           html += \`
             <div class="lb-item \${rankClass}" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
               <div class="lb-avatar-wrap">
-                <div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>
+                \${avatarHtml}
                 <div class="rank-badge">\${rankBadge}</div>
               </div>
               <div class="lb-info">
@@ -3785,7 +3821,7 @@ app.get("/mini/:userId", (req, res) => {
 });
 
 // ==========================================
-// LEADERBOARD API (unchanged)
+// LEADERBOARD API (UPDATED: includes photo_url)
 // ==========================================
 app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
@@ -3836,7 +3872,8 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
                 name: finalName,
                 username: safeUsername,
                 points: u[pointField] || 0,
-                title: getRankTitle(u[pointField] || 0) 
+                title: getRankTitle(u[pointField] || 0),
+                photo_url: u.photo_url || null   // <-- added
             };
         });
 
