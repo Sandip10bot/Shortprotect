@@ -1,5 +1,5 @@
 // ============================================================
-// index.js – Full Express Server with Premium Mini App UI
+// index.js – Premium Frontend (No Emojis, All SVG, Enhanced UI)
 // ============================================================
 
 import express from "express";
@@ -114,11 +114,11 @@ const THEME_CSS = `
 // RANK TITLE HELPER
 // ==========================================
 function getRankTitle(points) {
-    if (points < 100) return "🌱 Novice";
-    if (points < 500) return "⚔️ Warrior";
-    if (points < 1500) return "🛡️ Knight";
-    if (points < 3000) return "🐉 Dragon Slayer";
-    return "👑 Mythic Lord";
+    if (points < 100) return "Novice";
+    if (points < 500) return "Warrior";
+    if (points < 1500) return "Knight";
+    if (points < 3000) return "Dragon Slayer";
+    return "Mythic Lord";
 }
 
 // ========================
@@ -135,11 +135,11 @@ function renderBypassError(res) {
       </head>
       <body>
           <div class="container">
-              <div style="font-size:60px; margin-bottom:10px;">🚫🤖</div>
-              <h2 class="error-title">Bypass Bot Detected!</h2>
-              <p>You attempted to use a bypass method or external script to skip verification.</p>
+              <div style="font-size:60px; margin-bottom:10px;">🚫</div>
+              <h2 class="error-title">Access Denied</h2>
+              <p>Unauthorized request detected.</p>
               <div class="manual-box" style="display:block; text-align:center;">
-                  <p style="color:white; margin:0;">Please click the original <b>shortxlinks</b> link in Telegram to proceed securely.</p>
+                  <p style="color:white; margin:0;">Please use the official link from the bot.</p>
               </div>
           </div>
       </body>
@@ -283,7 +283,7 @@ function renderSecureFinalPage(res, targetUrl) {
       </head>
       <body>
       <div class="container">
-          <h2>🎉 Verification Complete!</h2>
+          <h2>Verification Complete!</h2>
           <p>Your file is ready. Click below to securely open it in Telegram.</p>
           <button id="open-btn" class="btn">Open in Telegram</button>
       </div>
@@ -347,7 +347,7 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
         ${THEME_CSS}
         <div class="container">
           <div class="card" style="border-color: #ff4757; box-shadow: 0 8px 32px 0 rgba(255, 71, 87, 0.37);">
-            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">❌ Access Denied</h2>
+            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">Access Denied</h2>
             <p>Multiple account usage detected from this network connection.</p>
             <p style="font-size: 13px; color: #ccc; margin-top: 15px;">Your Activity Has Been Logged.</p>
             <p style="font-size: 11px; color: #888;">Network Node: ${userIp}</p>
@@ -372,7 +372,7 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
       ${THEME_CSS}
       <div class="container">
         <div class="card" style="border-color: #00ffcc; box-shadow: 0 8px 32px 0 rgba(0, 255, 204, 0.2);">
-          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">✅ Verified Successfully</h2>
+          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">Verified Successfully</h2>
           <p>Your device integrity check passed.</p>
           <p style="color: #aaa; font-size: 14px;">You can now close this Mini App and return to the bot to continue.</p>
         </div>
@@ -563,12 +563,12 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 <h3 id="user-name">Loading...</h3>
                 <p id="user-username-id">ID: ...</p>
                 <div class="stats-badge" id="stats-badge">
-                    💠 <span id="user-points">${currentPoints}</span> MP
+                    <span id="user-points">${currentPoints}</span> MP
                 </div>
             </div>
         </div>
 
-        <div id="floating-reward" class="floating-points">+${reward} MythoPoints!</div>
+        <div id="floating-reward" class="floating-points">+${reward}</div>
 
         <div class="scratch-wrapper">
             <div class="scratch-inner" id="scratch-container">
@@ -909,7 +909,7 @@ app.get("/generate/:userId", async (req, res) => {
   res.send(`
     <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
     <div class="container">
-      <h2>✅ Token generated!</h2>
+      <h2>Token generated!</h2>
       <p>Copy this link and shorten it with shortxlinks:</p>
       <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; word-wrap:break-word; color:#ea80fc;">
         <code>${protectedLink}</code>
@@ -1672,15 +1672,15 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
                 if (outcome === "jackpot") {
                     await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: 300 } });
                     await mpHistoryCollection.insertOne({ user_id: uid, amount: 300, type: "EARNED", reason: "Mystery Jackpot", date: new Date() });
-                    result = "🎰 JACKPOT! You won 300 Mythopoints!";
+                    result = "Jackpot! You won 300 Mythopoints!";
                 } else if (outcome === "credits") {
                     await searchLimitCollection.updateOne({ user_id: uid }, { $inc: { credits: 10 } }, { upsert: true });
-                    result = "🔑 You found 10 Search Credits!";
+                    result = "You found 10 Search Credits!";
                 } else if (outcome === "coupon") {
                     const code = await generateCoupon(uid, 15);
-                    result = `🎟️ You found a 15% OFF coupon! Code: ${code}`;
+                    result = `You found a 15% OFF coupon! Code: ${code}`;
                 } else {
-                    result = "💨 OOF! The box was empty.";
+                    result = "The box was empty.";
                 }
                 return { message: result };
             };
@@ -2004,7 +2004,7 @@ app.get("/api/withdraw/history/:userId", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM ADDICTIVE UI
+// MINI APP ROUTE – PREMIUM FRONTEND (No Emojis, SVG Icons, Mythopoints Label)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2034,19 +2034,19 @@ app.get("/mini/:userId", (req, res) => {
       -webkit-touch-callout: none;
     }
     ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
     ::-webkit-scrollbar-thumb { background: #d500f9; border-radius: 10px; }
 
     /* === GLASS CARD === */
     .glass {
-      background: rgba(255,255,255,0.05);
+      background: rgba(255,255,255,0.04);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
-      border: 0.5px solid rgba(255,255,255,0.08);
+      border: 0.5px solid rgba(255,255,255,0.07);
       border-radius: 24px;
       padding: 16px;
       margin: 12px 16px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 0 20px rgba(213,0,249,0.05);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 0 20px rgba(213,0,249,0.04);
       transition: all 0.3s ease;
     }
     .glass-title {
@@ -2056,7 +2056,12 @@ app.get("/mini/:userId", (req, res) => {
       letter-spacing: -0.3px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+    }
+    .glass-title svg {
+      width: 24px;
+      height: 24px;
+      fill: #ea80fc;
     }
 
     /* === NAVBAR === */
@@ -2064,10 +2069,10 @@ app.get("/mini/:userId", (req, res) => {
       position: sticky;
       top: 0;
       z-index: 50;
-      background: rgba(10,0,20,0.7);
+      background: rgba(10,0,20,0.75);
       backdrop-filter: blur(30px);
       -webkit-backdrop-filter: blur(30px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid rgba(255,255,255,0.06);
       padding: 16px 20px;
       text-align: center;
       font-weight: 600;
@@ -2077,10 +2082,10 @@ app.get("/mini/:userId", (req, res) => {
     }
 
     /* === TAB CONTENT === */
-    .tab-content { display: none; animation: fadeSlide 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .tab-content { display: none; animation: fadeSlide 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .tab-content.active { display: block; }
     @keyframes fadeSlide {
-      0% { opacity: 0; transform: translateY(12px); }
+      0% { opacity: 0; transform: translateY(16px); }
       100% { opacity: 1; transform: translateY(0); }
     }
 
@@ -2089,10 +2094,10 @@ app.get("/mini/:userId", (req, res) => {
       position: fixed;
       bottom: 0;
       width: 100%;
-      background: rgba(10,0,20,0.8);
+      background: rgba(10,0,20,0.85);
       backdrop-filter: blur(30px);
       -webkit-backdrop-filter: blur(30px);
-      border-top: 0.5px solid rgba(255,255,255,0.08);
+      border-top: 0.5px solid rgba(255,255,255,0.06);
       display: flex;
       justify-content: space-around;
       padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 20px)) 0;
@@ -2102,10 +2107,10 @@ app.get("/mini/:userId", (req, res) => {
       display: flex;
       flex-direction: column;
       align-items: center;
-      color: rgba(255,255,255,0.35);
+      color: rgba(255,255,255,0.3);
       font-size: 10px;
       font-weight: 500;
-      transition: all 0.2s;
+      transition: all 0.25s;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       min-width: 48px;
@@ -2114,12 +2119,12 @@ app.get("/mini/:userId", (req, res) => {
     .tab-btn svg {
       width: 28px;
       height: 28px;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
       fill: currentColor;
       transition: all 0.3s;
     }
     .tab-btn.active { color: #ea80fc; }
-    .tab-btn.active svg { fill: #ea80fc; filter: drop-shadow(0 0 8px rgba(234,128,252,0.4)); }
+    .tab-btn.active svg { fill: #ea80fc; filter: drop-shadow(0 0 10px rgba(234,128,252,0.4)); }
     .tab-btn::after {
       content: '';
       position: absolute;
@@ -2130,55 +2135,57 @@ app.get("/mini/:userId", (req, res) => {
       border-radius: 2px;
       transition: width 0.3s;
     }
-    .tab-btn.active::after { width: 60%; }
+    .tab-btn.active::after { width: 70%; }
 
     /* === WIDGETS === */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
     .widget {
-      background: rgba(45,10,80,0.4);
-      border: 0.5px solid rgba(255,255,255,0.06);
+      background: rgba(45,10,80,0.35);
+      border: 0.5px solid rgba(255,255,255,0.05);
       border-radius: 22px;
       padding: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4), inset 0 0 15px rgba(213,0,249,0.04);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3), inset 0 0 15px rgba(213,0,249,0.03);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       display: flex;
       flex-direction: column;
       justify-content: center;
       transition: transform 0.2s;
     }
     .widget-full { grid-column: span 2; }
-    .widget-icon { font-size: 24px; margin-bottom: 8px; }
-    .widget-title { font-size: 12px; color: rgba(255,255,255,0.5); font-weight: 500; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
-    .widget-value { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; display: flex; align-items: center; gap: 6px; }
+    .widget-icon { width: 28px; height: 28px; fill: rgba(255,255,255,0.5); margin-bottom: 8px; }
+    .widget-title { 
+      font-size: 11px; 
+      color: rgba(255,255,255,0.45); 
+      font-weight: 500; 
+      text-transform: uppercase; 
+      letter-spacing: 0.8px; 
+      margin-bottom: 4px; 
+    }
+    .widget-value { 
+      font-size: 26px; 
+      font-weight: 700; 
+      letter-spacing: -0.5px; 
+      display: flex; 
+      align-items: center; 
+      gap: 6px; 
+      position: relative;
+    }
+    .widget-value .mytho-label {
+      position: absolute;
+      bottom: -8px;
+      right: 0;
+      font-size: 10px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.15);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
     .widget-sub { font-size: 12px; color: #ea80fc; margin-top: 4px; font-weight: 500; }
-    .w-premium { border: 0.5px solid rgba(255,214,10,0.25); background: rgba(255,214,10,0.04); }
+    .w-premium { border: 0.5px solid rgba(255,214,10,0.2); background: rgba(255,214,10,0.04); }
     .w-premium .widget-value { color: #ffd60a; }
-    .w-bank { border: 0.5px solid rgba(48,209,88,0.25); background: rgba(48,209,88,0.04); }
+    .w-bank { border: 0.5px solid rgba(48,209,88,0.2); background: rgba(48,209,88,0.04); }
     .w-bank .widget-value { color: #30d158; }
-
-    /* === COIN ICON === */
-    .coin-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 24px;
-      height: 24px;
-      background: radial-gradient(circle at 30% 30%, #ffd700, #b8860b);
-      border-radius: 50%;
-      box-shadow: 0 0 12px rgba(255,215,0,0.5);
-      font-size: 12px;
-      font-weight: 800;
-      color: #0a0014;
-      margin-right: 4px;
-      flex-shrink: 0;
-    }
-    .coin-icon-small {
-      width: 18px;
-      height: 18px;
-      font-size: 9px;
-      box-shadow: 0 0 8px rgba(255,215,0,0.4);
-    }
 
     /* === PROFILE HEADER === */
     .profile-hdr {
@@ -2194,36 +2201,49 @@ app.get("/mini/:userId", (req, res) => {
       border: 2px solid #d500f9;
       object-fit: cover;
       background: #1c0a2b;
-      box-shadow: 0 0 20px rgba(213,0,249,0.3);
+      box-shadow: 0 0 20px rgba(213,0,249,0.25);
     }
     .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
     .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: #ea80fc; font-weight: 500; }
     .badge {
       display: inline-block;
-      padding: 4px 10px;
-      background: rgba(213,0,249,0.15);
-      border-radius: 12px;
+      padding: 4px 12px;
+      background: rgba(213,0,249,0.12);
+      border-radius: 30px;
       font-size: 11px;
       font-weight: 600;
       color: #fff;
       margin-top: 6px;
-      border: 0.5px solid rgba(213,0,249,0.2);
+      border: 0.5px solid rgba(213,0,249,0.15);
     }
 
     /* === LIST CARD === */
-    .list-card { background: rgba(45,10,80,0.3); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.06); overflow: hidden; }
-    .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.04); }
+    .list-card { 
+      background: rgba(45,10,80,0.25); 
+      border-radius: 20px; 
+      border: 0.5px solid rgba(255,255,255,0.04); 
+      overflow: hidden; 
+    }
+    .list-item { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding: 14px 16px; 
+      border-bottom: 0.5px solid rgba(255,255,255,0.04); 
+      transition: background 0.15s;
+    }
     .list-item:last-child { border-bottom: none; }
+    .item-left { display: flex; flex-direction: column; gap: 2px; }
     .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
-    .item-left span { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px; display: inline-block; }
+    .item-left span { font-size: 12px; color: rgba(255,255,255,0.4); }
     .item-right { font-weight: 600; font-size: 16px; }
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
     /* === LOADING === */
-    .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.15); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.12); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .empty { text-align: center; color: rgba(255,255,255,0.4); padding: 30px 20px; font-size: 14px; }
+    .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
 
     /* === AI FAB === */
     .ai-fab {
@@ -2235,7 +2255,7 @@ app.get("/mini/:userId", (req, res) => {
       border-radius: 50%;
       background: linear-gradient(135deg, #d500f9, #651fff);
       border: none;
-      box-shadow: 0 4px 25px rgba(213,0,249,0.6);
+      box-shadow: 0 4px 30px rgba(213,0,249,0.5);
       color: white;
       font-size: 20px;
       font-weight: 800;
@@ -2249,8 +2269,8 @@ app.get("/mini/:userId", (req, res) => {
     }
     .ai-fab:active { transform: scale(0.9); }
     @keyframes pulseGlow {
-      0% { box-shadow: 0 4px 25px rgba(213,0,249,0.4); }
-      100% { box-shadow: 0 4px 45px rgba(213,0,249,0.9); }
+      0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
+      100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
     }
 
     /* === AI CHAT OVERLAY === */
@@ -2276,13 +2296,13 @@ app.get("/mini/:userId", (req, res) => {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.04);
     }
     .ai-chat-header {
       padding: 16px 20px;
       background: rgba(10,0,20,0.8);
       backdrop-filter: blur(10px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      border-bottom: 0.5px solid rgba(255,255,255,0.06);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -2321,7 +2341,7 @@ app.get("/mini/:userId", (req, res) => {
     }
     .msg.bot {
       align-self: flex-start;
-      background: rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.06);
       color: #eee;
       border-bottom-left-radius: 4px;
     }
@@ -2329,7 +2349,7 @@ app.get("/mini/:userId", (req, res) => {
     .ai-chat-footer {
       padding: 12px 16px;
       background: rgba(10,0,20,0.8);
-      border-top: 0.5px solid rgba(255,255,255,0.05);
+      border-top: 0.5px solid rgba(255,255,255,0.04);
       display: flex;
       gap: 8px;
       flex-shrink: 0;
@@ -2338,13 +2358,13 @@ app.get("/mini/:userId", (req, res) => {
       flex: 1;
       padding: 10px 14px;
       border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
       color: #fff;
       font-size: 15px;
       outline: none;
     }
-    .ai-chat-footer input::placeholder { color: rgba(255,255,255,0.25); }
+    .ai-chat-footer input::placeholder { color: rgba(255,255,255,0.2); }
     .ai-chat-footer button {
       padding: 10px 18px;
       border-radius: 20px;
@@ -2357,13 +2377,13 @@ app.get("/mini/:userId", (req, res) => {
     }
     .ai-chat-footer button:active { transform: scale(0.95); }
     .ai-clear-btn {
-      background: rgba(255,69,58,0.2) !important;
+      background: rgba(255,69,58,0.15) !important;
       color: #ff453a !important;
-      border: 1px solid rgba(255,69,58,0.2) !important;
+      border: 1px solid rgba(255,69,58,0.15) !important;
     }
     .typing-indicator {
       align-self: flex-start;
-      color: rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.25);
       font-size: 14px;
       padding: 4px 12px;
     }
@@ -2372,7 +2392,7 @@ app.get("/mini/:userId", (req, res) => {
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
     }
 
-    /* === LEADERBOARD PREMIUM === */
+    /* === LEADERBOARD === */
     .lb-item {
       display: flex;
       align-items: center;
@@ -2390,11 +2410,16 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       justify-content: center;
       font-weight: 700;
-      font-size: 14px;
+      font-size: 13px;
       background: rgba(255,255,255,0.04);
       color: #aaa;
       flex-shrink: 0;
       margin-right: 14px;
+      position: relative;
+    }
+    .lb-rank .medal {
+      font-size: 18px;
+      line-height: 1;
     }
     .lb-rank.gold { background: linear-gradient(135deg, #ffd700, #b8860b); color: #fff; box-shadow: 0 0 15px rgba(255,215,0,0.3); }
     .lb-rank.silver { background: linear-gradient(135deg, #c0c0c0, #808080); color: #fff; box-shadow: 0 0 15px rgba(192,192,192,0.2); }
@@ -2404,15 +2429,15 @@ app.get("/mini/:userId", (req, res) => {
     .lb-info { flex: 1; }
     .lb-name { font-weight: 600; font-size: 16px; }
     .lb-name.self-highlight { color: #ea80fc; }
-    .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.2); padding: 1px 8px; border-radius: 10px; margin-left: 8px; color: #ea80fc; }
+    .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.15); padding: 2px 8px; border-radius: 30px; margin-left: 8px; color: #ea80fc; }
     .lb-pts { font-weight: 600; color: #ea80fc; font-size: 15px; }
 
     .lb-self-row {
       margin-top: 12px;
       padding: 12px 16px;
-      background: rgba(213,0,249,0.06);
+      background: rgba(213,0,249,0.05);
       border-radius: 16px;
-      border: 1px solid rgba(213,0,249,0.15);
+      border: 1px solid rgba(213,0,249,0.12);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -2426,15 +2451,15 @@ app.get("/mini/:userId", (req, res) => {
       width: 100%;
       padding: 12px 16px;
       border-radius: 30px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
       color: #fff;
       font-size: 16px;
       margin-bottom: 16px;
       transition: border 0.3s;
     }
     .search-user-input:focus { border-color: #d500f9; outline: none; }
-    .search-user-input::placeholder { color: rgba(255,255,255,0.25); }
+    .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
     .user-result {
       display: flex;
       justify-content: space-between;
@@ -2444,7 +2469,7 @@ app.get("/mini/:userId", (req, res) => {
       cursor: pointer;
       transition: background 0.15s;
     }
-    .user-result:active { background: rgba(255,255,255,0.03); }
+    .user-result:active { background: rgba(255,255,255,0.02); }
     .quick-action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -2452,9 +2477,9 @@ app.get("/mini/:userId", (req, res) => {
       margin: 12px 16px;
     }
     .quick-action {
-      background: rgba(45,10,80,0.35);
+      background: rgba(45,10,80,0.3);
       backdrop-filter: blur(12px);
-      border: 0.5px solid rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.04);
       border-radius: 16px;
       padding: 12px;
       text-align: center;
@@ -2463,10 +2488,10 @@ app.get("/mini/:userId", (req, res) => {
     }
     .quick-action:active { transform: scale(0.94); }
     .quick-action .icon { font-size: 28px; }
-    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 4px; }
-    .quick-action.bank { border-color: rgba(48,209,88,0.2); }
-    .quick-action.store { border-color: rgba(255,214,10,0.2); }
-    .quick-action.pay { border-color: rgba(10,132,255,0.2); }
+    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+    .quick-action.bank { border-color: rgba(48,209,88,0.15); }
+    .quick-action.store { border-color: rgba(255,214,10,0.15); }
+    .quick-action.pay { border-color: rgba(10,132,255,0.15); }
 
     /* === STORE === */
     .store-item {
@@ -2489,20 +2514,21 @@ app.get("/mini/:userId", (req, res) => {
     }
     .store-item button:active { transform: scale(0.92); }
 
-    /* === RATING STARS === */
+    /* === RATING STARS (SVG based) === */
     .star-rating {
       display: flex;
-      gap: 8px;
+      gap: 10px;
       justify-content: center;
       margin: 12px 0;
     }
     .star {
-      font-size: 34px;
-      color: rgba(255,255,255,0.15);
+      width: 32px;
+      height: 32px;
       cursor: pointer;
       transition: all 0.2s;
+      fill: rgba(255,255,255,0.1);
     }
-    .star.active { color: #ffd60a; text-shadow: 0 0 20px rgba(255,214,10,0.4); }
+    .star.active { fill: #ffd60a; filter: drop-shadow(0 0 10px rgba(255,214,10,0.5)); }
     .star:active { transform: scale(1.2); }
 
     /* === WITHDRAW === */
@@ -2510,8 +2536,8 @@ app.get("/mini/:userId", (req, res) => {
       width: 100%;
       padding: 12px 16px;
       border-radius: 30px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
       color: #fff;
       font-size: 16px;
       margin-bottom: 12px;
@@ -2535,18 +2561,35 @@ app.get("/mini/:userId", (req, res) => {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(255,215,0,0.08);
+      background: rgba(255,215,0,0.06);
       padding: 4px 12px 4px 8px;
       border-radius: 30px;
-      border: 0.5px solid rgba(255,215,0,0.2);
+      border: 0.5px solid rgba(255,215,0,0.12);
     }
     .streak-ring .flame {
       font-size: 18px;
       animation: flicker 1.5s infinite alternate;
     }
     @keyframes flicker {
-      0% { opacity: 0.8; transform: scale(0.95); }
+      0% { opacity: 0.7; transform: scale(0.95); }
       100% { opacity: 1; transform: scale(1.05); }
+    }
+
+    /* === Mythopoints label behind numbers === */
+    .mytho-label {
+      position: absolute;
+      bottom: -6px;
+      right: 0;
+      font-size: 10px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.12);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .balance-container {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
     }
   </style>
 </head>
@@ -2569,9 +2612,9 @@ app.get("/mini/:userId", (req, res) => {
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget widget-full">
         <div class="widget-title">Wallet Balance</div>
-        <div class="widget-value" style="font-size:36px; color:#ea80fc;">
-          <span class="coin-icon">M</span>
+        <div class="widget-value" style="font-size:36px; color:#ea80fc; position:relative;">
           <span id="ui-pts">0</span>
+          <span class="mytho-label">Mythopoints</span>
         </div>
         <div class="widget-sub" id="ui-streak">
           <span class="streak-ring">
@@ -2581,15 +2624,17 @@ app.get("/mini/:userId", (req, res) => {
         </div>
       </div>
       <div class="widget w-premium">
-        <div class="widget-icon">💎</div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
+        </div>
         <div class="widget-title">Premium</div>
         <div class="widget-value" id="ui-prem-status">Free</div>
         <div class="widget-sub" id="ui-prem-days">Upgrade</div>
       </div>
       <div class="widget">
-        <div class="widget-icon">🔍</div>
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="#0a84ff"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
         <div class="widget-title">Search Credits</div>
-        <div class="widget-value"><span id="ui-credits" style="color:#0a84ff;">0</span><span style="font-size:16px; color:rgba(255,255,255,0.3)">/5</span></div>
+        <div class="widget-value"><span id="ui-credits" style="color:#0a84ff;">0</span><span style="font-size:16px; color:rgba(255,255,255,0.2)">/5</span></div>
         <div class="widget-sub">Auto-Refill</div>
       </div>
     </div>
@@ -2614,11 +2659,17 @@ app.get("/mini/:userId", (req, res) => {
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget" style="padding:12px 16px;">
         <div class="widget-title">Total Earned</div>
-        <div class="widget-value" style="font-size:20px; color:#30d158;" id="ui-life-earn">0</div>
+        <div class="widget-value" style="font-size:20px; color:#30d158; position:relative;">
+          <span id="ui-life-earn">0</span>
+          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+        </div>
       </div>
       <div class="widget" style="padding:12px 16px;">
         <div class="widget-title">Total Spent</div>
-        <div class="widget-value" style="font-size:20px; color:#ff453a;" id="ui-life-spent">0</div>
+        <div class="widget-value" style="font-size:20px; color:#ff453a; position:relative;">
+          <span id="ui-life-spent">0</span>
+          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+        </div>
       </div>
     </div>
   </div>
@@ -2626,15 +2677,23 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: BANK (includes Withdraw) ========== -->
   <div id="tab-bank" class="tab-content">
     <div class="glass w-bank">
-      <div class="widget-icon">📈</div>
-      <div class="widget-title">MythoFund Vault</div>
-      <div class="widget-value" style="color:#30d158;" id="ui-bank-invest">0 pts</div>
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M11.5 1L2 6v2h19V6l-9.5-5zm0 2.5L18 6H5l6.5-2.5zM2 10v2h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v-2H2z"/></svg>
+        MythoFund Vault
+      </div>
+      <div class="widget-value" style="color:#30d158; position:relative;">
+        <span id="ui-bank-invest">0 pts</span>
+        <span class="mytho-label">Invested</span>
+      </div>
       <div class="widget-sub">Active Investment</div>
     </div>
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget">
         <div class="widget-title">Pending Yield</div>
-        <div class="widget-value" style="color:#ffd60a;" id="ui-bank-yield">+0</div>
+        <div class="widget-value" style="color:#ffd60a; position:relative;">
+          <span id="ui-bank-yield">+0</span>
+          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+        </div>
         <div class="widget-sub" id="bank-claim-btn" style="color:#ea80fc; cursor:pointer;">Claim</div>
       </div>
       <div class="widget">
@@ -2645,20 +2704,23 @@ app.get("/mini/:userId", (req, res) => {
     </div>
     <div style="padding:0 16px;">
       <div style="display:flex; gap:8px; margin-top:8px;">
-        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:10px; border-radius:30px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.03); color:#fff;">
+        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:10px; border-radius:30px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff;">
         <button id="invest-btn" style="padding:10px 20px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Invest</button>
-        <button id="withdraw-btn" style="padding:10px 20px; border-radius:30px; border:none; background:rgba(255,69,58,0.25); color:#ff453a; font-weight:600;">Withdraw</button>
+        <button id="withdraw-btn" style="padding:10px 20px; border-radius:30px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600;">Withdraw</button>
       </div>
       <div style="margin-top:12px; display:flex; gap:8px;">
         <button id="loan-apply-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Apply Loan (100 pts)</button>
-        <button id="loan-repay-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:rgba(255,69,58,0.25); color:#ff453a; font-weight:600;">Repay Loan</button>
+        <button id="loan-repay-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600;">Repay Loan</button>
       </div>
     </div>
 
     <!-- Withdraw Section -->
     <div class="glass" style="margin-top:20px;">
-      <div class="glass-title">💰 Withdraw to Real Money</div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.5);">10,000 pts = ₹1 | Min ₹10</p>
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        Withdraw to Real Money
+      </div>
+      <p style="font-size:13px; color:rgba(255,255,255,0.4);">10,000 pts = ₹1 | Min ₹10</p>
       <input type="number" id="withdraw-amount" class="withdraw-input" placeholder="Amount in INR (e.g., 50)" />
       <input type="text" id="withdraw-method" class="withdraw-input" placeholder="Payment Method (e.g., UPI, Bank)" />
       <button id="withdraw-request-btn" class="withdraw-btn">Request Withdraw</button>
@@ -2669,7 +2731,10 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: STORE ========== -->
   <div id="tab-store" class="tab-content">
     <div class="glass">
-      <div class="glass-title">🛍️ MythoStore</div>
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
+        MythoStore
+      </div>
       <div id="store-items">
         <div class="store-item">
           <span>🔑 5 Search Credits</span>
@@ -2706,14 +2771,17 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: PAY ========== -->
   <div id="tab-pay" class="tab-content">
     <div class="glass">
-      <div class="glass-title">💸 Send Mythopoints</div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.5);">Min 200 pts | 15% tax | 1 payment/day</p>
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        Send Mythopoints
+      </div>
+      <p style="font-size:13px; color:rgba(255,255,255,0.4);">Min 200 pts | 15% tax | 1 payment/day</p>
       <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
       <div id="search-results"></div>
       <div id="selected-user" style="display:none; margin:12px 0;">
         <p>Send to: <span id="selected-name"></span> (ID: <span id="selected-id"></span>)</p>
       </div>
-      <input type="number" id="payment-amount" placeholder="Amount" style="width:100%; padding:12px; border-radius:30px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.03); color:#fff; margin-bottom:12px;" />
+      <input type="number" id="payment-amount" placeholder="Amount" style="width:100%; padding:12px; border-radius:30px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff; margin-bottom:12px;" />
       <button id="send-payment-btn" style="width:100%; padding:14px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Send Payment</button>
       <div id="payment-status" style="margin-top:12px; text-align:center;"></div>
     </div>
@@ -2729,11 +2797,11 @@ app.get("/mini/:userId", (req, res) => {
           <p id="profile-id">ID: ${userId}</p>
         </div>
       </div>
-      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.05);">
+      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
         <span>Mythopoints</span>
         <span id="profile-pts" style="color:#ea80fc;">0</span>
       </div>
-      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.05);">
+      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
         <span>Streak</span>
         <span id="profile-streak">0</span>
       </div>
@@ -2745,21 +2813,24 @@ app.get("/mini/:userId", (req, res) => {
 
     <!-- Rating Section -->
     <div class="glass">
-      <div class="glass-title">⭐ Rate MythoBot</div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.5);">Earn 10 MythoPoints for rating!</p>
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        Rate MythoBot
+      </div>
+      <p style="font-size:13px; color:rgba(255,255,255,0.4);">Earn 10 MythoPoints for rating!</p>
       <div id="rating-status"></div>
       <div class="star-rating" id="star-container">
-        <span class="star" data-value="1">☆</span>
-        <span class="star" data-value="2">☆</span>
-        <span class="star" data-value="3">☆</span>
-        <span class="star" data-value="4">☆</span>
-        <span class="star" data-value="5">☆</span>
+        <svg class="star" data-value="1" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="2" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="3" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="4" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="5" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
       </div>
       <div id="rating-message" style="text-align:center; font-size:14px; margin-top:8px;"></div>
     </div>
 
     <!-- History -->
-    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.4); text-transform:uppercase;">Recent Transactions</div>
+    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.3); text-transform:uppercase;">Recent Transactions</div>
     <div class="list-card" id="ui-history-list" style="margin:0 16px;">
       <div class="spinner"></div>
     </div>
@@ -2767,21 +2838,21 @@ app.get("/mini/:userId", (req, res) => {
     <!-- Leaderboard -->
     <div style="padding:16px 16px 8px; font-size:16px; font-weight:600;">🏆 Leaderboard</div>
     <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.08); background:rgba(213,0,249,0.12); color:#fff; font-weight:600;">All-Time</button>
-      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.5);">Weekly</button>
-      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.5);">Monthly</button>
+      <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:rgba(213,0,249,0.1); color:#fff; font-weight:600;">All-Time</button>
+      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4);">Weekly</button>
+      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4);">Monthly</button>
     </div>
     <div id="lb-list" style="margin:12px 16px;">
       <div class="spinner"></div>
     </div>
     <div style="display:flex; justify-content:center; gap:16px; padding:8px 16px;">
       <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">⬅️</button>
-      <span id="lb-page-info" style="color:rgba(255,255,255,0.4);">Page 1</span>
+      <span id="lb-page-info" style="color:rgba(255,255,255,0.3);">Page 1</span>
       <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">➡️</button>
     </div>
   </div>
 
-  <!-- ========== TAB BAR ========== -->
+  <!-- ========== TAB BAR (SVG Icons, no emojis) ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
@@ -2895,11 +2966,11 @@ app.get("/mini/:userId", (req, res) => {
         const badge = document.getElementById('ui-verified');
         if (data.profile.is_verified) {
           badge.innerText = '✓ Secured Node';
-          badge.style.background = 'rgba(48,209,88,0.15)';
+          badge.style.background = 'rgba(48,209,88,0.12)';
           badge.style.color = '#30d158';
         } else {
           badge.innerText = '! Unverified';
-          badge.style.background = 'rgba(255,69,58,0.15)';
+          badge.style.background = 'rgba(255,69,58,0.12)';
           badge.style.color = '#ff453a';
         }
         if (data.premium.active) {
@@ -3037,7 +3108,7 @@ app.get("/mini/:userId", (req, res) => {
         const res = await fetch('/api/withdraw/history/' + userId);
         const data = await res.json();
         if (data.success && data.requests.length) {
-          let html = '<div style="font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:8px;">Recent Withdrawals</div>';
+          let html = '<div style="font-size:13px; color:rgba(255,255,255,0.3); margin-bottom:8px;">Recent Withdrawals</div>';
           data.requests.forEach(w => {
             const statusColor = w.status === 'Pending' ? '#ffd60a' : (w.status === 'Paid' ? '#30d158' : '#ff453a');
             html += \`
@@ -3117,7 +3188,7 @@ app.get("/mini/:userId", (req, res) => {
             html += \`
               <div class="user-result" onclick="selectUser(\${u.id}, '\${u.name}')">
                 <span>\${u.name} \${u.username ? '@' + u.username : ''}</span>
-                <span style="color:rgba(255,255,255,0.4);">\${u.points} pts</span>
+                <span style="color:rgba(255,255,255,0.3);">\${u.points} pts</span>
               </div>
             \`;
           });
@@ -3229,17 +3300,17 @@ app.get("/mini/:userId", (req, res) => {
         data.users.forEach((u, idx) => {
           const rank = (data.page - 1) * 10 + idx + 1;
           let rankClass = 'lb-rank';
-          let medal = '';
-          if (rank === 1) { rankClass += ' gold'; medal = '🥇'; }
-          else if (rank === 2) { rankClass += ' silver'; medal = '🥈'; }
-          else if (rank === 3) { rankClass += ' bronze'; medal = '🥉'; }
+          let medalHtml = '';
+          if (rank === 1) { rankClass += ' gold'; medalHtml = '🥇'; }
+          else if (rank === 2) { rankClass += ' silver'; medalHtml = '🥈'; }
+          else if (rank === 3) { rankClass += ' bronze'; medalHtml = '🥉'; }
           const isSelf = u.user_id == userId;
           if (isSelf) rankClass += ' self';
           const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
           const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
           html += \`
-            <div class="lb-item" style="\${isSelf ? 'background:rgba(213,0,249,0.06); border-left:3px solid #d500f9;' : ''}">
-              <div class="\${rankClass}">\${medal || rank}</div>
+            <div class="lb-item" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
+              <div class="\${rankClass}">\${medalHtml || rank}</div>
               <div class="lb-info">
                 <span class="\${nameClass}">\${u.name || 'Unknown'} \${youTag}</span>
               </div>
@@ -3320,7 +3391,7 @@ app.get("/mini/:userId", (req, res) => {
             msgDiv.innerText = 'Thanks for rating!';
           } else {
             userRated = false;
-            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.4);">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.3);">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
             starContainer.style.display = 'flex';
             msgDiv.innerText = 'Tap a star to rate!';
           }
@@ -3328,6 +3399,7 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     }
 
+    // Star click – SVG stars
     document.querySelectorAll('.star').forEach(star => {
       star.addEventListener('click', async function() {
         if (userRated) return;
