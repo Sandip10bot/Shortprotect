@@ -136,10 +136,10 @@ function renderBypassError(res) {
       <body>
           <div class="container">
               <div style="font-size:60px; margin-bottom:10px;">🚫</div>
-              <h2 class="error-title">Access Denied</h2>
+              <h2 class="error-title">Bypass Detected</h2>
               <p>Unauthorized request detected.</p>
               <div class="manual-box" style="display:block; text-align:center;">
-                  <p style="color:white; margin:0;">Please use the official link from the bot.</p>
+                  <p style="color:white; margin:0;">Please Don't Bypass Support Admin To Open Ads 🕵️‍♀️</p>
               </div>
           </div>
       </body>
