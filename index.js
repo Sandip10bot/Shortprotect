@@ -1,3 +1,7 @@
+// ============================================================
+// index.js – Full Express Server with Banking, Store & Payments
+// ============================================================
+
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
@@ -5,7 +9,7 @@ import crypto from "crypto";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable JSON parsing for API requests (Required for Scratch Card Claiming)
+// Enable JSON parsing for API requests
 app.use(express.json());
 
 // ========================
@@ -27,6 +31,10 @@ let usersCollection;
 let mpHistoryCollection;
 let userStatsCollection;
 let bankCollection;
+let couponsCollection;
+let searchLimitCollection;
+let paymentLimitCollection;
+let ipVerificationCollection;
 
 async function connectDB() {
   try {
@@ -42,8 +50,12 @@ async function connectDB() {
     mpHistoryCollection = db.collection("mphistory");
     userStatsCollection = db.collection("user_stats");
     bankCollection = db.collection("bank");
+    couponsCollection = db.collection("coupons");
+    searchLimitCollection = db.collection("search_limits");
+    paymentLimitCollection = db.collection("payment_limits");
+    ipVerificationCollection = db.collection("ip_verification");
     
-    console.log("✅ MongoDB connected for Main, Masking, Double, Search Ads, and Scratch Cards");
+    console.log("✅ MongoDB connected for all collections");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
   }
@@ -111,7 +123,7 @@ const THEME_CSS = `
 `;
 
 // ==========================================
-// RANK TITLE HELPER (Required for the route)
+// RANK TITLE HELPER
 // ==========================================
 function getRankTitle(points) {
     if (points < 100) return "🌱 Novice";
@@ -386,10 +398,9 @@ app.get("/verify-miniapp/:userId", async (req, res) => {
 });
 
 // ==========================================
-// SCRATCH CARD ROUTES
+// SCRATCH CARD ROUTES (unchanged)
 // ==========================================
 
-// 1. Verify Scratch Ad Route
 app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     const { userId, token } = req.params;
 
@@ -401,7 +412,6 @@ app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     renderSecureFinalPage(res, finalBotLink);
 });
 
-// 2. Serve Web App Render HTML (Ultra-Premium Cinematic Edition)
 function renderScratchAppHTML(userId, token, currentPoints, reward) {
     return `
     <!DOCTYPE html>
@@ -430,7 +440,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 min-height: 100vh; overflow: hidden; user-select: none;
             }
 
-            /* --- Cinematic Background Elements --- */
             .bg-glow {
                 position: absolute; width: 100vw; height: 100vh;
                 background: radial-gradient(circle at 50% 40%, rgba(213, 0, 249, 0.15) 0%, transparent 60%);
@@ -443,7 +452,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 100% { opacity: 1; }
             }
 
-            /* --- Premium Glassmorphism Dashboard --- */
             .profile-card {
                 position: relative; z-index: 10;
                 background: rgba(255, 255, 255, 0.04);
@@ -472,7 +480,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 margin-top: 8px; transition: all 0.3s ease;
             }
 
-            /* --- LIVE INCREMENT ANIMATIONS --- */
             .stats-badge.points-updating {
                 background: rgba(255, 223, 0, 0.2);
                 border-color: var(--gold-light);
@@ -496,7 +503,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 100% { opacity: 0; transform: translate(-50%, -250px) scale(0.8); }
             }
 
-            /* --- The Scratch Card Container --- */
             .scratch-wrapper {
                 position: relative; z-index: 10; margin-top: 50px;
                 width: 280px; height: 280px; border-radius: 24px;
@@ -516,7 +522,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 overflow: hidden;
             }
 
-            /* --- The Reward Reveal Layer --- */
             .reward-layer {
                 position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -544,7 +549,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 z-index: 2; cursor: pointer; border-radius: 20px;
             }
 
-            /* --- Premium Close Button --- */
             .btn-close {
                 position: relative; z-index: 10; margin-top: 45px;
                 background: linear-gradient(135deg, #d500f9, #651fff);
@@ -594,12 +598,10 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             const tg = window.Telegram.WebApp;
             tg.expand();
             
-            // Populate User Data
             const user = tg.initDataUnsafe?.user;
             if (user) {
                 document.getElementById('user-name').innerText = user.first_name + (user.last_name ? ' ' + user.last_name : '');
                 
-                // Username + ID Integration
                 if (user.username) {
                     document.getElementById('user-username-id').innerText = '@' + user.username + ' | ID: ' + user.id;
                 } else {
@@ -617,7 +619,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             let isRevealed = false;
             let lastHapticTime = 0;
             
-            // Cinematic Foil Generation
             function drawPremiumFoil() {
                 const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
                 grad.addColorStop(0, "#D4AF37");
@@ -739,10 +740,8 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                         const floater = document.getElementById('floating-reward');
                         const reward = data.reward;
                         
-                        // 1. Trigger the floating text animation
                         floater.style.animation = 'floatToWallet 1.8s forwards cubic-bezier(0.2, 0.8, 0.2, 1)';
                         
-                        // 2. Wait for text to "hit" the wallet, then pulse the wallet and start counting
                         setTimeout(() => {
                             badge.classList.add('points-updating');
                             
@@ -754,20 +753,17 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                                     clearInterval(interval);
                                     pointsEl.innerText = target;
                                     
-                                    // Heavy haptic on completion
                                     tg.HapticFeedback.impactOccurred('heavy');
                                     
-                                    // Remove glowing state after a brief moment
                                     setTimeout(() => badge.classList.remove('points-updating'), 800);
                                     document.getElementById('closeBtn').classList.add('show');
                                 } else {
                                     current++;
                                     pointsEl.innerText = current;
-                                    // Light coin-tick haptic for each point
                                     tg.HapticFeedback.impactOccurred('light');
                                 }
-                            }, 60); // Speed of the live increment
-                        }, 800); // Delay syncing with the floating text animation
+                            }, 60);
+                        }, 800);
                     }
                 } catch (error) {
                     console.error("Failed to claim:", error);
@@ -779,7 +775,6 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
     `;
 }
 
-// 3. Mini App Display
 app.get("/scratch-app/:userId/:token", async (req, res) => {
     const { userId, token } = req.params;
     const uid = parseInt(userId);
@@ -804,7 +799,6 @@ app.get("/scratch-app/:userId/:token", async (req, res) => {
     res.send(renderScratchAppHTML(uid, token, mythopoints, reward));
 });
 
-// 4. API for claiming the reward
 app.post("/api/claim-scratch", async (req, res) => {
     const { userId, token } = req.body;
     const uid = parseInt(userId);
@@ -830,11 +824,11 @@ app.post("/api/claim-scratch", async (req, res) => {
     );
     try {
         await mpHistoryCollection.insertOne({
-            user_id: parseInt(userId),            // Bot 'int' expect karta hai
+            user_id: parseInt(userId),
             amount: reward,
             type: "EARNED",
-            reason: "Daily Scratch Card Reward",  // 🔴 'description' ko change karke 'reason' kiya
-            date: new Date()                      // 🔴 'timestamp' ko change karke 'date' kiya
+            reason: "Daily Scratch Card Reward",
+            date: new Date()
         });
         console.log(`✅ Logged ${reward} MythoPoints for user ${uid}`);
     } catch (err) {
@@ -845,7 +839,7 @@ app.post("/api/claim-scratch", async (req, res) => {
 });
 
 // ========================
-// ENTRY POINTS
+// ENTRY POINTS (unchanged)
 // ========================
 app.get("/link/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
@@ -888,9 +882,6 @@ app.get("/link/:hex", (req, res) => {
   }
 });
 
-// ========================
-// THE ULTIMATE FINISH LINE
-// ========================
 app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   const { prefix, userId, token } = req.params;
 
@@ -918,9 +909,6 @@ app.get("/verify/:prefix/:userId/:token", async (req, res) => {
   }
 });
 
-// ========================
-// EXIT ROUTES
-// ========================
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
@@ -1024,19 +1012,17 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
 // UNIFIED APPLE iOS PROFILE MINI APP
 // ==========================================
 
-// 1. API: Fetch Unified User Data & Activity History
+// 1. API: Fetch Unified User Data & Activity History (unchanged)
 app.get("/api/ios-profile-data/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
         
-        // Fetch user info for Mythopoints
         const user = await usersCollection.findOne({ user_id: uid });
         
-        // Fetch latest activity history from mpHistoryCollection
         const history = await mpHistoryCollection
             .find({ user_id: uid })
             .sort({ date: -1 })
-            .limit(15) // Limit to 15 recent transactions for the UI
+            .limit(15)
             .toArray();
 
         res.json({
@@ -1051,7 +1037,7 @@ app.get("/api/ios-profile-data/:userId", async (req, res) => {
     }
 });
 
-// 2. RENDER: The Apple iPhone UI
+// 2. RENDER: The Apple iPhone UI (unchanged)
 app.get("/ios-app/:userId", (req, res) => {
     const { userId } = req.params;
     
@@ -1085,7 +1071,6 @@ app.get("/ios-app/:userId", (req, res) => {
                 color: var(--ios-text); -webkit-font-smoothing: antialiased; user-select: none;
             }
 
-            /* Frosted Glass Header */
             .header {
                 position: sticky; top: 0; z-index: 50;
                 background: rgba(255, 255, 255, 0.75);
@@ -1095,12 +1080,10 @@ app.get("/ios-app/:userId", (req, res) => {
                 letter-spacing: -0.4px;
             }
 
-            /* iOS Card Style */
             .card {
                 background: var(--ios-card); border-radius: 12px; margin: 16px; padding: 16px;
             }
 
-            /* Profile Section */
             .profile-header { 
                 display: flex; align-items: center; gap: 15px; 
                 border-bottom: 0.5px solid var(--ios-light-gray); 
@@ -1113,12 +1096,10 @@ app.get("/ios-app/:userId", (req, res) => {
             .profile-info h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.5px; }
             .profile-info p { margin: 4px 0 0 0; color: var(--ios-gray); font-size: 13px; }
             
-            /* Mythopoints Balance */
             .balance-box { text-align: center; padding: 5px 0; }
             .balance-box h3 { margin: 0; font-size: 13px; color: var(--ios-gray); font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
             .balance-box .amount { font-size: 38px; font-weight: 700; color: var(--ios-blue); margin: 8px 0; letter-spacing: -1px; }
             
-            /* Activity List */
             .activity-item { 
                 display: flex; justify-content: space-between; align-items: center; 
                 padding: 12px 0; border-bottom: 0.5px solid var(--ios-light-gray); 
@@ -1130,7 +1111,6 @@ app.get("/ios-app/:userId", (req, res) => {
             .earn { color: var(--ios-green); }
             .spend { color: var(--ios-red); }
 
-            /* Frosted Glass Bottom Tab Bar */
             .tab-bar {
                 position: fixed; bottom: 0; width: 100%;
                 background: rgba(242, 242, 247, 0.85); 
@@ -1209,14 +1189,12 @@ app.get("/ios-app/:userId", (req, res) => {
         </div>
 
         <script>
-            // Initialize Telegram Web App
             const tg = window.Telegram.WebApp;
             tg.expand();
             tg.setHeaderColor('#F2F2F7'); 
             
             const userId = ${userId};
 
-            // Setup User Data from Telegram (Including Username)
             const tgUser = tg.initDataUnsafe?.user;
             if (tgUser) {
                 document.getElementById('user-name').innerText = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
@@ -1235,7 +1213,6 @@ app.get("/ios-app/:userId", (req, res) => {
                 document.getElementById('user-id').innerText = 'ID: ' + userId;
             }
 
-            // Tab Switching Logic
             function switchTab(tabId, title, element) {
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
@@ -1244,11 +1221,9 @@ app.get("/ios-app/:userId", (req, res) => {
                 element.classList.add('active');
                 document.getElementById('header-title').innerText = title;
                 
-                // Light iOS Haptic Tick
                 tg.HapticFeedback.selectionChanged();
             }
 
-            // Fetch Unified Data from Backend
             async function fetchUserData() {
                 try {
                     const res = await fetch('/api/ios-profile-data/' + userId);
@@ -1261,12 +1236,10 @@ app.get("/ios-app/:userId", (req, res) => {
                         
                         document.getElementById('mp-balance').innerText = formattedBalance;
 
-                        // Set Verification Badge
                         document.getElementById('verification-status').innerHTML = data.is_verified ? 
                             '<span style="color:var(--ios-green);">✓ Node Verified</span>' : 
                             '<span style="color:var(--ios-red);">! Unverified Device</span>';
 
-                        // Render History List
                         const list = document.getElementById('activity-list');
                         if (data.history.length === 0) {
                             list.innerHTML = '<div class="empty-state">No recent activity found.</div>';
@@ -1297,7 +1270,6 @@ app.get("/ios-app/:userId", (req, res) => {
                 }
             }
             
-            // Execute on load
             fetchUserData();
         </script>
     </body>
@@ -1306,10 +1278,10 @@ app.get("/ios-app/:userId", (req, res) => {
 });
 
 // ==========================================
-// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES)
+// UNIFIED iOS PURPLE DASHBOARD (ALL FEATURES) – ADDED NEW TABS
 // ==========================================
 
-// 1. API: Extract all user data across multiple collections
+// 1. API: Extract all user data across multiple collections (updated to include bank/store)
 app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -1330,12 +1302,10 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         let loanDue = 0;
 
         if (bank) {
-            // Invest calculations
             if (bank.invested > 0) {
                 const cycles = Math.floor((now - bank.last_claim_time) / 86400);
-                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.0015 * cycles);
+                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.05 * cycles); // 5% daily
             }
-            // Loan calculations
             if (bank.loan_active && bank.loan_principal > 0) {
                 activeLoan = true;
                 let loanCycles = Math.floor((now - bank.loan_taken_at) / 86400);
@@ -1351,6 +1321,13 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
             isPremium = true;
             premiumDaysLeft = Math.ceil((premium.expiry_time - now) / 86400);
         }
+
+        // Get daily payment count for today
+        const today = new Date().toISOString().split('T')[0];
+        const paymentCount = await db.collection("payment_limits").countDocuments({
+            user_id: uid,
+            date: today
+        });
 
         res.json({
             success: true,
@@ -1379,7 +1356,11 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
                 lifetimeSpent: stats?.total_points_spent || 0,
                 totalFiles: stats?.lifetime_files || 0
             },
-            history: history
+            history: history,
+            payment: {
+                dailyLimit: 1,
+                usedToday: paymentCount
+            }
         });
     } catch (error) {
         console.error("Dashboard API Error:", error);
@@ -1387,699 +1368,574 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
     }
 });
 
-// 2. RENDER: The Premium iOS Dark Purple UI
-app.get("/dashboard/:userId", (req, res) => {
-    const { userId } = req.params;
-    
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Mytho Dashboard</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <style>
-            /* Apple iOS Dark Purple System Variables */
-            :root {
-                --ios-bg: #000000;
-                --ios-card: rgba(45, 10, 80, 0.4);
-                --ios-card-solid: #1c0a2b;
-                --ios-purple: #d500f9;
-                --ios-purple-light: #ea80fc;
-                --ios-purple-dark: #651fff;
-                --ios-green: #30d158;
-                --ios-red: #ff453a;
-                --ios-blue: #0a84ff;
-                --ios-gold: #ffd60a;
-                --ios-text: #ffffff;
-                --ios-gray: #ebebf599;
-                --safe-area-bottom: env(safe-area-inset-bottom, 20px);
+// ==========================================
+// 🏦 BANKING API (cbank.py logic)
+// ==========================================
+
+// Helper: Get or create bank document
+async function getBank(userId) {
+    let bank = await bankCollection.findOne({ user_id: userId });
+    if (!bank) {
+        bank = {
+            user_id: userId,
+            loan_active: false,
+            loan_principal: 0,
+            loan_taken_at: 0,
+            invested: 0,
+            last_claim_time: Math.floor(Date.now() / 1000),
+            notified_for_claim: false
+        };
+        await bankCollection.insertOne(bank);
+    }
+    return bank;
+}
+
+// Helper: Calculate pending interest
+function calculateInterest(invested, lastClaimTime) {
+    if (invested <= 0) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    const cycles = Math.floor((now - lastClaimTime) / 86400);
+    if (cycles < 1) return 0;
+    return Math.floor(invested * 0.05 * cycles); // 5% daily
+}
+
+// Helper: Calculate loan due
+function calculateLoanDue(principal, takenAt) {
+    if (principal <= 0) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    let cycles = Math.floor((now - takenAt) / 86400);
+    cycles = Math.max(1, cycles);
+    const interest = Math.floor(principal * 0.10 * cycles);
+    const total = principal + interest;
+    return Math.min(total, principal * 5);
+}
+
+// GET bank status
+app.get("/api/bank/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        const invested = bank.invested || 0;
+        const pending = calculateInterest(invested, bank.last_claim_time);
+        const loanActive = bank.loan_active || false;
+        const loanDue = loanActive ? calculateLoanDue(bank.loan_principal, bank.loan_taken_at) : 0;
+
+        res.json({
+            success: true,
+            invested,
+            pendingInterest: pending,
+            loanActive,
+            loanDue,
+            loanPrincipal: bank.loan_principal || 0
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// POST: Invest (add funds)
+app.post("/api/bank/invest/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount" });
+
+        const bank = await getBank(uid);
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found" });
+        if (user.mythopoints < amount) return res.status(400).json({ success: false, error: "Insufficient balance" });
+
+        // Check if pending interest exists – if so, force claim first
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
+        if (pending > 0) {
+            return res.status(400).json({ success: false, error: "Claim pending interest before investing" });
+        }
+
+        // Deduct from wallet
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -amount } });
+        // Update bank: increase invested, reset timer
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { invested: amount },
+                $set: { last_claim_time: Math.floor(Date.now() / 1000) }
             }
-            
-            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-            
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-                background-color: var(--ios-bg);
-                background-image: radial-gradient(circle at 50% 0%, rgba(101, 31, 255, 0.25) 0%, transparent 60%);
-                margin: 0; padding: 0; padding-bottom: calc(90px + var(--safe-area-bottom));
-                color: var(--ios-text); -webkit-font-smoothing: antialiased; user-select: none;
-                min-height: 100vh; overflow-x: hidden;
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: amount,
+            type: "SPENT",
+            reason: "Invested into MythoFund",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Added ${amount} to investment.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// POST: Withdraw (remove funds)
+app.post("/api/bank/withdraw/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount" });
+
+        const bank = await getBank(uid);
+        if (bank.invested < amount) return res.status(400).json({ success: false, error: "Not enough invested" });
+
+        // Check pending interest
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
+        if (pending > 0) {
+            return res.status(400).json({ success: false, error: "Claim pending interest before withdrawing" });
+        }
+
+        // Update bank
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { invested: -amount },
+                $set: { last_claim_time: Math.floor(Date.now() / 1000) }
             }
+        );
 
-            /* iOS Frosted Navigation Bar */
-            .navbar {
-                position: sticky; top: 0; z-index: 50;
-                background: rgba(10, 0, 20, 0.65);
-                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
-                border-bottom: 0.5px solid rgba(255,255,255,0.1);
-                padding: 16px; text-align: center; font-weight: 600; font-size: 17px;
-                letter-spacing: -0.4px; color: #fff;
-            }
+        // Add to wallet
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: amount } });
 
-            /* Container & Grid System */
-            .container { padding: 16px; }
-            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
-            
-            /* iOS Widget Cards */
-            .widget {
-                background: var(--ios-card);
-                border: 0.5px solid rgba(255, 255, 255, 0.08);
-                border-radius: 22px; padding: 16px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 10px rgba(213,0,249,0.05);
-                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-                display: flex; flex-direction: column; justify-content: center;
-            }
-            .widget-full { grid-column: span 2; }
-            
-            .widget-icon { font-size: 24px; margin-bottom: 8px; }
-            .widget-title { font-size: 13px; color: var(--ios-gray); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-            .widget-value { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
-            .widget-sub { font-size: 12px; color: var(--ios-purple-light); margin-top: 4px; font-weight: 500; }
+        // Log
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: amount,
+            type: "EARNED",
+            reason: "Withdrew from MythoFund",
+            date: new Date()
+        });
 
-            /* Specific Widget Colors */
-            .w-premium { border: 0.5px solid rgba(255, 214, 10, 0.3); background: rgba(255, 214, 10, 0.05); }
-            .w-premium .widget-value { color: var(--ios-gold); }
-            
-            .w-bank { border: 0.5px solid rgba(48, 209, 88, 0.3); background: rgba(48, 209, 88, 0.05); }
-            .w-bank .widget-value { color: var(--ios-green); }
+        res.json({ success: true, message: `Withdrew ${amount} from investment.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 
-            /* Profile Header */
-            .profile-hdr { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-            .profile-pic { width: 70px; height: 70px; border-radius: 50%; border: 2px solid var(--ios-purple); object-fit: cover; background: var(--ios-card-solid); }
-            .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
-            .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: var(--ios-purple-light); font-weight: 500; }
-            .badge { display: inline-block; padding: 3px 8px; background: rgba(213,0,249,0.2); border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; margin-top: 6px;}
+// POST: Claim interest
+app.post("/api/bank/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
 
-            /* History List */
-            .list-card { background: var(--ios-card); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.08); overflow: hidden; }
-            .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.05); }
-            .list-item:last-child { border-bottom: none; }
-            .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
-            .item-left span { font-size: 12px; color: var(--ios-gray); margin-top: 4px; display: inline-block; }
-            .item-right { font-weight: 600; font-size: 16px; }
-            .val-pos { color: var(--ios-green); }
-            .val-neg { color: var(--ios-red); }
+        if (pending < 1) return res.status(400).json({ success: false, error: "No interest to claim" });
 
-            /* Tab Bar */
-            .tab-bar {
-                position: fixed; bottom: 0; width: 100%;
-                background: rgba(15, 0, 30, 0.85); 
-                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
-                border-top: 0.5px solid rgba(255,255,255,0.1);
-                display: flex; justify-content: space-around; 
-                padding: 12px 0 calc(12px + var(--safe-area-bottom)) 0; z-index: 100;
-            }
-            .tab-btn { display: flex; flex-direction: column; align-items: center; color: var(--ios-gray); font-size: 10px; font-weight: 500; transition: 0.2s; }
-            .tab-btn svg { width: 26px; height: 26px; margin-bottom: 4px; fill: currentColor; }
-            .tab-btn.active { color: var(--ios-purple-light); }
-            
-            .tab-content { display: none; animation: fadeIn 0.3s ease; }
-            .tab-content.active { display: block; }
-            @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
-            
-            /* Loading Spinner */
-            .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.2); border-top-color: var(--ios-purple); border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
-            @keyframes spin { to { transform: rotate(360deg); } }
-            .empty { text-align: center; color: var(--ios-gray); padding: 30px 20px; font-size: 14px; }
-        </style>
-    </head>
-    <body>
-        <div class="navbar" id="nav-title">Overview</div>
+        // Update: advance last_claim_time by cycles
+        const now = Math.floor(Date.now() / 1000);
+        const cycles = Math.floor((now - bank.last_claim_time) / 86400);
+        const newClaimTime = bank.last_claim_time + (cycles * 86400);
 
-        <div class="container">
-            <div id="tab-overview" class="tab-content active">
-                <div class="profile-hdr">
-                    <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
-                    <div class="profile-info">
-                        <h1 id="ui-name">Loading...</h1>
-                        <p id="ui-id">ID: ${userId}</p>
-                        <div class="badge" id="ui-verified">Checking Node...</div>
-                    </div>
-                </div>
+        await bankCollection.updateOne(
+            { user_id: uid },
+            { $set: { last_claim_time: newClaimTime, notified_for_claim: false } }
+        );
 
-                <div class="grid-2">
-                    <div class="widget widget-full">
-                        <div class="widget-title">Wallet Balance</div>
-                        <div class="widget-value" style="font-size:36px; color:var(--ios-purple-light);" id="ui-pts">0</div>
-                        <div class="widget-sub" id="ui-streak">🔥 0 Day Streak</div>
-                    </div>
-                    
-                    <div class="widget w-premium">
-                        <div class="widget-icon">💎</div>
-                        <div class="widget-title">Premium</div>
-                        <div class="widget-value" id="ui-prem-status">Free</div>
-                        <div class="widget-sub" id="ui-prem-days">Upgrade Now</div>
-                    </div>
+        // Add to wallet
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: pending } });
 
-                    <div class="widget">
-                        <div class="widget-icon">🔍</div>
-                        <div class="widget-title">Search Credits</div>
-                        <div class="widget-value"><span id="ui-credits" style="color:var(--ios-blue);">0</span><span style="font-size:16px; color:var(--ios-gray)">/5</span></div>
-                        <div class="widget-sub">Auto-Refill Active</div>
-                    </div>
-                </div>
+        // Log
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pending,
+            type: "EARNED",
+            reason: `MythoFund Interest (${cycles} cycles)`,
+            date: new Date()
+        });
 
-                <h3 style="font-size:18px; margin: 24px 0 12px 4px; font-weight:600;">Lifetime Statistics</h3>
-                <div class="grid-2">
-                    <div class="widget" style="padding: 12px 16px;">
-                        <div class="widget-title">Total Earned</div>
-                        <div class="widget-value" style="font-size:20px; color:var(--ios-green);" id="ui-life-earn">0</div>
-                    </div>
-                    <div class="widget" style="padding: 12px 16px;">
-                        <div class="widget-title">Total Spent</div>
-                        <div class="widget-value" style="font-size:20px; color:var(--ios-red);" id="ui-life-spent">0</div>
-                    </div>
-                </div>
-            </div>
+        res.json({ success: true, claimed: pending });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 
-            <div id="tab-bank" class="tab-content">
-                <div class="widget widget-full w-bank" style="margin-bottom:16px;">
-                    <div class="widget-icon">📈</div>
-                    <div class="widget-title">MythoFund Vault</div>
-                    <div class="widget-value" id="ui-bank-invest">0</div>
-                    <div class="widget-sub" style="color:#fff;">Active Investment</div>
-                </div>
-                
-                <div class="grid-2">
-                    <div class="widget">
-                        <div class="widget-title">Pending Yield</div>
-                        <div class="widget-value" style="color:var(--ios-gold);" id="ui-bank-yield">+0</div>
-                        <div class="widget-sub">Ready to claim</div>
-                    </div>
-                    <div class="widget">
-                        <div class="widget-title">Active Loan</div>
-                        <div class="widget-value" style="color:var(--ios-red);" id="ui-bank-loan">0</div>
-                        <div class="widget-sub" id="ui-loan-status">No Debt</div>
-                    </div>
-                </div>
-                <div style="margin-top:20px; text-align:center; font-size:13px; color:var(--ios-gray);">
-                    Manage deposits and repayments directly via the /mythobank command in the bot.
-                </div>
-            </div>
+// POST: Apply for loan
+app.post("/api/bank/loan/apply/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        if (bank.loan_active) return res.status(400).json({ success: false, error: "Loan already active" });
 
-            <div id="tab-history" class="tab-content">
-                <div class="list-card" id="ui-history-list">
-                    <div class="spinner"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-bar">
-            <div class="tab-btn active" onclick="switchTab('overview', 'Overview', this)">
-                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
-                Overview
-            </div>
-            <div class="tab-btn" onclick="switchTab('bank', 'MythoBank', this)">
-                <svg viewBox="0 0 24 24"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72l5 2.73 5-2.73v3.72z"/></svg>
-                Bank
-            </div>
-            <div class="tab-btn" onclick="switchTab('history', 'Activity', this)">
-                <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
-                Activity
-            </div>
-        </div>
-
-        <script>
-            const tg = window.Telegram.WebApp;
-            tg.expand();
-            tg.setHeaderColor('#0A0014');
-            tg.setBackgroundColor('#000000');
-
-            const userId = ${userId};
-
-            // Setup User Data from Telegram (Including Username)
-            const tgUser = tg.initDataUnsafe?.user;
-            if (tgUser) {
-                document.getElementById('ui-name').innerText = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
-                
-                const uiIdElement = document.getElementById('ui-id');
-                if (tgUser.username) {
-                    uiIdElement.innerText = '@' + tgUser.username + ' | ID: ' + tgUser.id;
-                } else {
-                    uiIdElement.innerText = 'ID: ' + tgUser.id; 
-                }
-
-                if (tgUser.photo_url) {
-                    document.getElementById('ui-dp').src = tgUser.photo_url;
-                }
-            } else {
-                document.getElementById('ui-id').innerText = 'ID: ' + userId;
-            }
-
-            function switchTab(tabId, title, el) {
-                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.getElementById('tab-' + tabId).classList.add('active');
-                el.classList.add('active');
-                document.getElementById('nav-title').innerText = title;
-                tg.HapticFeedback.selectionChanged();
-            }
-
-            async function loadData() {
-                try {
-                    const res = await fetch('/api/ios-dashboard-data/' + userId);
-                    const data = await res.json();
-                    
-                    if(data.success) {
-                        // Overview Tab
-                        document.getElementById('ui-pts').innerText = data.profile.mythopoints.toLocaleString();
-                        document.getElementById('ui-streak').innerText = '🔥 ' + data.profile.streak + ' Day Streak';
-                        
-                        const badge = document.getElementById('ui-verified');
-                        if(data.profile.is_verified) {
-                            badge.innerText = '✓ Secured Node';
-                            badge.style.background = 'rgba(48, 209, 88, 0.2)';
-                            badge.style.color = 'var(--ios-green)';
-                        } else {
-                            badge.innerText = '! Unverified';
-                            badge.style.background = 'rgba(255, 69, 58, 0.2)';
-                            badge.style.color = 'var(--ios-red)';
-                        }
-
-                        // Premium Data
-                        if(data.premium.active) {
-                            document.getElementById('ui-prem-status').innerText = data.premium.plan;
-                            document.getElementById('ui-prem-days').innerText = data.premium.daysLeft + ' Days Left';
-                        }
-                        
-                        // Search Credits
-                        document.getElementById('ui-credits').innerText = data.search.credits;
-
-                        // Lifetime Stats
-                        document.getElementById('ui-life-earn').innerText = data.stats.lifetimeEarned.toLocaleString();
-                        document.getElementById('ui-life-spent').innerText = data.stats.lifetimeSpent.toLocaleString();
-
-                        // Bank Tab
-                        document.getElementById('ui-bank-invest').innerText = data.bank.invested.toLocaleString() + ' pts';
-                        document.getElementById('ui-bank-yield').innerText = '+' + data.bank.pendingInterest.toLocaleString();
-                        
-                        if(data.bank.activeLoan) {
-                            document.getElementById('ui-bank-loan').innerText = data.bank.loanDue.toLocaleString();
-                            document.getElementById('ui-loan-status').innerText = 'Accumulating 10%/day';
-                        } else {
-                            document.getElementById('ui-bank-loan').innerText = '0';
-                            document.getElementById('ui-bank-loan').style.color = 'var(--ios-green)';
-                            document.getElementById('ui-loan-status').innerText = 'Eligible for loan';
-                        }
-
-                        // History Tab
-                        const list = document.getElementById('ui-history-list');
-                        if (data.history.length === 0) {
-                            list.innerHTML = '<div class="empty">No recent transactions found.</div>';
-                        } else {
-                            list.innerHTML = data.history.map(item => {
-                                const isEarn = item.type === "EARNED";
-                                const sign = isEarn ? '+' : '-';
-                                const colorClass = isEarn ? 'val-pos' : 'val-neg';
-                                const dateString = new Date(item.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
-                                
-                                return \`
-                                <div class="list-item">
-                                    <div class="item-left">
-                                        <p>\${item.reason || item.type}</p>
-                                        <span>\${dateString}</span>
-                                    </div>
-                                    <div class="item-right \${colorClass}">
-                                        \${sign}\${item.amount}
-                                    </div>
-                                </div>
-                                \`;
-                            }).join('');
-                        }
-                    }
-                } catch (e) {
-                    console.error(e);
-                    document.getElementById('ui-history-list').innerHTML = '<div class="empty" style="color:var(--ios-red);">Connection Error. Please restart the app.</div>';
+        const principal = 100; // LOAN_PRINCIPAL
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    loan_active: true,
+                    loan_principal: principal,
+                    loan_taken_at: Math.floor(Date.now() / 1000)
                 }
             }
+        );
 
-            loadData();
-        </script>
-    </body>
-    </html>
-    `);
+        // Credit user
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: principal } });
+
+        // Log
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: principal,
+            type: "EARNED",
+            reason: "Bank Loan Disbursed",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Loan of ${principal} MythoPoints granted.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// POST: Repay loan
+app.post("/api/bank/loan/repay/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        if (!bank.loan_active) return res.status(400).json({ success: false, error: "No active loan" });
+
+        const due = calculateLoanDue(bank.loan_principal, bank.loan_taken_at);
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user || user.mythopoints < due) return res.status(400).json({ success: false, error: "Insufficient balance" });
+
+        // Deduct
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -due } });
+
+        // Clear loan
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    loan_active: false,
+                    loan_principal: 0,
+                    loan_taken_at: 0
+                }
+            }
+        );
+
+        // Log
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: due,
+            type: "SPENT",
+            reason: `Loan Repayment (Interest: ${due - bank.loan_principal})`,
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Repaid ${due} MythoPoints.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 // ==========================================
-// LEADERBOARD API (Updated)
+// 🛍️ STORE API (cstore.py logic)
 // ==========================================
 
+// Helper: Generate coupon
+async function generateCoupon(userId, discount) {
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await couponsCollection.insertOne({
+        code: code,
+        user_id: userId,
+        discount: discount,
+        used: false,
+        created: Math.floor(Date.now() / 1000),
+        expiry: Math.floor(Date.now() / 1000) + 30 * 86400
+    });
+    return code;
+}
 
-
-
-
-// ==========================================
-// LEADERBOARD API (Bulletproof + Python Fallbacks)
-// ==========================================
-app.get("/api/leaderboard/:userId", async (req, res) => {
+// POST: Purchase store item
+app.post("/api/store/purchase/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
-        const { timeframe = "all", page = 1 } = req.query;
-        const limit = 10;
-        const skip = (parseInt(page) - 1) * limit;
+        const { item } = req.body; // 'credits', 'skip_cooldown', 'mystery', 'coupon_10', etc.
 
-        // Map timeframe to DB field
-        let pointField = "mythopoints";
-        if (timeframe === "weekly") pointField = "weekly_points";
-        if (timeframe === "monthly") pointField = "monthly_points";
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found" });
 
-        const query = {};
-        query[pointField] = { $gt: 0 };
+        // Define items and costs
+        const items = {
+            credits: { cost: 50, name: "5 Search Credits" },
+            skip_cooldown: { cost: 50, name: "Skip Cooldown" },
+            mystery: { cost: 100, name: "Mystery Box" },
+        };
+        // Coupons: discount% -> cost mapping
+        const couponCosts = { 10: 200, 20: 500, 30: 800, 40: 1000, 50: 1500 };
 
-        const totalUsers = await usersCollection.countDocuments(query);
-        const totalPages = Math.ceil(totalUsers / limit) || 1;
+        let cost = 0;
+        let action = null;
+        let reward = null;
 
-        const users = await usersCollection
-            .find(query)
-            .sort({ [pointField]: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        const formattedUsers = users.map(u => {
-            // 1. Safely extract Username
-            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
-            let safeUsername = null;
-            
-            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
-                safeUsername = rawUsername.trim().startsWith('@') 
-                    ? rawUsername.trim() 
-                    : `@${rawUsername.trim()}`;
-            }
-
-            // 2. Safely extract Name
-            let rawName = u.name || u.first_name || null;
-
-            // 3. Apply lead.py's fallback logic
-            if (!rawName) {
-                if (safeUsername) {
-                    rawName = safeUsername; // Fallback to Username if Name is missing
-                } else {
-                    rawName = `User ${u.user_id}`; // Ultimate lead.py fallback
-                }
-            }
-
-            // 4. Apply lead.py's exact truncation logic safely
-            let finalName = String(rawName); 
-            if (finalName.length > 15) {
-                finalName = finalName.substring(0, 15) + "..";
-            }
-
-            return {
-                user_id: u.user_id,
-                name: finalName,
-                username: safeUsername,
-                points: u[pointField] || 0,
-                // Now this function will work perfectly because it's defined right above!
-                title: getRankTitle(u[pointField] || 0) 
+        if (item === 'credits') {
+            cost = items.credits.cost;
+            action = async () => {
+                await searchLimitCollection.updateOne(
+                    { user_id: uid },
+                    { $inc: { credits: 5 }, $set: { last_search: 0 } },
+                    { upsert: true }
+                );
+                return { message: "Added 5 search credits." };
             };
+        } else if (item === 'skip_cooldown') {
+            cost = items.skip_cooldown.cost;
+            action = async () => {
+                await searchLimitCollection.updateOne(
+                    { user_id: uid },
+                    { $set: { last_search: 0 } },
+                    { upsert: true }
+                );
+                return { message: "Cooldown skipped!" };
+            };
+        } else if (item === 'mystery') {
+            cost = items.mystery.cost;
+            action = async () => {
+                // Gacha
+                const rewards = ["jackpot", "credits", "coupon", "nothing"];
+                const weights = [10, 40, 30, 20];
+                const outcome = rewards[weights.reduce((acc, w, i) => {
+                    const r = Math.random() * 100;
+                    return r < w ? i : acc;
+                }, 0)];
+
+                let result = "";
+                if (outcome === "jackpot") {
+                    await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: 300 } });
+                    await mpHistoryCollection.insertOne({ user_id: uid, amount: 300, type: "EARNED", reason: "Mystery Jackpot", date: new Date() });
+                    result = "🎰 JACKPOT! You won 300 Mythopoints!";
+                } else if (outcome === "credits") {
+                    await searchLimitCollection.updateOne({ user_id: uid }, { $inc: { credits: 10 } }, { upsert: true });
+                    result = "🔑 You found 10 Search Credits!";
+                } else if (outcome === "coupon") {
+                    const code = await generateCoupon(uid, 15);
+                    result = `🎟️ You found a 15% OFF coupon! Code: ${code}`;
+                } else {
+                    result = "💨 OOF! The box was empty.";
+                }
+                return { message: result };
+            };
+        } else if (item.startsWith('coupon_')) {
+            const discount = parseInt(item.split('_')[1]);
+            if (!couponCosts[discount]) return res.status(400).json({ success: false, error: "Invalid coupon" });
+            cost = couponCosts[discount];
+            action = async () => {
+                const code = await generateCoupon(uid, discount);
+                return { message: `Coupon ${discount}% OFF generated! Code: ${code}` };
+            };
+        } else {
+            return res.status(400).json({ success: false, error: "Invalid item" });
+        }
+
+        // Check balance
+        if (user.mythopoints < cost) return res.status(400).json({ success: false, error: "Insufficient Mythopoints" });
+
+        // Deduct cost
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -cost } });
+
+        // Execute action
+        const result = await action();
+
+        // Log spend
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: cost,
+            type: "SPENT",
+            reason: `Purchased ${item}`,
+            date: new Date()
         });
 
-        // Calculate current user's rank
-        let currentUser = null;
-        const userDoc = await usersCollection.findOne({ user_id: uid });
-        
-        if (userDoc && userDoc[pointField] > 0) {
-            const rankQuery = {};
-            rankQuery[pointField] = { $gt: userDoc[pointField] };
-            const higherCount = await usersCollection.countDocuments(rankQuery);
-            currentUser = {
-                points: userDoc[pointField],
-                rank: higherCount + 1,
-                title: getRankTitle(userDoc[pointField])
-            };
+        res.json({ success: true, message: result.message });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// 💸 PAYMENT API with IP verification, tax, daily limit
+// ==========================================
+
+// Helper: Check daily payment limit
+async function canMakePayment(userId) {
+    const today = new Date().toISOString().split('T')[0];
+    const count = await paymentLimitCollection.countDocuments({
+        user_id: userId,
+        date: today
+    });
+    return count < 1; // daily limit = 1
+}
+
+// POST /api/payment/send
+app.post("/api/payment/send", async (req, res) => {
+    try {
+        const { senderId, receiverId, amount } = req.body;
+
+        const sender = parseInt(senderId);
+        const receiver = parseInt(receiverId);
+        const amt = parseInt(amount);
+
+        // Basic validations
+        if (!sender || !receiver || !amt) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        if (sender === receiver) {
+            return res.status(400).json({ success: false, error: "Cannot send to yourself." });
+        }
+        if (amt < 200) {
+            return res.status(400).json({ success: false, error: "Minimum payment is 200 Mythopoints." });
+        }
+
+        // Check daily limit for sender
+        const canPay = await canMakePayment(sender);
+        if (!canPay) {
+            return res.status(400).json({ success: false, error: "Daily payment limit reached (1 per day)." });
+        }
+
+        // Get sender and receiver details
+        const senderDoc = await usersCollection.findOne({ user_id: sender });
+        const receiverDoc = await usersCollection.findOne({ user_id: receiver });
+        if (!senderDoc || !receiverDoc) {
+            return res.status(404).json({ success: false, error: "User not found." });
+        }
+
+        // Check IP verification (anti-multiple accounts)
+        const senderIpRecord = await ipVerificationCollection.findOne({ userId: sender });
+        const receiverIpRecord = await ipVerificationCollection.findOne({ userId: receiver });
+        if (!senderIpRecord || !receiverIpRecord) {
+            return res.status(400).json({ success: false, error: "Both users must be verified." });
+        }
+        if (senderIpRecord.ip === receiverIpRecord.ip) {
+            return res.status(400).json({ success: false, error: "Same IP detected. Multiple accounts not allowed." });
+        }
+
+        // Check balance (sender)
+        if (senderDoc.mythopoints < amt) {
+            return res.status(400).json({ success: false, error: "Insufficient balance." });
+        }
+
+        // Calculate tax (15%) – receiver gets 85%
+        const tax = Math.floor(amt * 0.15);
+        const receiverAmount = amt - tax;
+
+        // Perform atomic transactions
+        const session = client.startSession();
+        try {
+            await session.withTransaction(async () => {
+                // Deduct from sender
+                await usersCollection.updateOne(
+                    { user_id: sender },
+                    { $inc: { mythopoints: -amt } },
+                    { session }
+                );
+                // Add to receiver
+                await usersCollection.updateOne(
+                    { user_id: receiver },
+                    { $inc: { mythopoints: receiverAmount } },
+                    { session }
+                );
+                // Record payment limit
+                const today = new Date().toISOString().split('T')[0];
+                await paymentLimitCollection.insertOne({
+                    user_id: sender,
+                    date: today,
+                    receiver: receiver,
+                    amount: amt,
+                    tax: tax,
+                    receiverAmount: receiverAmount,
+                    timestamp: new Date()
+                }, { session });
+                // Log sender spend
+                await mpHistoryCollection.insertOne({
+                    user_id: sender,
+                    amount: amt,
+                    type: "SPENT",
+                    reason: `Payment to ${receiver}`,
+                    date: new Date()
+                }, { session });
+                // Log receiver earn
+                await mpHistoryCollection.insertOne({
+                    user_id: receiver,
+                    amount: receiverAmount,
+                    type: "EARNED",
+                    reason: `Payment from ${sender}`,
+                    date: new Date()
+                }, { session });
+                // Log tax (optional: log to system account)
+                await mpHistoryCollection.insertOne({
+                    user_id: 0, // system account
+                    amount: tax,
+                    type: "TAX",
+                    reason: `Tax on payment ${sender}->${receiver}`,
+                    date: new Date()
+                }, { session });
+            });
+            await session.endSession();
+        } catch (error) {
+            await session.endSession();
+            throw error;
         }
 
         res.json({
             success: true,
-            page: parseInt(page),
-            totalPages: totalPages,
-            users: formattedUsers,
-            currentUser: currentUser
+            message: `Payment sent! Receiver gets ${receiverAmount} Mythopoints (tax: ${tax}).`
         });
-    } catch (error) {
-        console.error("Leaderboard API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+    } catch (e) {
+        console.error("Payment error:", e);
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
-
-// ==========================================
-// HISTORY API (Added)
-// ==========================================
-app.get("/api/history/:userId", async (req, res) => {
+// GET /api/users/search?q=...
+app.get("/api/users/search", async (req, res) => {
     try {
-        const uid = parseInt(req.params.userId);
-        const { filter = "ALL", page = 1 } = req.query;
-        const limit = 15; // Matches PAGE_SIZE in cmphistory.py
-        const skip = (parseInt(page) - 1) * limit;
+        const { q } = req.query;
+        if (!q) return res.json({ success: true, users: [] });
 
-        // Build the query
-        let query = { user_id: uid };
-        if (filter !== "ALL") {
-            query.type = filter.toUpperCase();
+        const query = {
+            $or: [
+                { username: { $regex: q, $options: 'i' } },
+                { first_name: { $regex: q, $options: 'i' } },
+                // also allow search by user_id if q is numeric
+            ]
+        };
+        const numericQ = parseInt(q);
+        if (!isNaN(numericQ)) {
+            query.$or.push({ user_id: numericQ });
         }
 
-        // Fetch the records
-        const historyRecords = await mpHistoryCollection
-            .find(query)
-            .sort({ date: -1 })
-            .skip(skip)
-            .limit(limit)
+        const users = await usersCollection.find(query)
+            .limit(10)
+            .project({ user_id: 1, username: 1, first_name: 1, mythopoints: 1 })
             .toArray();
 
-        res.json({ 
-            success: true, 
-            history: historyRecords 
-        });
-    } catch (error) {
-        console.error("History API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch history" });
-    }
-});
+        const formatted = users.map(u => ({
+            id: u.user_id,
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            username: u.username || null,
+            points: u.mythopoints || 0
+        }));
 
-// ==========================================
-// AI MEMORY FUNCTIONS (Synced with cai.py)
-// ==========================================
-async function addToMemory(userId, message) {
-    // cai.py format for DMs is chat_id:user_id.
-    // In a WebApp context, the user is interacting via DM, so both are the same.
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    
-    if (!doc) {
-        await usersCollection.insertOne({
-            user_id: key,
-            chat_id: parseInt(userId),
-            user_id_num: parseInt(userId),
-            conversation: [message],
-            total_messages: 1,
-            first_seen: new Date(),
-            last_seen: new Date()
-        });
-    } else {
-        let conv = doc.conversation || [];
-        conv.push(message);
-        // cai.py limits to 1000 messages, syncing that limit here
-        if (conv.length > 1000) conv = conv.slice(-1000);
-        
-        await usersCollection.updateOne(
-            { user_id: key },
-            {
-                $set: {
-                    conversation: conv,
-                    total_messages: conv.length,
-                    last_seen: new Date()
-                }
-            }
-        );
-    }
-}
-
-async function getMemory(userId) {
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    
-    if (doc && doc.conversation) {
-        // cai.py specifically pulls the last 14 messages for the context window
-        const recent = doc.conversation.slice(-14);
-        return recent.join('\n');
-    }
-    return '';
-}
-
-async function clearMemory(userId) {
-    const key = `${userId}:${userId}`;
-    await usersCollection.updateOne(
-        { user_id: key },
-        {
-            $set: {
-                conversation: [],
-                total_messages: 0
-            }
-        },
-        { upsert: true }
-    );
-}
-
-
-// ==========================================
-// AI API ENDPOINT (Uses the synced memory)
-// ==========================================
-app.post("/api/ai", async (req, res) => {
-    try {
-        const { userId, message } = req.body;
-        if (!userId || !message) {
-            return res.status(400).json({ success: false, error: "Missing userId or message" });
-        }
-
-        // Store user message in memory
-        await addToMemory(userId, `User: ${message}`);
-
-        // Restoring the "vibe" while keeping it URL-friendly
-        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
-
-        // Serial detection (copied from cai.py)
-        const SERIAL_COMMANDS = {
-            "shiv shakti": "/ss s01e01",
-            "dwarkadheesh": "/d s01e01",
-            "karmadhikari shanidev": "/karm s01e01",
-            "chandra dev": "/cd s01e01",
-            "mahishasura mardini": "/mm s01e01",
-            "jai mahalakshmi": "/jm s01e01",
-            "chandra nandni": "/cn s01e01",
-            "brij ke gopal": "/bkg s01e01",
-            "yashomati maiya ke nandlala": "/ymkn s01e01",
-            "meera": "/meera s01e01",
-            "bangla": "/bang s01e01",
-            "dharm yoddha garud": "/dyg s01e01",
-            "siya ke ram": "/skr s01e01",
-            "ram siya ke luv kush": "/rsklk s01e01",
-            "tenali rama": "/tr s01e01",
-            "devon ke dev mahadev": "/dkdm s01e01",
-            "karn sangini": "/ks s01e01",
-            "bolo ambe maa ki jai": "/maa s01e01",
-            "sriman rama": "/rama s01e01",
-            "the legend of hanuman": "/tloh s01e01",
-            "ramayan luv kush": "/ramayan2 s01e01",
-            "hatim": "/hatim s01e01",
-            "ramanand sagar ramayan": "/ramayan s01e01",
-            "shrimad ramayan": "/sr s01e01",
-            "ramayan sabke jeevan ka aadhar": "/rsjka s01e01",
-            "radhakrishn": "/rk s1 e01",
-            "veer hanuman": "/vh s01e01",
-            "prithviraj chauhan": "/cspc s01e01",
-            "suryaputra karn": "/spk s01e01",
-            "jai kanhaiya laal ki": "/jklk s1 e01",
-            "kaamdhenu gaumata": "/kg s01e01",
-            "kakbhushundi ramayan": "/kr s01e01",
-            "mata saraswati": "/ms s01e01",
-            "shri krishna": "/sk s01e01",
-            "mahabharat": "/mb s01e01",
-            "jag jaanani maa vaishnodevi": "/jjmv s01e01",
-            "shri tirupati balaji": "/stb s01e01",
-            "ganesh kartikey": "/gk s01e01",
-            "kurukshetra": "/kurukshetra s01e01",
-            "mahabharat - ek dharmayudh": "/med s01e01",
-            "budh dev": "/bd s01e01"
-        };
-
-        function detectSerial(text) {
-            const lower = text.toLowerCase().trim();
-            for (const [name, cmd] of Object.entries(SERIAL_COMMANDS)) {
-                if (lower.includes(name)) return { serial: name, command: cmd };
-            }
-            return null;
-        }
-
-        let finalPrompt = "";
-        const serial = detectSerial(message);
-        if (serial) {
-            finalPrompt = `${sysPrompt} Task: User wants ${serial.serial}. Tell them to send: ${serial.command}`;
-        } else {
-            let history = await getMemory(userId);
-            
-            // Keep history concise to avoid URL length issues (last ~400 chars)
-            if (history && history.length > 400) {
-                history = "..." + history.slice(-400);
-            }
-            
-            if (history) {
-                finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
-            } else {
-                finalPrompt = `${sysPrompt} User says: ${message}`;
-            }
-        }
-
-        // Call external GPT-5 API 
-        const encoded = encodeURIComponent(finalPrompt);
-        const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
-        
-        // Supports both built-in Node fetch and node-fetch
-        let fetchModule;
-        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
-        
-        const response = await fetchModule(apiUrl);
-        let reply = null;
-        
-        if (response.ok) {
-            const data = await response.json();
-            reply = data.text || data.reply || data.response || data.message || data.data || null;
-            if (reply && typeof reply === 'string') {
-                // Convert markdown bold to HTML bold
-                reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-                reply = reply.replace(/\n/g, ' ');
-            }
-        }
-
-        if (!reply) {
-            reply = "Arre yaar, lagta hai network devlok (API) mein thoda busy chal raha hai! Thodi der mein wapas try kar 😅✨";
-        }
-
-        // Store AI reply in memory
-        await addToMemory(userId, `Mythobot: ${reply}`);
-
-        res.json({ success: true, reply });
-    } catch (error) {
-        console.error("AI API error:", error);
-        res.status(500).json({ success: false, error: "AI service unavailable" });
-    }
-});
-
-
-// ==========================================
-// AI MEMORY ENDPOINTS
-// ==========================================
-app.get("/api/ai/memory/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        const memory = await getMemory(userId);
-        res.json({ success: true, memory });
+        res.json({ success: true, users: formatted });
     } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to fetch memory" });
-    }
-});
-
-app.post("/api/ai/clear/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        await clearMemory(userId);
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to clear memory" });
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
 // ==========================================
-// MINI APP ROUTE (with AI floating button)
+// MINI APP ROUTE (with AI floating button) – UPDATED WITH NEW TABS
 // ==========================================
+
 app.get("/mini/:userId", (req, res) => {
     const userId = req.params.userId;
-    // Embed the full Mini App HTML (as provided earlier)
-    // For brevity, we assume the HTML is identical to the one in the previous answer.
-    // We'll include it here in full to keep the file self-contained.
+    // Full Mini App HTML (as provided earlier) but we need to add new tabs: Store & Payment.
+    // We'll embed the updated HTML with additional tabs.
     res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -2118,7 +1974,6 @@ app.get("/mini/:userId", (req, res) => {
       transition: all 0.3s ease;
     }
 
-    /* ----- NAVBAR ----- */
     .navbar {
       position: sticky;
       top: 0;
@@ -2135,12 +1990,10 @@ app.get("/mini/:userId", (req, res) => {
       color: #fff;
     }
 
-    /* ----- TAB CONTENT ----- */
     .tab-content { display: none; animation: fadeIn 0.3s ease; }
     .tab-content.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
 
-    /* ----- TAB BAR ----- */
     .tab-bar {
       position: fixed;
       bottom: 0;
@@ -2153,6 +2006,7 @@ app.get("/mini/:userId", (req, res) => {
       justify-content: space-around;
       padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 20px)) 0;
       z-index: 100;
+      overflow-x: auto;
     }
     .tab-btn {
       display: flex;
@@ -2164,11 +2018,12 @@ app.get("/mini/:userId", (req, res) => {
       transition: 0.2s;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
+      padding: 0 6px;
+      min-width: 56px;
     }
     .tab-btn svg { width: 26px; height: 26px; margin-bottom: 4px; fill: currentColor; }
     .tab-btn.active { color: #ea80fc; }
 
-    /* ----- WIDGETS ----- */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
     .widget {
       background: rgba(45,10,80,0.4);
@@ -2192,7 +2047,6 @@ app.get("/mini/:userId", (req, res) => {
     .w-bank { border: 0.5px solid rgba(48,209,88,0.3); background: rgba(48,209,88,0.05); }
     .w-bank .widget-value { color: #30d158; }
 
-    /* ----- PROFILE HEADER ----- */
     .profile-hdr {
       display: flex;
       align-items: center;
@@ -2220,7 +2074,6 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 6px;
     }
 
-    /* ----- HISTORY LIST ----- */
     .list-card { background: rgba(45,10,80,0.4); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.08); overflow: hidden; }
     .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.05); }
     .list-item:last-child { border-bottom: none; }
@@ -2230,12 +2083,10 @@ app.get("/mini/:userId", (req, res) => {
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
-    /* ----- LOADING / EMPTY ----- */
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.2); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.5); padding: 30px 20px; font-size: 14px; }
 
-    /* ----- FLOATING AI BUTTON (purple round, white text) ----- */
     .ai-fab {
       position: fixed;
       bottom: 100px;
@@ -2263,7 +2114,6 @@ app.get("/mini/:userId", (req, res) => {
       100% { box-shadow: 0 4px 40px rgba(213,0,249,0.9); }
     }
 
-    /* ----- AI CHAT MODAL (overlay) ----- */
     .ai-chat-overlay {
       display: none;
       position: fixed;
@@ -2382,7 +2232,6 @@ app.get("/mini/:userId", (req, res) => {
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
     }
 
-    /* ----- UPDATED LEADERBOARD STYLES ----- */
     .lb-item {
       display: flex;
       align-items: center;
@@ -2428,11 +2277,50 @@ app.get("/mini/:userId", (req, res) => {
     }
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
+
+    /* Payment & Store specific */
+    .store-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.05);
+    }
+    .store-item:last-child { border-bottom: none; }
+    .store-item button {
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      border: none;
+      padding: 6px 16px;
+      border-radius: 30px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .store-item button:active { transform: scale(0.95); }
+    .search-user-input {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 30px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 16px;
+      margin-bottom: 16px;
+    }
+    .search-user-input::placeholder { color: rgba(255,255,255,0.3); }
+    .user-result {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.05);
+      cursor: pointer;
+    }
+    .user-result:active { background: rgba(255,255,255,0.05); }
   </style>
 </head>
 <body>
 
-  <!-- NAVBAR -->
   <div class="navbar" id="navTitle">Home</div>
 
   <!-- TAB: HOME -->
@@ -2484,14 +2372,14 @@ app.get("/mini/:userId", (req, res) => {
     <div class="glass w-bank" style="margin:16px;">
       <div class="widget-icon">📈</div>
       <div class="widget-title">MythoFund Vault</div>
-      <div class="widget-value" id="ui-bank-invest" style="color:#30d158;">0</div>
+      <div class="widget-value" id="ui-bank-invest" style="color:#30d158;">0 pts</div>
       <div class="widget-sub">Active Investment</div>
     </div>
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget">
         <div class="widget-title">Pending Yield</div>
         <div class="widget-value" style="color:#ffd60a;" id="ui-bank-yield">+0</div>
-        <div class="widget-sub">Ready to claim</div>
+        <div class="widget-sub" id="bank-claim-btn" style="color:#ea80fc; cursor:pointer;">Claim</div>
       </div>
       <div class="widget">
         <div class="widget-title">Active Loan</div>
@@ -2499,8 +2387,69 @@ app.get("/mini/:userId", (req, res) => {
         <div class="widget-sub" id="ui-loan-status">No Debt</div>
       </div>
     </div>
-    <div style="padding:0 16px; text-align:center; font-size:13px; color:rgba(255,255,255,0.5); margin-top:12px;">
-      Manage via /mythobank in bot
+    <div style="padding:0 16px;">
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:10px; border-radius:30px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#fff;">
+        <button id="invest-btn" style="padding:10px 20px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Invest</button>
+        <button id="withdraw-btn" style="padding:10px 20px; border-radius:30px; border:none; background:rgba(255,69,58,0.3); color:#ff453a; font-weight:600;">Withdraw</button>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button id="loan-apply-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Apply Loan (100 pts)</button>
+        <button id="loan-repay-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:rgba(255,69,58,0.3); color:#ff453a; font-weight:600;">Repay Loan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: STORE -->
+  <div id="tab-store" class="tab-content">
+    <div class="glass" style="margin:16px;">
+      <h3 style="margin-bottom:12px;">🛍️ MythoStore</h3>
+      <div id="store-items">
+        <div class="store-item">
+          <span>🔑 5 Search Credits</span>
+          <button onclick="purchase('credits')">50 pts</button>
+        </div>
+        <div class="store-item">
+          <span>⏱️ Skip Cooldown</span>
+          <button onclick="purchase('skip_cooldown')">50 pts</button>
+        </div>
+        <div class="store-item">
+          <span>🎁 Mystery Box</span>
+          <button onclick="purchase('mystery')">100 pts</button>
+        </div>
+        <div class="store-item">
+          <span>🎟️ 10% OFF Coupon</span>
+          <button onclick="purchase('coupon_10')">200 pts</button>
+        </div>
+        <div class="store-item">
+          <span>🎟️ 20% OFF Coupon</span>
+          <button onclick="purchase('coupon_20')">500 pts</button>
+        </div>
+        <div class="store-item">
+          <span>🎟️ 30% OFF Coupon</span>
+          <button onclick="purchase('coupon_30')">800 pts</button>
+        </div>
+        <div class="store-item">
+          <span>🎟️ 50% OFF Coupon</span>
+          <button onclick="purchase('coupon_50')">1500 pts</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: PAYMENT -->
+  <div id="tab-payment" class="tab-content">
+    <div class="glass" style="margin:16px;">
+      <h3 style="margin-bottom:12px;">💸 Send Mythopoints</h3>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Min 200 pts | 15% tax | 1 payment/day</p>
+      <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
+      <div id="search-results"></div>
+      <div id="selected-user" style="display:none; margin:12px 0;">
+        <p>Send to: <span id="selected-name"></span> (ID: <span id="selected-id"></span>)</p>
+      </div>
+      <input type="number" id="payment-amount" placeholder="Amount" style="width:100%; padding:12px; border-radius:30px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#fff; margin-bottom:12px;" />
+      <button id="send-payment-btn" style="width:100%; padding:14px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Send Payment</button>
+      <div id="payment-status" style="margin-top:12px; text-align:center;"></div>
     </div>
   </div>
 
@@ -2512,7 +2461,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- TAB: LEADERBOARD (UPDATED UI) -->
+  <!-- TAB: LEADERBOARD -->
   <div id="tab-leaderboard" class="tab-content">
     <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.5);">🏆 MythoPoints Leaderboard</div>
     <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -2564,6 +2513,14 @@ app.get("/mini/:userId", (req, res) => {
     <div class="tab-btn" data-tab="bank">
       <svg viewBox="0 0 24 24"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72l5 2.73 5-2.73v3.72z"/></svg>
       <span>Bank</span>
+    </div>
+    <div class="tab-btn" data-tab="store">
+      <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
+      <span>Store</span>
+    </div>
+    <div class="tab-btn" data-tab="payment">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+      <span>Pay</span>
     </div>
     <div class="tab-btn" data-tab="history">
       <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
@@ -2630,6 +2587,8 @@ app.get("/mini/:userId", (req, res) => {
     const tabContents = {
       home: document.getElementById('tab-home'),
       bank: document.getElementById('tab-bank'),
+      store: document.getElementById('tab-store'),
+      payment: document.getElementById('tab-payment'),
       history: document.getElementById('tab-history'),
       leaderboard: document.getElementById('tab-leaderboard'),
       profile: document.getElementById('tab-profile')
@@ -2646,9 +2605,11 @@ app.get("/mini/:userId", (req, res) => {
         });
         navTitle.innerText = tab.charAt(0).toUpperCase() + tab.slice(1);
         tg.HapticFeedback.selectionChanged();
+        if (tab === 'bank') loadBankData();
         if (tab === 'leaderboard') loadLeaderboard();
         if (tab === 'history') loadHistory();
         if (tab === 'profile') loadProfile();
+        if (tab === 'payment') loadPaymentStatus();
       });
     });
 
@@ -2681,24 +2642,228 @@ app.get("/mini/:userId", (req, res) => {
         document.getElementById('ui-credits').innerText = data.search.credits;
         document.getElementById('ui-life-earn').innerText = data.stats.lifetimeEarned.toLocaleString();
         document.getElementById('ui-life-spent').innerText = data.stats.lifetimeSpent.toLocaleString();
+        // Bank tab will be loaded when selected
+      } catch (e) {
+        console.error('Dashboard error:', e);
+      }
+    }
 
-        // Bank
-        document.getElementById('ui-bank-invest').innerText = data.bank.invested.toLocaleString() + ' pts';
-        document.getElementById('ui-bank-yield').innerText = '+' + data.bank.pendingInterest.toLocaleString();
-        if (data.bank.activeLoan) {
-          document.getElementById('ui-bank-loan').innerText = data.bank.loanDue.toLocaleString();
+    // ─── BANK DATA ───
+    async function loadBankData() {
+      try {
+        const res = await fetch('/api/bank/status/' + userId);
+        const data = await res.json();
+        if (!data.success) return;
+        document.getElementById('ui-bank-invest').innerText = data.invested.toLocaleString() + ' pts';
+        document.getElementById('ui-bank-yield').innerText = '+' + data.pendingInterest.toLocaleString();
+        if (data.loanActive) {
+          document.getElementById('ui-bank-loan').innerText = data.loanDue.toLocaleString();
           document.getElementById('ui-loan-status').innerText = 'Accumulating 10%/day';
         } else {
           document.getElementById('ui-bank-loan').innerText = '0';
           document.getElementById('ui-bank-loan').style.color = '#30d158';
           document.getElementById('ui-loan-status').innerText = 'Eligible for loan';
         }
-      } catch (e) {
-        console.error('Dashboard error:', e);
-      }
+        // Set claim button
+        const claimBtn = document.getElementById('bank-claim-btn');
+        if (data.pendingInterest > 0) {
+          claimBtn.style.display = 'block';
+          claimBtn.innerText = 'Claim +' + data.pendingInterest;
+          claimBtn.onclick = () => claimInterest();
+        } else {
+          claimBtn.style.display = 'none';
+        }
+      } catch (e) {}
     }
 
-    // ─── LOAD HISTORY ───
+    async function claimInterest() {
+      try {
+        const res = await fetch('/api/bank/claim/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert('Claimed ' + data.claimed + ' MythoPoints!');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error || 'Failed to claim.');
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('invest-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('invest-amount').value);
+      if (!amount || amount < 1) return alert('Enter a valid amount.');
+      try {
+        const res = await fetch('/api/bank/invest/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('withdraw-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('invest-amount').value);
+      if (!amount || amount < 1) return alert('Enter a valid amount.');
+      try {
+        const res = await fetch('/api/bank/withdraw/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('loan-apply-btn').addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/bank/loan/apply/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('loan-repay-btn').addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/bank/loan/repay/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    // ─── STORE ───
+    async function purchase(item) {
+      try {
+        const res = await fetch('/api/store/purchase/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    }
+    window.purchase = purchase;
+
+    // ─── PAYMENT ───
+    let selectedReceiver = null;
+
+    document.getElementById('search-user').addEventListener('input', async function() {
+      const query = this.value.trim();
+      if (query.length < 2) {
+        document.getElementById('search-results').innerHTML = '';
+        return;
+      }
+      try {
+        const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
+        const data = await res.json();
+        if (data.success && data.users.length) {
+          let html = '';
+          data.users.forEach(u => {
+            html += \`
+              <div class="user-result" onclick="selectUser(\${u.id}, '\${u.name}')">
+                <span>\${u.name} \${u.username ? '@' + u.username : ''}</span>
+                <span style="color:rgba(255,255,255,0.5);">\${u.points} pts</span>
+              </div>
+            \`;
+          });
+          document.getElementById('search-results').innerHTML = html;
+        } else {
+          document.getElementById('search-results').innerHTML = '<div class="empty">No users found.</div>';
+        }
+      } catch (e) {}
+    });
+
+    function selectUser(id, name) {
+      selectedReceiver = id;
+      document.getElementById('selected-user').style.display = 'block';
+      document.getElementById('selected-name').innerText = name;
+      document.getElementById('selected-id').innerText = id;
+      document.getElementById('search-results').innerHTML = '';
+    }
+    window.selectUser = selectUser;
+
+    document.getElementById('send-payment-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('payment-amount').value);
+      if (!selectedReceiver) return alert('Select a receiver first.');
+      if (!amount || amount < 200) return alert('Minimum 200 Mythopoints.');
+      
+      try {
+        const res = await fetch('/api/payment/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderId: userId,
+            receiverId: selectedReceiver,
+            amount: amount
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          alert(data.message);
+          loadDashboard();
+          loadPaymentStatus();
+          document.getElementById('payment-amount').value = '';
+          selectedReceiver = null;
+          document.getElementById('selected-user').style.display = 'none';
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    async function loadPaymentStatus() {
+      try {
+        const res = await fetch('/api/ios-dashboard-data/' + userId);
+        const data = await res.json();
+        if (data.success && data.payment) {
+          const used = data.payment.usedToday || 0;
+          const limit = data.payment.dailyLimit || 1;
+          document.getElementById('payment-status').innerHTML = \`Daily payments: \${used}/\${limit}\`;
+        }
+      } catch (e) {}
+    }
+
+    // ─── HISTORY ───
     async function loadHistory() {
       const container = document.getElementById('ui-history-list');
       container.innerHTML = '<div class="spinner"></div>';
@@ -2729,7 +2894,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── LOAD LEADERBOARD (UPDATED RENDERING) ───
+    // ─── LEADERBOARD ───
     let lbPage = 1, lbFilter = 'all', lbTotalPages = 1;
     async function loadLeaderboard() {
       const list = document.getElementById('lb-list');
@@ -2766,7 +2931,6 @@ app.get("/mini/:userId", (req, res) => {
             </div>
           \`;
         });
-        // Your rank section
         if (data.currentUser) {
           const cu = data.currentUser;
           html += \`
@@ -2783,7 +2947,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Leaderboard filter buttons
     document.querySelectorAll('.lb-filter').forEach(btn => {
       btn.addEventListener('click', function() {
         document.querySelectorAll('.lb-filter').forEach(b => b.classList.remove('active'));
@@ -2800,7 +2963,7 @@ app.get("/mini/:userId", (req, res) => {
       if (lbPage < lbTotalPages) { lbPage++; loadLeaderboard(); }
     });
 
-    // ─── LOAD PROFILE ───
+    // ─── PROFILE ───
     async function loadProfile() {
       try {
         const res = await fetch('/api/ios-profile-data/' + userId);
@@ -2897,12 +3060,321 @@ app.get("/mini/:userId", (req, res) => {
 
     // ─── INIT ───
     loadDashboard();
+    if (document.getElementById('tab-bank').classList.contains('active')) loadBankData();
     if (document.getElementById('tab-history').classList.contains('active')) loadHistory();
     if (document.getElementById('tab-leaderboard').classList.contains('active')) loadLeaderboard();
+    if (document.getElementById('tab-payment').classList.contains('active')) loadPaymentStatus();
   </script>
 </body>
 </html>
     `);
+});
+
+// ==========================================
+// LEADERBOARD API (unchanged)
+// ==========================================
+app.get("/api/leaderboard/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { timeframe = "all", page = 1 } = req.query;
+        const limit = 10;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let pointField = "mythopoints";
+        if (timeframe === "weekly") pointField = "weekly_points";
+        if (timeframe === "monthly") pointField = "monthly_points";
+
+        const query = {};
+        query[pointField] = { $gt: 0 };
+
+        const totalUsers = await usersCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+        const users = await usersCollection
+            .find(query)
+            .sort({ [pointField]: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        const formattedUsers = users.map(u => {
+            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
+            let safeUsername = null;
+            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
+                safeUsername = rawUsername.trim().startsWith('@') 
+                    ? rawUsername.trim() 
+                    : `@${rawUsername.trim()}`;
+            }
+            let rawName = u.name || u.first_name || null;
+            if (!rawName) {
+                if (safeUsername) {
+                    rawName = safeUsername;
+                } else {
+                    rawName = `User ${u.user_id}`;
+                }
+            }
+            let finalName = String(rawName); 
+            if (finalName.length > 15) {
+                finalName = finalName.substring(0, 15) + "..";
+            }
+            return {
+                user_id: u.user_id,
+                name: finalName,
+                username: safeUsername,
+                points: u[pointField] || 0,
+                title: getRankTitle(u[pointField] || 0) 
+            };
+        });
+
+        let currentUser = null;
+        const userDoc = await usersCollection.findOne({ user_id: uid });
+        if (userDoc && userDoc[pointField] > 0) {
+            const rankQuery = {};
+            rankQuery[pointField] = { $gt: userDoc[pointField] };
+            const higherCount = await usersCollection.countDocuments(rankQuery);
+            currentUser = {
+                points: userDoc[pointField],
+                rank: higherCount + 1,
+                title: getRankTitle(userDoc[pointField])
+            };
+        }
+
+        res.json({
+            success: true,
+            page: parseInt(page),
+            totalPages: totalPages,
+            users: formattedUsers,
+            currentUser: currentUser
+        });
+    } catch (error) {
+        console.error("Leaderboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+    }
+});
+
+// ==========================================
+// HISTORY API (unchanged)
+// ==========================================
+app.get("/api/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { filter = "ALL", page = 1 } = req.query;
+        const limit = 15;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let query = { user_id: uid };
+        if (filter !== "ALL") {
+            query.type = filter.toUpperCase();
+        }
+
+        const historyRecords = await mpHistoryCollection
+            .find(query)
+            .sort({ date: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ 
+            success: true, 
+            history: historyRecords 
+        });
+    } catch (error) {
+        console.error("History API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch history" });
+    }
+});
+
+// ==========================================
+// AI MEMORY FUNCTIONS (unchanged)
+// ==========================================
+async function addToMemory(userId, message) {
+    const key = `${userId}:${userId}`;
+    const doc = await usersCollection.findOne({ user_id: key });
+    if (!doc) {
+        await usersCollection.insertOne({
+            user_id: key,
+            chat_id: parseInt(userId),
+            user_id_num: parseInt(userId),
+            conversation: [message],
+            total_messages: 1,
+            first_seen: new Date(),
+            last_seen: new Date()
+        });
+    } else {
+        let conv = doc.conversation || [];
+        conv.push(message);
+        if (conv.length > 1000) conv = conv.slice(-1000);
+        await usersCollection.updateOne(
+            { user_id: key },
+            {
+                $set: {
+                    conversation: conv,
+                    total_messages: conv.length,
+                    last_seen: new Date()
+                }
+            }
+        );
+    }
+}
+
+async function getMemory(userId) {
+    const key = `${userId}:${userId}`;
+    const doc = await usersCollection.findOne({ user_id: key });
+    if (doc && doc.conversation) {
+        const recent = doc.conversation.slice(-14);
+        return recent.join('\n');
+    }
+    return '';
+}
+
+async function clearMemory(userId) {
+    const key = `${userId}:${userId}`;
+    await usersCollection.updateOne(
+        { user_id: key },
+        {
+            $set: {
+                conversation: [],
+                total_messages: 0
+            }
+        },
+        { upsert: true }
+    );
+}
+
+// ==========================================
+// AI API ENDPOINT (unchanged)
+// ==========================================
+app.post("/api/ai", async (req, res) => {
+    try {
+        const { userId, message } = req.body;
+        if (!userId || !message) {
+            return res.status(400).json({ success: false, error: "Missing userId or message" });
+        }
+
+        await addToMemory(userId, `User: ${message}`);
+
+        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
+
+        const SERIAL_COMMANDS = {
+            "shiv shakti": "/ss s01e01",
+            "dwarkadheesh": "/d s01e01",
+            "karmadhikari shanidev": "/karm s01e01",
+            "chandra dev": "/cd s01e01",
+            "mahishasura mardini": "/mm s01e01",
+            "jai mahalakshmi": "/jm s01e01",
+            "chandra nandni": "/cn s01e01",
+            "brij ke gopal": "/bkg s01e01",
+            "yashomati maiya ke nandlala": "/ymkn s01e01",
+            "meera": "/meera s01e01",
+            "bangla": "/bang s01e01",
+            "dharm yoddha garud": "/dyg s01e01",
+            "siya ke ram": "/skr s01e01",
+            "ram siya ke luv kush": "/rsklk s01e01",
+            "tenali rama": "/tr s01e01",
+            "devon ke dev mahadev": "/dkdm s01e01",
+            "karn sangini": "/ks s01e01",
+            "bolo ambe maa ki jai": "/maa s01e01",
+            "sriman rama": "/rama s01e01",
+            "the legend of hanuman": "/tloh s01e01",
+            "ramayan luv kush": "/ramayan2 s01e01",
+            "hatim": "/hatim s01e01",
+            "ramanand sagar ramayan": "/ramayan s01e01",
+            "shrimad ramayan": "/sr s01e01",
+            "ramayan sabke jeevan ka aadhar": "/rsjka s01e01",
+            "radhakrishn": "/rk s1 e01",
+            "veer hanuman": "/vh s01e01",
+            "prithviraj chauhan": "/cspc s01e01",
+            "suryaputra karn": "/spk s01e01",
+            "jai kanhaiya laal ki": "/jklk s1 e01",
+            "kaamdhenu gaumata": "/kg s01e01",
+            "kakbhushundi ramayan": "/kr s01e01",
+            "mata saraswati": "/ms s01e01",
+            "shri krishna": "/sk s01e01",
+            "mahabharat": "/mb s01e01",
+            "jag jaanani maa vaishnodevi": "/jjmv s01e01",
+            "shri tirupati balaji": "/stb s01e01",
+            "ganesh kartikey": "/gk s01e01",
+            "kurukshetra": "/kurukshetra s01e01",
+            "mahabharat - ek dharmayudh": "/med s01e01",
+            "budh dev": "/bd s01e01"
+        };
+
+        function detectSerial(text) {
+            const lower = text.toLowerCase().trim();
+            for (const [name, cmd] of Object.entries(SERIAL_COMMANDS)) {
+                if (lower.includes(name)) return { serial: name, command: cmd };
+            }
+            return null;
+        }
+
+        let finalPrompt = "";
+        const serial = detectSerial(message);
+        if (serial) {
+            finalPrompt = `${sysPrompt} Task: User wants ${serial.serial}. Tell them to send: ${serial.command}`;
+        } else {
+            let history = await getMemory(userId);
+            if (history && history.length > 400) {
+                history = "..." + history.slice(-400);
+            }
+            if (history) {
+                finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
+            } else {
+                finalPrompt = `${sysPrompt} User says: ${message}`;
+            }
+        }
+
+        const encoded = encodeURIComponent(finalPrompt);
+        const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
+        
+        let fetchModule;
+        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
+        
+        const response = await fetchModule(apiUrl);
+        let reply = null;
+        
+        if (response.ok) {
+            const data = await response.json();
+            reply = data.text || data.reply || data.response || data.message || data.data || null;
+            if (reply && typeof reply === 'string') {
+                reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                reply = reply.replace(/\n/g, ' ');
+            }
+        }
+
+        if (!reply) {
+            reply = "Arre yaar, lagta hai network devlok (API) mein thoda busy chal raha hai! Thodi der mein wapas try kar 😅✨";
+        }
+
+        await addToMemory(userId, `Mythobot: ${reply}`);
+
+        res.json({ success: true, reply });
+    } catch (error) {
+        console.error("AI API error:", error);
+        res.status(500).json({ success: false, error: "AI service unavailable" });
+    }
+});
+
+// ==========================================
+// AI MEMORY ENDPOINTS
+// ==========================================
+app.get("/api/ai/memory/:userId", async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const memory = await getMemory(userId);
+        res.json({ success: true, memory });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to fetch memory" });
+    }
+});
+
+app.post("/api/ai/clear/:userId", async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        await clearMemory(userId);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to clear memory" });
+    }
 });
 
 // ========================
