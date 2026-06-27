@@ -2846,9 +2846,9 @@ app.get("/mini/:userId", (req, res) => {
       <div class="spinner"></div>
     </div>
     <div style="display:flex; justify-content:center; gap:16px; padding:8px 16px;">
-      <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">⬅️</button>
+      <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;"><</button>
       <span id="lb-page-info" style="color:rgba(255,255,255,0.3);">Page 1</span>
-      <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">➡️</button>
+      <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">></button>
     </div>
   </div>
 
