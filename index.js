@@ -2194,6 +2194,7 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       gap: 16px;
       margin: 16px 16px 8px;
+      position: relative;
     }
     .profile-pic {
       width: 72px;
@@ -2204,6 +2205,7 @@ app.get("/mini/:userId", (req, res) => {
       background: #1c0a2b;
       box-shadow: 0 0 20px rgba(0,230,118,0.25);
     }
+    .profile-info { flex: 1; }
     .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
     .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: #ea80fc; font-weight: 500; }
     .badge {
@@ -2217,6 +2219,27 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 6px;
       border: 0.5px solid rgba(213,0,249,0.15);
     }
+    /* Switch button on home profile */
+    .switch-btn {
+      background: rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: 0.2s;
+      color: #ea80fc;
+      flex-shrink: 0;
+    }
+    .switch-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+    .switch-btn:active { transform: scale(0.9); background: rgba(213,0,249,0.15); }
 
     /* === LIST CARD === */
     .list-card { 
@@ -2227,17 +2250,42 @@ app.get("/mini/:userId", (req, res) => {
     }
     .list-item { 
       display: flex; 
-      justify-content: space-between; 
-      align-items: center; 
+      align-items: center;
       padding: 14px 16px; 
       border-bottom: 0.5px solid rgba(255,255,255,0.04); 
       transition: background 0.15s;
+      gap: 12px;
     }
     .list-item:last-child { border-bottom: none; }
+    .list-item .tx-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .list-item .tx-icon svg {
+      width: 18px;
+      height: 18px;
+      fill: #fff;
+    }
+    .tx-icon.earn { background: rgba(48,209,88,0.2); border: 1px solid rgba(48,209,88,0.3); }
+    .tx-icon.spend { background: rgba(255,69,58,0.2); border: 1px solid rgba(255,69,58,0.3); }
+    .tx-icon.tax { background: rgba(255,214,10,0.2); border: 1px solid rgba(255,214,10,0.3); }
+    .tx-icon.default { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.05); }
+
+    .list-item .item-content {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
     .item-left { display: flex; flex-direction: column; gap: 2px; }
     .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
     .item-left span { font-size: 12px; color: rgba(255,255,255,0.4); }
-    .item-right { font-weight: 600; font-size: 16px; color: #fff; } /* white points */
+    .item-right { font-weight: 600; font-size: 16px; color: #fff; }
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
@@ -2404,49 +2452,56 @@ app.get("/mini/:userId", (req, res) => {
       gap: 8px;
     }
     .lb-item:last-child { border-bottom: none; }
+
+    .lb-avatar-wrap {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+    }
     .lb-avatar {
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 16px;
       color: #fff;
       background: #651fff;
-      flex-shrink: 0;
       text-transform: uppercase;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.1);
     }
-    .lb-rank {
-      width: 32px;
-      height: 32px;
+    .lb-avatar-wrap .rank-badge {
+      position: absolute;
+      bottom: -4px;
+      right: -4px;
+      background: #0a0014;
+      border: 1.5px solid rgba(255,255,255,0.15);
       border-radius: 50%;
+      width: 22px;
+      height: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-size: 10px;
       font-weight: 700;
-      font-size: 13px;
-      background: rgba(255,255,255,0.04);
-      color: #aaa;
-      flex-shrink: 0;
-      margin-right: 4px;
-      position: relative;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.6);
     }
-    .lb-rank .medal {
-      font-size: 18px;
-      line-height: 1;
-    }
-    .lb-rank.gold { background: linear-gradient(135deg, #ffd700, #b8860b); color: #fff; box-shadow: 0 0 15px rgba(255,215,0,0.3); }
-    .lb-rank.silver { background: linear-gradient(135deg, #c0c0c0, #808080); color: #fff; box-shadow: 0 0 15px rgba(192,192,192,0.2); }
-    .lb-rank.bronze { background: linear-gradient(135deg, #cd7f32, #8b5a2b); color: #fff; box-shadow: 0 0 15px rgba(205,127,50,0.2); }
-    .lb-rank.self { background: #d500f9; color: #fff; box-shadow: 0 0 15px rgba(213,0,249,0.5); }
+    .lb-rank.gold .lb-avatar { border-color: #FFD700; box-shadow: 0 0 20px rgba(255,215,0,0.4); }
+    .lb-rank.silver .lb-avatar { border-color: #C0C0C0; box-shadow: 0 0 20px rgba(192,192,192,0.3); }
+    .lb-rank.bronze .lb-avatar { border-color: #CD7F32; box-shadow: 0 0 20px rgba(205,127,50,0.3); }
+    .lb-rank.default .lb-avatar { border-color: rgba(255,255,255,0.08); }
+    .lb-rank.self .lb-avatar { border-color: #d500f9; box-shadow: 0 0 20px rgba(213,0,249,0.3); }
 
     .lb-info { flex: 1; }
     .lb-name { font-weight: 600; font-size: 16px; }
     .lb-name.self-highlight { color: #ea80fc; }
     .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.15); padding: 2px 8px; border-radius: 30px; margin-left: 8px; color: #ea80fc; }
-    .lb-pts { font-weight: 600; color: #ffffff; font-size: 15px; } /* white points */
+    .lb-pts { font-weight: 600; color: #ffffff; font-size: 15px; }
 
     .lb-self-row {
       margin-top: 12px;
@@ -2707,6 +2762,10 @@ app.get("/mini/:userId", (req, res) => {
         <p id="ui-id">ID: ${userId}</p>
         <div class="badge" id="ui-verified">Checking...</div>
       </div>
+      <!-- Switch Button -->
+      <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+      </a>
     </div>
 
     <div class="grid-2" style="padding:0 16px;">
@@ -3455,16 +3514,33 @@ app.get("/mini/:userId", (req, res) => {
         }
         container.innerHTML = data.history.map(item => {
           const isEarn = item.type === 'EARNED';
+          const isTax = item.type === 'TAX';
           const sign = isEarn ? '+' : '-';
           const cls = isEarn ? 'val-pos' : 'val-neg';
           const date = new Date(item.date).toLocaleDateString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+          // Icon based on type
+          let iconClass = 'default';
+          let iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>';
+          if (isEarn) {
+            iconClass = 'earn';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+          } else if (isTax) {
+            iconClass = 'tax';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>';
+          } else {
+            iconClass = 'spend';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+          }
           return \`
             <div class="list-item">
-              <div class="item-left">
-                <p>\${item.reason || item.type}</p>
-                <span>\${date}</span>
+              <div class="tx-icon \${iconClass}">\${iconSvg}</div>
+              <div class="item-content">
+                <div class="item-left">
+                  <p>\${item.reason || item.type}</p>
+                  <span>\${date}</span>
+                </div>
+                <div class="item-right \${cls}">\${sign}\${item.amount}</div>
               </div>
-              <div class="item-right \${cls}">\${sign}\${item.amount}</div>
             </div>
           \`;
         }).join('');
@@ -3492,22 +3568,27 @@ app.get("/mini/:userId", (req, res) => {
         data.users.forEach((u, idx) => {
           const rank = (data.page - 1) * 10 + idx + 1;
           let rankClass = 'lb-rank';
-          let medalHtml = '';
-          if (rank === 1) { rankClass += ' gold'; medalHtml = '🥇'; }
-          else if (rank === 2) { rankClass += ' silver'; medalHtml = '🥈'; }
-          else if (rank === 3) { rankClass += ' bronze'; medalHtml = '🥉'; }
+          if (rank === 1) rankClass += ' gold';
+          else if (rank === 2) rankClass += ' silver';
+          else if (rank === 3) rankClass += ' bronze';
+          else rankClass += ' default';
           const isSelf = u.user_id == userId;
           if (isSelf) rankClass += ' self';
           const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
           const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
-          // Generate avatar
+          // Avatar: use photo from Telegram if available? We can't store per-user photo in this simple list.
+          // We'll use initials with a color derived from user_id.
           const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
           const hue = (u.user_id * 137) % 360;
           const bgColor = \`hsl(\${hue}, 70%, 40%)\`;
+          // Rank badge
+          const rankBadge = \`#\${rank}\`;
           html += \`
-            <div class="lb-item" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
-              <div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>
-              <div class="\${rankClass}">\${medalHtml || rank}</div>
+            <div class="lb-item \${rankClass}" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
+              <div class="lb-avatar-wrap">
+                <div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>
+                <div class="rank-badge">\${rankBadge}</div>
+              </div>
               <div class="lb-info">
                 <span class="\${nameClass}">\${u.name} \${youTag}</span>
               </div>
