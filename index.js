@@ -2030,7 +2030,7 @@ app.post("/api/sync-profile", async (req, res) => {
 });
 
 // ==========================================
-// CHANT & EARN (Tap to Earn) – NEW FEATURE
+// CHANT & EARN (Tap to Earn) – UPDATED
 // ==========================================
 
 // In-memory rate limiting: last sync timestamps per user
@@ -2128,7 +2128,45 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chant tab)
+// CHANT LEADERBOARD (top by total taps)
+// ==========================================
+app.get("/api/chant/leaderboard", async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 5;
+        const top = await userStatsCollection
+            .find({ chant_taps: { $gt: 0 } })
+            .sort({ chant_taps: -1 })
+            .limit(limit)
+            .toArray();
+
+        // Fetch user details (name, photo) for each
+        const userIds = top.map(s => s.user_id);
+        const users = await usersCollection
+            .find({ user_id: { $in: userIds } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+        const userMap = {};
+        users.forEach(u => userMap[u.user_id] = u);
+
+        const leaderboard = top.map(s => {
+            const user = userMap[s.user_id] || {};
+            return {
+                userId: s.user_id,
+                name: user.first_name || user.username || `User ${s.user_id}`,
+                photo: user.photo_url || null,
+                taps: s.chant_taps || 0
+            };
+        });
+
+        res.json({ success: true, leaderboard });
+    } catch (e) {
+        console.error("Chant leaderboard error:", e);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+    }
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chant card on Home)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2871,12 +2909,12 @@ app.get("/mini/:userId", (req, res) => {
       color: #ffffff !important;
     }
 
-    /* ===== CHANT TAB SPECIAL STYLES ===== */
+    /* ===== CHANT CARD STYLES (integrated into Home) ===== */
     .chant-level {
       text-align: center;
       font-size: 22px;
       font-weight: 700;
-      margin: 8px 0 4px;
+      margin: 4px 0 2px;
       background: linear-gradient(135deg, #ffd60a, #ff9f1c);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -2885,8 +2923,8 @@ app.get("/mini/:userId", (req, res) => {
     .chant-progress-container {
       background: rgba(255,255,255,0.06);
       border-radius: 30px;
-      height: 10px;
-      margin: 8px 16px 12px;
+      height: 8px;
+      margin: 6px 0 10px;
       overflow: hidden;
       box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
     }
@@ -2900,40 +2938,41 @@ app.get("/mini/:userId", (req, res) => {
     }
     .chant-counter {
       text-align: center;
-      font-size: 16px;
-      color: rgba(255,255,255,0.6);
-      margin-bottom: 20px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 12px;
       font-weight: 500;
     }
     .chant-counter span { color: #fff; font-weight: 700; }
     .chant-orb-container {
       display: flex;
       justify-content: center;
-      margin: 10px 0 20px;
+      margin: 6px 0 10px;
       position: relative;
     }
     .chant-orb {
-      width: 200px;
-      height: 200px;
+      width: 160px;
+      height: 160px;
       border-radius: 50%;
       background: radial-gradient(circle at 30% 30%, #ff9f1c, #d500f9);
-      box-shadow: 0 0 60px rgba(213,0,249,0.6), 0 0 120px rgba(213,0,249,0.3);
+      box-shadow: 0 0 40px rgba(213,0,249,0.5), 0 0 80px rgba(213,0,249,0.2);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: transform 0.1s ease;
+      transition: transform 0.15s ease, box-shadow 0.2s;
       user-select: none;
       -webkit-user-select: none;
       position: relative;
-      border: 2px solid rgba(255,255,255,0.2);
+      border: 2px solid rgba(255,255,255,0.15);
     }
     .chant-orb:active {
       transform: scale(0.92);
+      box-shadow: 0 0 60px rgba(213,0,249,0.8);
     }
     .chant-orb .chant-text {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 700;
       color: #fff;
       text-shadow: 0 0 20px rgba(0,0,0,0.5);
@@ -2943,36 +2982,49 @@ app.get("/mini/:userId", (req, res) => {
     }
     .chant-orb .edit-icon {
       position: absolute;
-      bottom: 16px;
-      right: 16px;
+      bottom: 12px;
+      right: 12px;
       background: rgba(0,0,0,0.5);
       border-radius: 50%;
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
       transition: background 0.2s;
       color: #fff;
-      font-size: 14px;
+      font-size: 12px;
       border: 1px solid rgba(255,255,255,0.2);
     }
     .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
 
+    /* Ripple effect for tap */
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+      transform: scale(0);
+      animation: rippleAnim 0.6s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes rippleAnim {
+      to { transform: scale(2); opacity: 0; }
+    }
+
     .floating-tap {
       position: fixed;
       pointer-events: none;
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 700;
       color: #ffd60a;
       text-shadow: 0 0 20px rgba(255,214,10,0.8);
-      animation: floatUp 1s forwards ease-out;
+      animation: floatUp 0.8s forwards ease-out;
       z-index: 999;
     }
     @keyframes floatUp {
       0% { opacity: 1; transform: translateY(0) scale(1); }
-      100% { opacity: 0; transform: translateY(-120px) scale(1.4); }
+      100% { opacity: 0; transform: translateY(-80px) scale(1.3); }
     }
 
     .chant-mint-animation {
@@ -2980,8 +3032,49 @@ app.get("/mini/:userId", (req, res) => {
     }
     @keyframes mintPulse {
       0% { transform: scale(1); }
-      50% { transform: scale(1.3); box-shadow: 0 0 80px rgba(255,214,10,0.9); }
+      50% { transform: scale(1.2); box-shadow: 0 0 80px rgba(255,214,10,0.9); }
       100% { transform: scale(1); }
+    }
+
+    .chant-leaderboard {
+      margin-top: 12px;
+    }
+    .chant-lb-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.04);
+      gap: 10px;
+    }
+    .chant-lb-item:last-child { border-bottom: none; }
+    .chant-lb-rank {
+      font-weight: 600;
+      color: rgba(255,255,255,0.3);
+      font-size: 12px;
+      width: 20px;
+    }
+    .chant-lb-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 12px;
+      color: #fff;
+    }
+    .chant-lb-name {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+    }
+    .chant-lb-taps {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
     }
   </style>
 </head>
@@ -3048,6 +3141,32 @@ app.get("/mini/:userId", (req, res) => {
       <div class="quick-action pay" onclick="switchTab('pay')">
         <div class="icon">💸</div>
         <div class="label">Pay</div>
+      </div>
+    </div>
+
+    <!-- ========== CHANT & EARN CARD ========== -->
+    <div class="glass" style="margin: 12px 16px 8px;">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        Chant & Earn
+      </div>
+      <div class="chant-level" id="chant-level">Seeker</div>
+      <div class="chant-progress-container">
+        <div class="chant-progress-bar" id="chant-progress" style="width:0%;"></div>
+      </div>
+      <div class="chant-counter">
+        <span id="chant-tap-count">0</span> / 1000 taps • <span id="chant-reward-multiplier">1</span>× reward
+      </div>
+      <div class="chant-orb-container">
+        <div class="chant-orb" id="chant-orb">
+          <span class="chant-text" id="chant-text">Radha Radha</span>
+          <div class="edit-icon" id="chant-edit">✎</div>
+        </div>
+      </div>
+      <!-- Compact Leaderboard -->
+      <div class="chant-leaderboard" id="chant-leaderboard">
+        <div style="font-size:12px; color:rgba(255,255,255,0.3); margin-bottom:6px;">Top Chanters</div>
+        <div id="chant-lb-list"><div class="spinner" style="width:24px;height:24px;margin:8px auto;"></div></div>
       </div>
     </div>
 
@@ -3248,26 +3367,6 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== NEW TAB: CHANT & EARN ========== -->
-  <div id="tab-chant" class="tab-content">
-    <div style="text-align:center; padding-top:10px;">
-      <div class="chant-level" id="chant-level">Seeker</div>
-      <div class="chant-progress-container">
-        <div class="chant-progress-bar" id="chant-progress" style="width:0%;"></div>
-      </div>
-      <div class="chant-counter">
-        <span id="chant-tap-count">0</span> / 1000 taps
-      </div>
-      <div class="chant-orb-container">
-        <div class="chant-orb" id="chant-orb">
-          <span class="chant-text" id="chant-text">Radha Radha</span>
-          <div class="edit-icon" id="chant-edit">✎</div>
-        </div>
-      </div>
-      <div style="margin-top:8px; color:rgba(255,255,255,0.3); font-size:13px;">Tap the orb to chant and earn</div>
-    </div>
-  </div>
-
   <!-- ========== TAB BAR (SVG Icons, no emojis) ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
@@ -3290,11 +3389,6 @@ app.get("/mini/:userId", (req, res) => {
     <div class="tab-btn" data-tab="profile">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
       <span>Profile</span>
-    </div>
-    <!-- NEW CHANT TAB BUTTON -->
-    <div class="tab-btn" data-tab="chant">
-      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
-      <span>Chant</span>
     </div>
   </div>
 
@@ -3419,8 +3513,7 @@ app.get("/mini/:userId", (req, res) => {
       bank: document.getElementById('tab-bank'),
       store: document.getElementById('tab-store'),
       pay: document.getElementById('tab-pay'),
-      profile: document.getElementById('tab-profile'),
-      chant: document.getElementById('tab-chant') // new
+      profile: document.getElementById('tab-profile')
     };
     const navTitle = document.getElementById('navTitle');
 
@@ -3435,7 +3528,6 @@ app.get("/mini/:userId", (req, res) => {
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
       if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
       if (tabId === 'pay') loadPaymentStatus();
-      if (tabId === 'chant') { initChantTab(); } // load chant stats
     }
     window.switchTab = switchTab;
 
@@ -4048,17 +4140,18 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     // ============================================================
-    // CHANT & EARN – TAP TO EARN LOGIC
+    // CHANT & EARN – TAP TO EARN LOGIC (Integrated into Home)
     // ============================================================
     let chantTapCount = 0;        // unredeemed taps since last 1000
     let chantTotalTaps = 0;       // lifetime taps (from server)
     let chantText = 'Radha Radha';
+    let chantLastTapTime = 0;     // for cooldown (1 sec)
     let chantLevels = [
-      { name: 'Seeker', min: 0 },
-      { name: 'Devotee', min: 100 },
-      { name: 'Priest', min: 500 },
-      { name: 'Ascended', min: 2000 },
-      { name: 'Moksha', min: 10000 }
+      { name: 'Seeker', min: 0, multiplier: 1 },
+      { name: 'Devotee', min: 100, multiplier: 1 },
+      { name: 'Priest', min: 500, multiplier: 1 },
+      { name: 'Ascended', min: 2000, multiplier: 2 },
+      { name: 'Moksha', min: 10000, multiplier: 3 }
     ];
 
     const ORB = document.getElementById('chant-orb');
@@ -4067,6 +4160,7 @@ app.get("/mini/:userId", (req, res) => {
     const TAP_COUNT_EL = document.getElementById('chant-tap-count');
     const LEVEL_EL = document.getElementById('chant-level');
     const PROGRESS_EL = document.getElementById('chant-progress');
+    const MULTIPLIER_EL = document.getElementById('chant-reward-multiplier');
 
     // Load saved chant text from localStorage
     const savedText = localStorage.getItem('chantText');
@@ -4101,13 +4195,13 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Update UI: level, progress, tap counter
+    // Update UI: level, progress, tap counter, multiplier
     function updateUI() {
-      // Update tap counter
+      // Update tap counter (remainder)
       const remainder = chantTotalTaps % 1000;
       TAP_COUNT_EL.innerText = remainder;
-      
-      // Determine level
+
+      // Determine current level
       let currentLevel = chantLevels[0];
       for (let i = chantLevels.length - 1; i >= 0; i--) {
         if (chantTotalTaps >= chantLevels[i].min) {
@@ -4116,6 +4210,7 @@ app.get("/mini/:userId", (req, res) => {
         }
       }
       LEVEL_EL.innerText = currentLevel.name;
+      MULTIPLIER_EL.innerText = currentLevel.multiplier;
 
       // Progress to next level
       let nextLevel = null;
@@ -4129,24 +4224,43 @@ app.get("/mini/:userId", (req, res) => {
         const progress = (chantTotalTaps - currentLevel.min) / (nextLevel.min - currentLevel.min) * 100;
         PROGRESS_EL.style.width = Math.min(progress, 100) + '%';
       } else {
-        PROGRESS_EL.style.width = '100%'; // Max level
+        PROGRESS_EL.style.width = '100%';
       }
     }
 
-    // Handle tap on orb
+    // Handle tap on orb with cooldown
     ORB.addEventListener('click', async function(e) {
-      // Visual feedback: scale down
-      this.style.transform = 'scale(0.92)';
-      setTimeout(() => { this.style.transform = ''; }, 100);
+      // Cooldown: 1 second
+      const now = Date.now();
+      if (now - chantLastTapTime < 1000) {
+        // Too fast: light haptic feedback to indicate wait
+        tg.HapticFeedback.impactOccurred('light');
+        return;
+      }
+      chantLastTapTime = now;
 
-      // Haptic feedback
+      // Visual feedback: scale down, ripple effect
+      this.style.transform = 'scale(0.92)';
+      setTimeout(() => { this.style.transform = ''; }, 150);
+
+      // Ripple effect
+      const rect = this.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const ripple = document.createElement('div');
+      ripple.className = 'ripple';
+      ripple.style.width = '20px';
+      ripple.style.height = '20px';
+      ripple.style.left = (x - 10) + 'px';
+      ripple.style.top = (y - 10) + 'px';
+      this.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 600);
+
+      // Haptic feedback (light)
       tg.HapticFeedback.impactOccurred('light');
 
-      // Floating +1 at tap position (relative to viewport)
-      const rect = this.getBoundingClientRect();
-      const x = e.clientX || (rect.left + rect.width/2);
-      const y = e.clientY || (rect.top + rect.height/2);
-      spawnFloatingText(x, y, '+1');
+      // Floating +1 at tap position (view‑relative)
+      spawnFloatingText(e.clientX || (rect.left + rect.width/2), e.clientY || (rect.top + rect.height/2), '+1');
 
       // Increment local counter
       chantTapCount++;
@@ -4155,7 +4269,7 @@ app.get("/mini/:userId", (req, res) => {
       if (chantTapCount >= 1000) {
         // Heavy haptic
         tg.HapticFeedback.impactOccurred('heavy');
-        // Sync to server
+        // Sync to server (the multiplier determines how many points are awarded? Actually server uses total taps, we'll just send taps)
         await syncTaps(chantTapCount);
         chantTapCount = 0;
         // Refresh total taps from server
@@ -4164,35 +4278,34 @@ app.get("/mini/:userId", (req, res) => {
         ORB.classList.add('chant-mint-animation');
         setTimeout(() => ORB.classList.remove('chant-mint-animation'), 600);
         // Show success notification
-        await showSuccess('You earned 1 Mythopoint for 1000 chants!', 'Chant Rewarded!');
+        const multiplier = getCurrentMultiplier();
+        const pointsEarned = multiplier; // Actually server handles points, but we can show the multiplier
+        await showSuccess(\`You earned \${multiplier} Mythopoint(s) for 1000 chants!\`, 'Chant Rewarded!');
         loadDashboard(); // refresh home balance
       } else {
-        // Update UI with current local count? We show remainder from total taps, but we want to show the unredeemed taps dynamically.
-        // We'll temporarily show the local count in the UI until sync.
-        // But we need to show the total taps remaining from server, we can update the counter after sync.
-        // For immediate feedback, we'll update the counter with the local unredeemed taps (but only if we haven't synced yet).
-        // Better: keep the UI showing the server remainder, but we can show a local placeholder?
-        // We'll update the TAP_COUNT_EL with the current local count (which is not yet on server) to provide immediate feedback.
-        // But after sync, it will update from server.
-        // We'll just set the text to local count for now, but we also need to keep the total taps in mind.
-        // We'll maintain a separate variable for local unredeemed taps and show it.
-        // Actually we already have chantTapCount, so we can show that.
+        // Update tap counter with local count (temporary)
         TAP_COUNT_EL.innerText = chantTapCount;
-        // But after sync, we want to show the server remainder, not the local one. So after sync we'll call fetchChantStats.
-        // For now, we'll just update the UI to show the local count.
-        // We'll also update the progress bar based on total taps (which is outdated until sync). We'll keep it.
       }
     });
+
+    function getCurrentMultiplier() {
+      for (let i = chantLevels.length - 1; i >= 0; i--) {
+        if (chantTotalTaps >= chantLevels[i].min) {
+          return chantLevels[i].multiplier;
+        }
+      }
+      return 1;
+    }
 
     // Spawn floating text at given coordinates
     function spawnFloatingText(x, y, text) {
       const el = document.createElement('div');
       el.className = 'floating-tap';
       el.innerText = text;
-      el.style.left = (x - 20) + 'px';
-      el.style.top = (y - 20) + 'px';
+      el.style.left = (x - 15) + 'px';
+      el.style.top = (y - 15) + 'px';
       document.body.appendChild(el);
-      setTimeout(() => el.remove(), 1000);
+      setTimeout(() => el.remove(), 800);
     }
 
     // Sync taps to server
@@ -4205,17 +4318,11 @@ app.get("/mini/:userId", (req, res) => {
         });
         const data = await res.json();
         if (!data.success) {
-          // If rate-limited or error, we might need to handle it
-          // Revert local counter? We can show an error.
           console.error('Sync failed:', data.error);
           alert('Sync failed: ' + data.error);
-          // We might want to keep the taps locally? But we'll just reset local counter to 0 to avoid double counting.
-          // For simplicity, we'll reset but we could also retry later.
           chantTapCount = 0;
         } else {
-          // Sync succeeded, update totalTaps from response
           if (data.totalTaps !== undefined) chantTotalTaps = data.totalTaps;
-          // If points were added, we could show a success message already handled.
         }
       } catch (e) {
         console.error('Sync error:', e);
@@ -4223,20 +4330,45 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Initialize chant tab when switched to
-    async function initChantTab() {
-      // Load total taps from server
-      await fetchChantStats();
-      // Reset local unredeemed taps to 0 (since we just synced, but we might have pending local taps if we switched tab before sync)
-      // We'll check if there is a pending local count from previous session? Not needed.
-      chantTapCount = 0;
-      // Update UI
-      updateUI();
+    // Fetch chant leaderboard
+    async function loadChantLeaderboard() {
+      const list = document.getElementById('chant-lb-list');
+      try {
+        const res = await fetch('/api/chant/leaderboard?limit=5');
+        const data = await res.json();
+        if (data.success && data.leaderboard.length) {
+          let html = '';
+          data.leaderboard.forEach((item, index) => {
+            const avatar = item.photo ? \`<img src="\${item.photo}" class="chant-lb-avatar" />\` :
+                          \`<div class="chant-lb-avatar" style="background:#651fff;">\${item.name.charAt(0)}</div>\`;
+            html += \`
+              <div class="chant-lb-item">
+                <span class="chant-lb-rank">#\${index+1}</span>
+                \${avatar}
+                <span class="chant-lb-name">\${item.name}</span>
+                <span class="chant-lb-taps">\${item.taps}</span>
+              </div>
+            \`;
+          });
+          list.innerHTML = html;
+        } else {
+          list.innerHTML = '<div class="empty" style="font-size:12px; padding:6px 0;">No chanters yet.</div>';
+        }
+      } catch (e) {
+        list.innerHTML = '<div class="empty" style="font-size:12px; padding:6px 0;">Failed to load.</div>';
+      }
     }
 
-    // If the chant tab is active on load, init it
-    if (document.getElementById('tab-chant').classList.contains('active')) {
-      initChantTab();
+    // Initialize chant on Home tab load
+    async function initChant() {
+      await fetchChantStats();
+      chantTapCount = 0;
+      await loadChantLeaderboard();
+    }
+
+    // If home tab is active on load, init
+    if (document.getElementById('tab-home').classList.contains('active')) {
+      initChant();
     }
 
     // ─── INIT ───
