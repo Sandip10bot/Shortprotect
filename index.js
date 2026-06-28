@@ -2030,7 +2030,105 @@ app.post("/api/sync-profile", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED)
+// CHANT & EARN (Tap to Earn) – NEW FEATURE
+// ==========================================
+
+// In-memory rate limiting: last sync timestamps per user
+const userTapHistory = new Map();
+
+app.get("/api/chant/stats/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const stats = await userStatsCollection.findOne({ user_id: uid });
+        const totalTaps = stats?.chant_taps || 0;
+        res.json({ success: true, totalTaps });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to fetch chant stats." });
+    }
+});
+
+app.post("/api/chant/sync/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { newTaps } = req.body;  // number of new taps since last sync
+        if (typeof newTaps !== 'number' || newTaps <= 0) {
+            return res.status(400).json({ success: false, error: "Invalid taps count." });
+        }
+
+        // --- ANTI-CHEAT: rate limiting ---
+        const now = Date.now();
+        const history = userTapHistory.get(uid) || [];
+        // Keep only last 10 requests
+        history.push(now);
+        if (history.length > 10) history.shift();
+        userTapHistory.set(uid, history);
+
+        if (history.length >= 2) {
+            const timeSpan = now - history[0];
+            const avgTapsPerSec = (newTaps) / (timeSpan / 1000);
+            // Allow maximum 15 taps per second (humanly impossible to tap more than ~10/sec)
+            if (avgTapsPerSec > 15) {
+                return res.status(429).json({ success: false, error: "Too many taps! Please slow down." });
+            }
+        }
+
+        // Fetch current stats
+        let stats = await userStatsCollection.findOne({ user_id: uid });
+        if (!stats) {
+            // Initialize
+            await userStatsCollection.insertOne({
+                user_id: uid,
+                chant_taps: 0,
+                total_points_earned: 0,
+                total_points_spent: 0,
+                lifetime_files: 0
+            });
+            stats = await userStatsCollection.findOne({ user_id: uid });
+        }
+
+        const oldTotal = stats.chant_taps || 0;
+        const newTotal = oldTotal + newTaps;
+        const pointsEarned = Math.floor(newTotal / 1000) - Math.floor(oldTotal / 1000); // how many new 1000-thresholds crossed
+
+        let mythopointsAdded = 0;
+        if (pointsEarned > 0) {
+            // Add points to user
+            await usersCollection.updateOne(
+                { user_id: uid },
+                { $inc: { mythopoints: pointsEarned } }
+            );
+            // Log each point separately or as one entry? We'll log total points earned in one history entry.
+            await mpHistoryCollection.insertOne({
+                user_id: uid,
+                amount: pointsEarned,
+                type: "EARNED",
+                reason: `Chant & Earn Reward: ${pointsEarned} Mythopoint(s) for ${pointsEarned * 1000} taps`,
+                date: new Date()
+            });
+            mythopointsAdded = pointsEarned;
+        }
+
+        // Update total taps
+        await userStatsCollection.updateOne(
+            { user_id: uid },
+            { $set: { chant_taps: newTotal } }
+        );
+
+        res.json({
+            success: true,
+            totalTaps: newTotal,
+            pointsAdded: mythopointsAdded,
+            newBalance: (await usersCollection.findOne({ user_id: uid }))?.mythopoints || 0
+        });
+
+    } catch (e) {
+        console.error("Chant sync error:", e);
+        res.status(500).json({ success: false, error: "Internal server error." });
+    }
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chant tab)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2772,6 +2870,119 @@ app.get("/mini/:userId", (req, res) => {
     #ui-pts, #profile-pts, .lb-pts, .item-right, .widget-value, .lb-self-pts {
       color: #ffffff !important;
     }
+
+    /* ===== CHANT TAB SPECIAL STYLES ===== */
+    .chant-level {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      margin: 8px 0 4px;
+      background: linear-gradient(135deg, #ffd60a, #ff9f1c);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+    .chant-progress-container {
+      background: rgba(255,255,255,0.06);
+      border-radius: 30px;
+      height: 10px;
+      margin: 8px 16px 12px;
+      overflow: hidden;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+    }
+    .chant-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #d500f9, #ffd60a);
+      border-radius: 30px;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 20px rgba(213,0,249,0.4);
+    }
+    .chant-counter {
+      text-align: center;
+      font-size: 16px;
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+    .chant-counter span { color: #fff; font-weight: 700; }
+    .chant-orb-container {
+      display: flex;
+      justify-content: center;
+      margin: 10px 0 20px;
+      position: relative;
+    }
+    .chant-orb {
+      width: 200px;
+      height: 200px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ff9f1c, #d500f9);
+      box-shadow: 0 0 60px rgba(213,0,249,0.6), 0 0 120px rgba(213,0,249,0.3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+      user-select: none;
+      -webkit-user-select: none;
+      position: relative;
+      border: 2px solid rgba(255,255,255,0.2);
+    }
+    .chant-orb:active {
+      transform: scale(0.92);
+    }
+    .chant-orb .chant-text {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 0 20px rgba(0,0,0,0.5);
+      pointer-events: none;
+      text-align: center;
+      padding: 0 10px;
+    }
+    .chant-orb .edit-icon {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.2s;
+      color: #fff;
+      font-size: 14px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
+
+    .floating-tap {
+      position: fixed;
+      pointer-events: none;
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffd60a;
+      text-shadow: 0 0 20px rgba(255,214,10,0.8);
+      animation: floatUp 1s forwards ease-out;
+      z-index: 999;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-120px) scale(1.4); }
+    }
+
+    .chant-mint-animation {
+      animation: mintPulse 0.6s ease;
+    }
+    @keyframes mintPulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); box-shadow: 0 0 80px rgba(255,214,10,0.9); }
+      100% { transform: scale(1); }
+    }
   </style>
 </head>
 <body>
@@ -3037,6 +3248,26 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
+  <!-- ========== NEW TAB: CHANT & EARN ========== -->
+  <div id="tab-chant" class="tab-content">
+    <div style="text-align:center; padding-top:10px;">
+      <div class="chant-level" id="chant-level">Seeker</div>
+      <div class="chant-progress-container">
+        <div class="chant-progress-bar" id="chant-progress" style="width:0%;"></div>
+      </div>
+      <div class="chant-counter">
+        <span id="chant-tap-count">0</span> / 1000 taps
+      </div>
+      <div class="chant-orb-container">
+        <div class="chant-orb" id="chant-orb">
+          <span class="chant-text" id="chant-text">Radha Radha</span>
+          <div class="edit-icon" id="chant-edit">✎</div>
+        </div>
+      </div>
+      <div style="margin-top:8px; color:rgba(255,255,255,0.3); font-size:13px;">Tap the orb to chant and earn</div>
+    </div>
+  </div>
+
   <!-- ========== TAB BAR (SVG Icons, no emojis) ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
@@ -3059,6 +3290,11 @@ app.get("/mini/:userId", (req, res) => {
     <div class="tab-btn" data-tab="profile">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
       <span>Profile</span>
+    </div>
+    <!-- NEW CHANT TAB BUTTON -->
+    <div class="tab-btn" data-tab="chant">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+      <span>Chant</span>
     </div>
   </div>
 
@@ -3183,7 +3419,8 @@ app.get("/mini/:userId", (req, res) => {
       bank: document.getElementById('tab-bank'),
       store: document.getElementById('tab-store'),
       pay: document.getElementById('tab-pay'),
-      profile: document.getElementById('tab-profile')
+      profile: document.getElementById('tab-profile'),
+      chant: document.getElementById('tab-chant') // new
     };
     const navTitle = document.getElementById('navTitle');
 
@@ -3198,6 +3435,7 @@ app.get("/mini/:userId", (req, res) => {
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
       if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
       if (tabId === 'pay') loadPaymentStatus();
+      if (tabId === 'chant') { initChantTab(); } // load chant stats
     }
     window.switchTab = switchTab;
 
@@ -3809,6 +4047,198 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
+    // ============================================================
+    // CHANT & EARN – TAP TO EARN LOGIC
+    // ============================================================
+    let chantTapCount = 0;        // unredeemed taps since last 1000
+    let chantTotalTaps = 0;       // lifetime taps (from server)
+    let chantText = 'Radha Radha';
+    let chantLevels = [
+      { name: 'Seeker', min: 0 },
+      { name: 'Devotee', min: 100 },
+      { name: 'Priest', min: 500 },
+      { name: 'Ascended', min: 2000 },
+      { name: 'Moksha', min: 10000 }
+    ];
+
+    const ORB = document.getElementById('chant-orb');
+    const TEXT_EL = document.getElementById('chant-text');
+    const EDIT_BTN = document.getElementById('chant-edit');
+    const TAP_COUNT_EL = document.getElementById('chant-tap-count');
+    const LEVEL_EL = document.getElementById('chant-level');
+    const PROGRESS_EL = document.getElementById('chant-progress');
+
+    // Load saved chant text from localStorage
+    const savedText = localStorage.getItem('chantText');
+    if (savedText) {
+      chantText = savedText;
+      TEXT_EL.innerText = chantText;
+    }
+
+    // Edit chant text
+    EDIT_BTN.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const newText = prompt('Enter your chant:', chantText);
+      if (newText && newText.trim().length > 0) {
+        chantText = newText.trim();
+        TEXT_EL.innerText = chantText;
+        localStorage.setItem('chantText', chantText);
+        tg.HapticFeedback.selectionChanged();
+      }
+    });
+
+    // Fetch total taps from server
+    async function fetchChantStats() {
+      try {
+        const res = await fetch('/api/chant/stats/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          chantTotalTaps = data.totalTaps || 0;
+          updateUI();
+        }
+      } catch (e) {
+        console.error('Failed to fetch chant stats:', e);
+      }
+    }
+
+    // Update UI: level, progress, tap counter
+    function updateUI() {
+      // Update tap counter
+      const remainder = chantTotalTaps % 1000;
+      TAP_COUNT_EL.innerText = remainder;
+      
+      // Determine level
+      let currentLevel = chantLevels[0];
+      for (let i = chantLevels.length - 1; i >= 0; i--) {
+        if (chantTotalTaps >= chantLevels[i].min) {
+          currentLevel = chantLevels[i];
+          break;
+        }
+      }
+      LEVEL_EL.innerText = currentLevel.name;
+
+      // Progress to next level
+      let nextLevel = null;
+      for (let i = 0; i < chantLevels.length; i++) {
+        if (chantLevels[i].min > currentLevel.min) {
+          nextLevel = chantLevels[i];
+          break;
+        }
+      }
+      if (nextLevel) {
+        const progress = (chantTotalTaps - currentLevel.min) / (nextLevel.min - currentLevel.min) * 100;
+        PROGRESS_EL.style.width = Math.min(progress, 100) + '%';
+      } else {
+        PROGRESS_EL.style.width = '100%'; // Max level
+      }
+    }
+
+    // Handle tap on orb
+    ORB.addEventListener('click', async function(e) {
+      // Visual feedback: scale down
+      this.style.transform = 'scale(0.92)';
+      setTimeout(() => { this.style.transform = ''; }, 100);
+
+      // Haptic feedback
+      tg.HapticFeedback.impactOccurred('light');
+
+      // Floating +1 at tap position (relative to viewport)
+      const rect = this.getBoundingClientRect();
+      const x = e.clientX || (rect.left + rect.width/2);
+      const y = e.clientY || (rect.top + rect.height/2);
+      spawnFloatingText(x, y, '+1');
+
+      // Increment local counter
+      chantTapCount++;
+
+      // If we reached 1000 taps, sync and reset
+      if (chantTapCount >= 1000) {
+        // Heavy haptic
+        tg.HapticFeedback.impactOccurred('heavy');
+        // Sync to server
+        await syncTaps(chantTapCount);
+        chantTapCount = 0;
+        // Refresh total taps from server
+        await fetchChantStats();
+        // Trigger success animation on orb
+        ORB.classList.add('chant-mint-animation');
+        setTimeout(() => ORB.classList.remove('chant-mint-animation'), 600);
+        // Show success notification
+        await showSuccess('You earned 1 Mythopoint for 1000 chants!', 'Chant Rewarded!');
+        loadDashboard(); // refresh home balance
+      } else {
+        // Update UI with current local count? We show remainder from total taps, but we want to show the unredeemed taps dynamically.
+        // We'll temporarily show the local count in the UI until sync.
+        // But we need to show the total taps remaining from server, we can update the counter after sync.
+        // For immediate feedback, we'll update the counter with the local unredeemed taps (but only if we haven't synced yet).
+        // Better: keep the UI showing the server remainder, but we can show a local placeholder?
+        // We'll update the TAP_COUNT_EL with the current local count (which is not yet on server) to provide immediate feedback.
+        // But after sync, it will update from server.
+        // We'll just set the text to local count for now, but we also need to keep the total taps in mind.
+        // We'll maintain a separate variable for local unredeemed taps and show it.
+        // Actually we already have chantTapCount, so we can show that.
+        TAP_COUNT_EL.innerText = chantTapCount;
+        // But after sync, we want to show the server remainder, not the local one. So after sync we'll call fetchChantStats.
+        // For now, we'll just update the UI to show the local count.
+        // We'll also update the progress bar based on total taps (which is outdated until sync). We'll keep it.
+      }
+    });
+
+    // Spawn floating text at given coordinates
+    function spawnFloatingText(x, y, text) {
+      const el = document.createElement('div');
+      el.className = 'floating-tap';
+      el.innerText = text;
+      el.style.left = (x - 20) + 'px';
+      el.style.top = (y - 20) + 'px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }
+
+    // Sync taps to server
+    async function syncTaps(taps) {
+      try {
+        const res = await fetch('/api/chant/sync/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newTaps: taps })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          // If rate-limited or error, we might need to handle it
+          // Revert local counter? We can show an error.
+          console.error('Sync failed:', data.error);
+          alert('Sync failed: ' + data.error);
+          // We might want to keep the taps locally? But we'll just reset local counter to 0 to avoid double counting.
+          // For simplicity, we'll reset but we could also retry later.
+          chantTapCount = 0;
+        } else {
+          // Sync succeeded, update totalTaps from response
+          if (data.totalTaps !== undefined) chantTotalTaps = data.totalTaps;
+          // If points were added, we could show a success message already handled.
+        }
+      } catch (e) {
+        console.error('Sync error:', e);
+        alert('Network error during sync. Please try again later.');
+      }
+    }
+
+    // Initialize chant tab when switched to
+    async function initChantTab() {
+      // Load total taps from server
+      await fetchChantStats();
+      // Reset local unredeemed taps to 0 (since we just synced, but we might have pending local taps if we switched tab before sync)
+      // We'll check if there is a pending local count from previous session? Not needed.
+      chantTapCount = 0;
+      // Update UI
+      updateUI();
+    }
+
+    // If the chant tab is active on load, init it
+    if (document.getElementById('tab-chant').classList.contains('active')) {
+      initChantTab();
+    }
+
     // ─── INIT ───
     loadDashboard();
     if (document.getElementById('tab-bank').classList.contains('active')) { loadBankData(); loadWithdrawHistory(); }
@@ -3873,7 +4303,7 @@ app.get("/api/leaderboard/:userId", async (req, res) => {
                 username: safeUsername,
                 points: u[pointField] || 0,
                 title: getRankTitle(u[pointField] || 0),
-                photo_url: u.photo_url || null   // <-- added
+                photo_url: u.photo_url || null
             };
         });
 
