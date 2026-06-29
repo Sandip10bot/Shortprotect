@@ -4690,78 +4690,72 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
     }
 });
 
-// Add this route block inside index.js to handle TvSerials Verification
-app.get('/verify/:type/:userId/:verifyToken', async (req, res) => {
-    const { type, userId, verifyToken } = req.params;
+// ============================================
+// NEW SYSTEM: FOR TV SERIALS ONLY (DailyDL)
+// ============================================
 
-    try {
-        // Handle TV Serials Verification
-        if (type === 'TvSerials') {
-            // Find the token in the 'serial_ads' MongoDB collection
-            const adData = await db.collection('serial_ads').findOne({ 
-                verify_token: verifyToken, 
-                user_id: parseInt(userId) 
-            });
-
-            if (adData) {
-                const botToken = adData.bot_token;
-                
-                // Redirect user to Telegram App passing the SECRET Bot Token
-                return res.redirect(`https://t.me/MythoserialBot?start=TvSerials_${botToken}`);
-            } else {
-                return res.status(404).send("❌ Invalid or Expired Verification Token!");
-            }
-        }
-        
-        // ============================================
-        // Handle Search Ad Verification (Your existing logic)
-        // ============================================
-        else if (type === 'searchad') {
-            const adData = await db.collection('search_ads').findOne({ 
-                verify_token: verifyToken, 
-                user_id: parseInt(userId) 
-            });
-
-            if (adData) {
-                const botToken = adData.bot_token;
-                return res.redirect(`https://t.me/MythoserialBot?start=searchad_${botToken}`);
-            } else {
-                return res.status(404).send("❌ Invalid or Expired Search Token!");
-            }
-        } 
-        
-        else {
-            return res.status(400).send("❌ Unknown verification type!");
-        }
-
-    } catch (err) {
-        console.error("Database Query Error:", err);
-        return res.status(500).send("Internal Server Error.");
+// Naya Route: /slink/
+app.get("/slink/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  
+  try {
+    // Ye sirf serial_ads collection check karega
+    const adData = await serialAdsCollection.findOne({
+      $or: [ { verify_token: token }, { token: token } ],
+      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+    });
+    
+    if (!adData) {
+      return res.send(`
+        <!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body>
+        <div class="container">
+          <h2 class="error-title">Invalid or Expired Serial Link</h2>
+          <p>System couldn't find your record in database.</p>
+          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
+        </div></body></html>
+      `);
     }
+    
+    const target = adData.short_url || adData.url; 
+    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
+    
+    renderAntiBypassPage(res, target);
+    
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
 });
 
-// Existing Link Handler (Ensuring it supports TvSerials lookups)
-app.get('/link/:userId/:verifyToken', async (req, res) => {
-    const { userId, verifyToken } = req.params;
+// Naya Route: /sverify/
+app.get("/sverify/:prefix/:userId/:token", async (req, res) => {
+  const { prefix, userId, token } = req.params;
 
-    try {
-        // Try looking in Search Ads first
-        let adData = await db.collection('search_ads').findOne({ verify_token: verifyToken });
-        
-        // If not found, look in Serial Ads
-        if (!adData) {
-            adData = await db.collection('serial_ads').findOne({ verify_token: verifyToken });
-        }
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
 
-        if (adData && adData.short_url) {
-            return res.redirect(adData.short_url);
-        } else {
-            return res.status(404).send("❌ Short URL not found in database.");
-        }
-    } catch (err) {
-        console.error("Database Query Error:", err);
-        return res.status(500).send("Internal Server Error.");
-    }
+  try {
+      if (prefix === "DailyDL") {
+          const adData = await serialAdsCollection.findOne({
+            $or: [ { verify_token: token }, { token: token } ],
+            $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+          });
+
+          if (!adData) {
+            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body><div class="container"><h2 class="error-title">Serial Verification record not found.</h2></div></body></html>`);
+          }
+
+          const trueBotToken = adData.bot_token || adData.token || token;
+          
+          // DailyDL format
+          const finalBotLink = `https://t.me/MythoSerialBot?start=DailyDL_${trueBotToken}`;
+          renderSecureFinalPage(res, finalBotLink);
+      } else {
+          return res.status(400).send("❌ Invalid prefix for serial verification.");
+      }
+  } catch (error) {
+      res.redirect('https://t.me/MythoSerialBot');
+  }
 });
 
 
