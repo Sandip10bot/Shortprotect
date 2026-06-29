@@ -4690,6 +4690,81 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
     }
 });
 
+// Add this route block inside index.js to handle TvSerials Verification
+app.get('/verify/:type/:userId/:verifyToken', async (req, res) => {
+    const { type, userId, verifyToken } = req.params;
+
+    try {
+        // Handle TV Serials Verification
+        if (type === 'TvSerials') {
+            // Find the token in the 'serial_ads' MongoDB collection
+            const adData = await db.collection('serial_ads').findOne({ 
+                verify_token: verifyToken, 
+                user_id: parseInt(userId) 
+            });
+
+            if (adData) {
+                const botToken = adData.bot_token;
+                
+                // Redirect user to Telegram App passing the SECRET Bot Token
+                return res.redirect(`https://t.me/MythoserialBot?start=TvSerials_${botToken}`);
+            } else {
+                return res.status(404).send("❌ Invalid or Expired Verification Token!");
+            }
+        }
+        
+        // ============================================
+        // Handle Search Ad Verification (Your existing logic)
+        // ============================================
+        else if (type === 'searchad') {
+            const adData = await db.collection('search_ads').findOne({ 
+                verify_token: verifyToken, 
+                user_id: parseInt(userId) 
+            });
+
+            if (adData) {
+                const botToken = adData.bot_token;
+                return res.redirect(`https://t.me/MythoserialBot?start=searchad_${botToken}`);
+            } else {
+                return res.status(404).send("❌ Invalid or Expired Search Token!");
+            }
+        } 
+        
+        else {
+            return res.status(400).send("❌ Unknown verification type!");
+        }
+
+    } catch (err) {
+        console.error("Database Query Error:", err);
+        return res.status(500).send("Internal Server Error.");
+    }
+});
+
+// Existing Link Handler (Ensuring it supports TvSerials lookups)
+app.get('/link/:userId/:verifyToken', async (req, res) => {
+    const { userId, verifyToken } = req.params;
+
+    try {
+        // Try looking in Search Ads first
+        let adData = await db.collection('search_ads').findOne({ verify_token: verifyToken });
+        
+        // If not found, look in Serial Ads
+        if (!adData) {
+            adData = await db.collection('serial_ads').findOne({ verify_token: verifyToken });
+        }
+
+        if (adData && adData.short_url) {
+            return res.redirect(adData.short_url);
+        } else {
+            return res.status(404).send("❌ Short URL not found in database.");
+        }
+    } catch (err) {
+        console.error("Database Query Error:", err);
+        return res.status(500).send("Internal Server Error.");
+    }
+});
+
+
 // ========================
 // FALLBACK HOME ROUTE
 // ========================
