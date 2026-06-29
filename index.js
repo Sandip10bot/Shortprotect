@@ -4692,83 +4692,8 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
     }
 });
 
-// ============================================
-// NEW SYSTEM: FOR TV SERIALS ONLY (DailyDL)
-// ============================================
 
 
-
-// ============================================
-// NEW SYSTEM: FOR TV SERIALS ONLY (DailyDL)
-// ============================================
-
-app.get("/slink/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  
-  try {
-    const adData = await serialAdsCollection.findOne({
-      $or: [ { verify_token: token }, { token: token } ],
-      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
-    });
-    
-    if (!adData) {
-      return res.send(`
-        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
-        <div class="container">
-          <h2 class="error-title">Invalid or Expired Serial Link</h2>
-          <p>System couldn't find your record in database.</p>
-          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
-        </div></body></html>
-      `);
-    }
-    
-    const target = adData.short_url || adData.url; 
-    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
-    
-    renderAntiBypassPage(res, target);
-    
-  } catch (error) {
-    console.error("Serial Link Error:", error);
-    res.redirect('https://t.me/MythoSerialBot');
-  }
-});
-
-app.get("/sverify/:prefix/:userId/:token", async (req, res) => {
-  const { prefix, userId, token } = req.params;
-
-  // 1. Anti-Bypass Check
-  if (!isRefererValid(req)) {
-    return renderBypassError(res);
-  }
-
-  try {
-      if (prefix === "DailyDL") {
-          // 2. Find token in serial_ads
-          const adData = await serialAdsCollection.findOne({
-            $or: [ { verify_token: token }, { token: token } ],
-            $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
-          });
-
-          if (!adData) {
-            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Serial Verification record not found.</h2></div></body></html>`);
-          }
-
-          // 3. Extract hidden bot token
-          const trueBotToken = adData.bot_token || adData.token || token;
-          
-          // 4. Create final redirect link for Telegram (DailyDL_ format)
-          const finalBotLink = `https://t.me/MythoSerialBot?start=DailyDL_${trueBotToken}`;
-          
-          // 5. Send User to Telegram
-          renderSecureFinalPage(res, finalBotLink);
-      } else {
-          return res.status(400).send("❌ Invalid prefix for serial verification.");
-      }
-  } catch (error) {
-      console.error("Serial Verify Error:", error);
-      res.redirect('https://t.me/MythoSerialBot');
-  }
-});
 
 
 
