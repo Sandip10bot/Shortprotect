@@ -25,6 +25,7 @@ let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollectio
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
+let serialAdsCollection;
 
 async function connectDB() {
   try {
@@ -46,6 +47,7 @@ async function connectDB() {
     ipVerificationCollection = db.collection("ip_verification");
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
+    serialAdsCollection = db.collection("serial_ads"); 
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -4694,12 +4696,16 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
 // NEW SYSTEM: FOR TV SERIALS ONLY (DailyDL)
 // ============================================
 
-// Naya Route: /slink/
+
+
+// ============================================
+// NEW SYSTEM: FOR TV SERIALS ONLY (DailyDL)
+// ============================================
+
 app.get("/slink/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
   
   try {
-    // Ye sirf serial_ads collection check karega
     const adData = await serialAdsCollection.findOne({
       $or: [ { verify_token: token }, { token: token } ],
       $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
@@ -4707,7 +4713,7 @@ app.get("/slink/:userId/:token", async (req, res) => {
     
     if (!adData) {
       return res.send(`
-        <!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body>
+        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
         <div class="container">
           <h2 class="error-title">Invalid or Expired Serial Link</h2>
           <p>System couldn't find your record in database.</p>
@@ -4717,46 +4723,53 @@ app.get("/slink/:userId/:token", async (req, res) => {
     }
     
     const target = adData.short_url || adData.url; 
-    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
+    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
     
     renderAntiBypassPage(res, target);
     
   } catch (error) {
+    console.error("Serial Link Error:", error);
     res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
-// Naya Route: /sverify/
 app.get("/sverify/:prefix/:userId/:token", async (req, res) => {
   const { prefix, userId, token } = req.params;
 
+  // 1. Anti-Bypass Check
   if (!isRefererValid(req)) {
     return renderBypassError(res);
   }
 
   try {
       if (prefix === "DailyDL") {
+          // 2. Find token in serial_ads
           const adData = await serialAdsCollection.findOne({
             $or: [ { verify_token: token }, { token: token } ],
             $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
           });
 
           if (!adData) {
-            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS || ''}</head><body><div class="container"><h2 class="error-title">Serial Verification record not found.</h2></div></body></html>`);
+            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Serial Verification record not found.</h2></div></body></html>`);
           }
 
+          // 3. Extract hidden bot token
           const trueBotToken = adData.bot_token || adData.token || token;
           
-          // DailyDL format
+          // 4. Create final redirect link for Telegram (DailyDL_ format)
           const finalBotLink = `https://t.me/MythoSerialBot?start=DailyDL_${trueBotToken}`;
+          
+          // 5. Send User to Telegram
           renderSecureFinalPage(res, finalBotLink);
       } else {
           return res.status(400).send("❌ Invalid prefix for serial verification.");
       }
   } catch (error) {
+      console.error("Serial Verify Error:", error);
       res.redirect('https://t.me/MythoSerialBot');
   }
 });
+
 
 
 // ========================
