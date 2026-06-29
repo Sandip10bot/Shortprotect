@@ -25,7 +25,7 @@ let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollectio
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
-let serialAdsCollection;
+
 
 async function connectDB() {
   try {
@@ -47,7 +47,7 @@ async function connectDB() {
     ipVerificationCollection = db.collection("ip_verification");
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
-    serialAdsCollection = db.collection("serial_ads"); 
+    
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
