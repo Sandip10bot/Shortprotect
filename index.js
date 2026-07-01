@@ -2251,7 +2251,7 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chant card on Home)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2417,7 +2417,7 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center; 
       gap: 6px; 
       position: relative;
-      color: #ffffff; /* All points white */
+      color: #ffffff;
     }
     .widget-value .mytho-label {
       position: absolute;
@@ -2447,7 +2447,7 @@ app.get("/mini/:userId", (req, res) => {
       width: 72px;
       height: 72px;
       border-radius: 50%;
-      border: 2px solid #00e676; /* Green border */
+      border: 2px solid #00e676;
       object-fit: cover;
       background: #1c0a2b;
       box-shadow: 0 0 20px rgba(0,230,118,0.25);
@@ -2466,7 +2466,6 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 6px;
       border: 0.5px solid rgba(213,0,249,0.15);
     }
-    /* Switch button on home profile */
     .switch-btn {
       background: rgba(255,255,255,0.06);
       border: 0.5px solid rgba(255,255,255,0.08);
@@ -2766,24 +2765,25 @@ app.get("/mini/:userId", (req, res) => {
 
     /* === PAYMENT - CHAT STYLE === */
     .payment-chat-container {
-      max-height: 300px;
+      max-height: 250px;
       overflow-y: auto;
-      margin-bottom: 12px;
-      padding: 8px;
+      margin-bottom: 8px;
+      padding: 6px 8px;
       background: rgba(0,0,0,0.2);
       border-radius: 16px;
+      min-height: 60px;
     }
     .payment-chat-container .chat-msg {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 8px;
+      margin-bottom: 6px;
       animation: fadeSlide 0.3s ease;
     }
     .payment-chat-container .chat-msg.sent { flex-direction: row-reverse; }
     .payment-chat-container .chat-msg .avatar {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
       object-fit: cover;
       background: #651fff;
@@ -2792,15 +2792,15 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       justify-content: center;
       font-weight: 600;
-      font-size: 12px;
+      font-size: 10px;
       color: #fff;
     }
     .payment-chat-container .chat-msg .bubble {
-      max-width: 70%;
-      padding: 8px 14px;
-      border-radius: 16px;
-      font-size: 14px;
-      line-height: 1.4;
+      max-width: 75%;
+      padding: 6px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.3;
       word-wrap: break-word;
     }
     .payment-chat-container .chat-msg.sent .bubble {
@@ -2816,72 +2816,76 @@ app.get("/mini/:userId", (req, res) => {
     .payment-chat-container .chat-msg .bubble .payment-card {
       background: rgba(0,230,118,0.1);
       border: 1px solid rgba(0,230,118,0.2);
-      border-radius: 12px;
-      padding: 8px 12px;
-      margin-top: 4px;
+      border-radius: 10px;
+      padding: 4px 10px;
+      margin-top: 2px;
+      font-size: 12px;
     }
     .payment-chat-container .chat-msg .bubble .payment-card .amount {
       font-weight: 700;
       color: #30d158;
     }
     .payment-chat-container .chat-msg .time {
-      font-size: 10px;
-      color: rgba(255,255,255,0.25);
+      font-size: 9px;
+      color: rgba(255,255,255,0.2);
       margin-top: 2px;
     }
     .payment-chat-input-row {
       display: flex;
-      gap: 8px;
-      margin-top: 8px;
+      gap: 6px;
+      margin-top: 4px;
     }
     .payment-chat-input-row input {
       flex: 1;
-      padding: 10px 14px;
+      padding: 8px 12px;
       border-radius: 20px;
       border: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.02);
       color: #fff;
-      font-size: 14px;
+      font-size: 13px;
       outline: none;
     }
     .payment-chat-input-row input::placeholder { color: rgba(255,255,255,0.2); }
     .payment-chat-input-row button {
-      padding: 10px 18px;
+      padding: 8px 14px;
       border-radius: 20px;
       border: none;
       background: linear-gradient(135deg, #d500f9, #651fff);
       color: #fff;
       font-weight: 600;
+      font-size: 12px;
       cursor: pointer;
     }
     .payment-chat-input-row button:active { transform: scale(0.95); }
 
     .search-user-input {
       width: 100%;
-      padding: 12px 16px;
-      border-radius: 30px;
+      padding: 8px 12px;
+      border-radius: 20px;
       border: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.02);
       color: #fff;
-      font-size: 16px;
-      margin-bottom: 16px;
+      font-size: 13px;
+      margin-bottom: 8px;
       transition: border 0.3s;
+      outline: none;
     }
-    .search-user-input:focus { border-color: #d500f9; outline: none; }
+    .search-user-input:focus { border-color: #d500f9; }
     .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
     .user-result {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 10px 0;
+      gap: 10px;
+      padding: 6px 8px;
       border-bottom: 0.5px solid rgba(255,255,255,0.04);
       cursor: pointer;
       transition: background 0.15s;
+      border-radius: 8px;
     }
     .user-result:active { background: rgba(255,255,255,0.02); }
     .user-result .result-avatar {
-      width: 36px;
-      height: 36px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       object-fit: cover;
       background: #651fff;
@@ -2889,12 +2893,13 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       justify-content: center;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 12px;
       color: #fff;
+      flex-shrink: 0;
     }
     .user-result .result-info { flex: 1; }
-    .user-result .result-info .name { font-weight: 500; font-size: 15px; }
-    .user-result .result-info .sub { font-size: 12px; color: rgba(255,255,255,0.3); }
+    .user-result .result-info .name { font-weight: 500; font-size: 13px; }
+    .user-result .result-info .sub { font-size: 10px; color: rgba(255,255,255,0.3); }
     .quick-action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -2923,23 +2928,24 @@ app.get("/mini/:userId", (req, res) => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 12px 0;
+      padding: 10px 0;
       border-bottom: 0.5px solid rgba(255,255,255,0.04);
     }
     .store-item:last-child { border-bottom: none; }
     .store-item button {
       background: linear-gradient(135deg, #d500f9, #651fff);
       border: none;
-      padding: 6px 18px;
-      border-radius: 30px;
+      padding: 4px 14px;
+      border-radius: 20px;
       color: white;
       font-weight: 600;
+      font-size: 12px;
       cursor: pointer;
       transition: transform 0.15s;
     }
     .store-item button:active { transform: scale(0.92); }
 
-    /* === RATING STARS (SVG based) === */
+    /* === RATING STARS === */
     .star-rating {
       display: flex;
       gap: 10px;
@@ -2959,25 +2965,27 @@ app.get("/mini/:userId", (req, res) => {
     /* === WITHDRAW === */
     .withdraw-input {
       width: 100%;
-      padding: 12px 16px;
-      border-radius: 30px;
+      padding: 10px 14px;
+      border-radius: 20px;
       border: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.02);
       color: #fff;
-      font-size: 16px;
-      margin-bottom: 12px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      outline: none;
     }
-    .withdraw-input:focus { border-color: #d500f9; outline: none; }
+    .withdraw-input:focus { border-color: #d500f9; }
     .withdraw-btn {
       width: 100%;
-      padding: 14px;
-      border-radius: 30px;
+      padding: 12px;
+      border-radius: 20px;
       border: none;
       background: linear-gradient(135deg, #d500f9, #651fff);
       color: #fff;
       font-weight: 600;
       cursor: pointer;
       transition: transform 0.15s;
+      font-size: 14px;
     }
     .withdraw-btn:active { transform: scale(0.95); }
 
@@ -3000,7 +3008,6 @@ app.get("/mini/:userId", (req, res) => {
       100% { opacity: 1; transform: scale(1.05); }
     }
 
-    /* === Mythopoints label behind numbers === */
     .mytho-label {
       position: absolute;
       bottom: -6px;
@@ -3010,11 +3017,6 @@ app.get("/mini/:userId", (req, res) => {
       color: rgba(255,255,255,0.12);
       letter-spacing: 1px;
       text-transform: uppercase;
-    }
-    .balance-container {
-      position: relative;
-      display: inline-flex;
-      align-items: center;
     }
 
     /* === Confirm Modal === */
@@ -3096,12 +3098,11 @@ app.get("/mini/:userId", (req, res) => {
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-    /* points white override for specific elements */
     #ui-pts, #profile-pts, .lb-pts, .item-right, .widget-value, .lb-self-pts {
       color: #ffffff !important;
     }
 
-    /* ===== CHANT CARD STYLES (integrated into Home) ===== */
+    /* ===== CHANT CARD STYLES ===== */
     .chant-level {
       text-align: center;
       font-size: 22px;
@@ -3191,7 +3192,6 @@ app.get("/mini/:userId", (req, res) => {
     }
     .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
 
-    /* Ripple effect for tap */
     .ripple {
       position: absolute;
       border-radius: 50%;
@@ -3234,20 +3234,20 @@ app.get("/mini/:userId", (req, res) => {
     .chant-lb-item {
       display: flex;
       align-items: center;
-      padding: 6px 0;
+      padding: 4px 0;
       border-bottom: 0.5px solid rgba(255,255,255,0.04);
-      gap: 10px;
+      gap: 8px;
     }
     .chant-lb-item:last-child { border-bottom: none; }
     .chant-lb-rank {
       font-weight: 600;
       color: rgba(255,255,255,0.3);
-      font-size: 12px;
-      width: 20px;
+      font-size: 11px;
+      width: 18px;
     }
     .chant-lb-avatar {
-      width: 28px;
-      height: 28px;
+      width: 24px;
+      height: 24px;
       border-radius: 50%;
       object-fit: cover;
       background: #651fff;
@@ -3255,21 +3255,20 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       justify-content: center;
       font-weight: 600;
-      font-size: 12px;
+      font-size: 10px;
       color: #fff;
     }
     .chant-lb-name {
       flex: 1;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       color: #fff;
     }
     .chant-lb-taps {
-      font-size: 12px;
+      font-size: 11px;
       color: rgba(255,255,255,0.5);
     }
 
-    /* === SKELETON LOADERS === */
     .skeleton {
       background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
       background-size: 200% 100%;
@@ -3280,25 +3279,21 @@ app.get("/mini/:userId", (req, res) => {
       0% { background-position: -200% 0; }
       100% { background-position: 200% 0; }
     }
-    .skeleton-line { height: 16px; margin-bottom: 8px; }
-    .skeleton-avatar { width: 44px; height: 44px; border-radius: 50%; }
-    .skeleton-text { height: 12px; width: 60%; }
 
-    /* === UPI Numpad Styles === */
     .upi-numpad {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      max-width: 280px;
+      gap: 6px;
+      max-width: 240px;
       margin: 0 auto;
     }
     .upi-numpad button {
-      padding: 16px;
+      padding: 12px;
       border: none;
-      border-radius: 12px;
+      border-radius: 10px;
       background: rgba(255,255,255,0.05);
       color: #fff;
-      font-size: 22px;
+      font-size: 18px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
@@ -3318,28 +3313,27 @@ app.get("/mini/:userId", (req, res) => {
       background: rgba(255,69,58,0.2);
     }
     .upi-display {
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 700;
       text-align: center;
-      padding: 12px 0;
+      padding: 6px 0;
       color: #fff;
       letter-spacing: 2px;
-      min-height: 60px;
+      min-height: 50px;
     }
 
     .payment-processing {
       display: none;
       text-align: center;
-      padding: 30px 0;
+      padding: 20px 0;
     }
     .payment-processing.active { display: block; }
     .payment-processing .svg-loader {
-      width: 80px;
-      height: 80px;
-      margin: 0 auto 20px;
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 16px;
     }
 
-    /* === 3D Orb Tilt === */
     .chant-orb-3d {
       perspective: 600px;
       display: flex;
@@ -3349,6 +3343,27 @@ app.get("/mini/:userId", (req, res) => {
       transform-style: preserve-3d;
       transition: transform 0.1s ease-out;
     }
+
+    .selected-user-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(213,0,249,0.08);
+      border-radius: 30px;
+      border: 0.5px solid rgba(213,0,249,0.15);
+      margin: 4px 0 8px;
+      font-size: 12px;
+    }
+    .selected-user-badge .remove-btn {
+      background: none;
+      border: none;
+      color: #ff453a;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .selected-user-badge .remove-btn:active { transform: scale(0.9); }
   </style>
 </head>
 <body>
@@ -3365,7 +3380,6 @@ app.get("/mini/:userId", (req, res) => {
         <p id="ui-id">ID: ${userId}</p>
         <div class="badge" id="ui-verified">Checking...</div>
       </div>
-      <!-- Switch Button -->
       <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
       </a>
@@ -3401,7 +3415,6 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-    <!-- Quick Actions -->
     <div class="quick-action-grid">
       <div class="quick-action bank" onclick="switchTab('bank')">
         <div class="icon">🏦</div>
@@ -3436,33 +3449,32 @@ app.get("/mini/:userId", (req, res) => {
           <div class="edit-icon" id="chant-edit">✎</div>
         </div>
       </div>
-      <!-- Compact Leaderboard -->
       <div class="chant-leaderboard" id="chant-leaderboard">
-        <div style="font-size:12px; color:rgba(255,255,255,0.3); margin-bottom:6px;">Top Chanters</div>
-        <div id="chant-lb-list"><div class="spinner" style="width:24px;height:24px;margin:8px auto;"></div></div>
+        <div style="font-size:11px; color:rgba(255,255,255,0.3); margin-bottom:4px;">Top Chanters</div>
+        <div id="chant-lb-list"><div class="spinner" style="width:20px;height:20px;margin:4px auto;"></div></div>
       </div>
     </div>
 
-    <h3 style="font-size:18px; margin: 12px 16px 8px; font-weight:600;">Lifetime Stats</h3>
+    <h3 style="font-size:16px; margin: 8px 16px 4px; font-weight:600;">Lifetime Stats</h3>
     <div class="grid-2" style="padding:0 16px;">
-      <div class="widget" style="padding:12px 16px;">
+      <div class="widget" style="padding:10px 14px;">
         <div class="widget-title">Total Earned</div>
-        <div class="widget-value" style="font-size:20px; color:#30d158; position:relative;">
+        <div class="widget-value" style="font-size:18px; color:#30d158; position:relative;">
           <span id="ui-life-earn">0</span>
-          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+          <span class="mytho-label" style="font-size:7px;">Mythopoints</span>
         </div>
       </div>
-      <div class="widget" style="padding:12px 16px;">
+      <div class="widget" style="padding:10px 14px;">
         <div class="widget-title">Total Spent</div>
-        <div class="widget-value" style="font-size:20px; color:#ff453a; position:relative;">
+        <div class="widget-value" style="font-size:18px; color:#ff453a; position:relative;">
           <span id="ui-life-spent">0</span>
-          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+          <span class="mytho-label" style="font-size:7px;">Mythopoints</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ========== TAB: BANK (includes Withdraw) ========== -->
+  <!-- ========== TAB: BANK ========== -->
   <div id="tab-bank" class="tab-content">
     <div class="glass w-bank">
       <div class="glass-title">
@@ -3491,28 +3503,27 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
     <div style="padding:0 16px;">
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:10px; border-radius:30px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff;">
-        <button id="invest-btn" style="padding:10px 20px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Invest</button>
-        <button id="withdraw-btn" style="padding:10px 20px; border-radius:30px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600;">Withdraw</button>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:8px 12px; border-radius:20px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff; font-size:13px; outline:none;">
+        <button id="invest-btn" style="padding:8px 16px; border-radius:20px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600; font-size:12px;">Invest</button>
+        <button id="withdraw-btn" style="padding:8px 16px; border-radius:20px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600; font-size:12px;">Withdraw</button>
       </div>
-      <div style="margin-top:12px; display:flex; gap:8px;">
-        <button id="loan-apply-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Apply Loan (100 pts)</button>
-        <button id="loan-repay-btn" style="flex:1; padding:10px; border-radius:30px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600;">Repay Loan</button>
+      <div style="margin-top:8px; display:flex; gap:6px;">
+        <button id="loan-apply-btn" style="flex:1; padding:8px; border-radius:20px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600; font-size:12px;">Apply Loan (100 pts)</button>
+        <button id="loan-repay-btn" style="flex:1; padding:8px; border-radius:20px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600; font-size:12px;">Repay Loan</button>
       </div>
     </div>
 
-    <!-- Withdraw Section -->
-    <div class="glass" style="margin-top:20px;">
+    <div class="glass" style="margin-top:16px;">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
         Withdraw to Real Money
       </div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.4);">10,000 pts = ₹1 | Min ₹10</p>
-      <input type="number" id="withdraw-amount" class="withdraw-input" placeholder="Amount in INR (e.g., 50)" />
-      <input type="text" id="withdraw-method" class="withdraw-input" placeholder="Payment Method (e.g., UPI, Bank)" />
+      <p style="font-size:11px; color:rgba(255,255,255,0.4);">10,000 pts = ₹1 | Min ₹10</p>
+      <input type="number" id="withdraw-amount" class="withdraw-input" placeholder="Amount in INR" />
+      <input type="text" id="withdraw-method" class="withdraw-input" placeholder="Payment Method (UPI, Bank)" />
       <button id="withdraw-request-btn" class="withdraw-btn">Request Withdraw</button>
-      <div id="withdraw-history" style="margin-top:16px;"></div>
+      <div id="withdraw-history" style="margin-top:12px;"></div>
     </div>
   </div>
 
@@ -3524,70 +3535,46 @@ app.get("/mini/:userId", (req, res) => {
         MythoStore
       </div>
       <div id="store-items">
-        <div class="store-item">
-          <span>🔑 5 Search Credits</span>
-          <button onclick="purchase('credits')">50 pts</button>
-        </div>
-        <div class="store-item">
-          <span>⏱️ Skip Cooldown</span>
-          <button onclick="purchase('skip_cooldown')">50 pts</button>
-        </div>
-        <div class="store-item">
-          <span>🎁 Mystery Box</span>
-          <button onclick="purchase('mystery')">100 pts</button>
-        </div>
-        <div class="store-item">
-          <span>🎟️ 10% OFF Coupon</span>
-          <button onclick="purchase('coupon_10')">200 pts</button>
-        </div>
-        <div class="store-item">
-          <span>🎟️ 20% OFF Coupon</span>
-          <button onclick="purchase('coupon_20')">500 pts</button>
-        </div>
-        <div class="store-item">
-          <span>🎟️ 30% OFF Coupon</span>
-          <button onclick="purchase('coupon_30')">800 pts</button>
-        </div>
-        <div class="store-item">
-          <span>🎟️ 50% OFF Coupon</span>
-          <button onclick="purchase('coupon_50')">1500 pts</button>
-        </div>
+        <div class="store-item"><span>🔑 5 Search Credits</span><button onclick="purchase('credits')">50 pts</button></div>
+        <div class="store-item"><span>⏱️ Skip Cooldown</span><button onclick="purchase('skip_cooldown')">50 pts</button></div>
+        <div class="store-item"><span>🎁 Mystery Box</span><button onclick="purchase('mystery')">100 pts</button></div>
+        <div class="store-item"><span>🎟️ 10% OFF Coupon</span><button onclick="purchase('coupon_10')">200 pts</button></div>
+        <div class="store-item"><span>🎟️ 20% OFF Coupon</span><button onclick="purchase('coupon_20')">500 pts</button></div>
+        <div class="store-item"><span>🎟️ 30% OFF Coupon</span><button onclick="purchase('coupon_30')">800 pts</button></div>
+        <div class="store-item"><span>🎟️ 50% OFF Coupon</span><button onclick="purchase('coupon_50')">1500 pts</button></div>
       </div>
     </div>
   </div>
 
-  <!-- ========== TAB: PAY (UPI-Style with Chat) ========== -->
+  <!-- ========== TAB: PAY (Chat & Pay) ========== -->
   <div id="tab-pay" class="tab-content">
-    <div class="glass">
-      <div class="glass-title">
+    <div class="glass" style="padding:12px 14px;">
+      <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
         Payment Chat
       </div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.4);">Min 200 pts | 15% tax | 1 payment/day</p>
+      <p style="font-size:11px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Min 200 pts | 15% tax | 1 payment/day</p>
       
-      <!-- Search User -->
       <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
       <div id="search-results"></div>
       
-      <!-- Selected User Display -->
-      <div id="selected-user" style="display:none; margin:12px 0; padding:8px 12px; background:rgba(213,0,249,0.05); border-radius:12px; border:0.5px solid rgba(213,0,249,0.1);">
-        <span>💬 Sending to: <strong id="selected-name"></strong> (ID: <span id="selected-id"></span>)</span>
-        <button onclick="clearSelectedUser()" style="float:right; background:none; border:none; color:#ff453a; font-size:18px;">✕</button>
+      <div id="selected-user" style="display:none;">
+        <div class="selected-user-badge">
+          <span>💬 Sending to: <strong id="selected-name"></strong></span>
+          <button class="remove-btn" onclick="clearSelectedUser()">✕</button>
+        </div>
       </div>
       
-      <!-- Chat Messages -->
       <div class="payment-chat-container" id="payment-chat-container">
-        <div class="empty" style="padding:10px;">Loading chat...</div>
+        <div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>
       </div>
       
-      <!-- Chat Input -->
       <div class="payment-chat-input-row">
         <input type="text" id="chat-input" placeholder="Type a message..." />
         <button id="chat-send-btn">Send</button>
       </div>
       
-      <!-- UPI Numpad -->
-      <div style="margin-top:12px; border-top:0.5px solid rgba(255,255,255,0.06); padding-top:12px;">
+      <div style="margin-top:8px; border-top:0.5px solid rgba(255,255,255,0.06); padding-top:8px;">
         <div class="upi-display" id="upi-display">₹0</div>
         <div class="upi-numpad" id="upi-numpad">
           <button data-value="1">1</button>
@@ -3605,7 +3592,6 @@ app.get("/mini/:userId", (req, res) => {
         </div>
       </div>
       
-      <!-- Processing State -->
       <div class="payment-processing" id="payment-processing">
         <svg class="svg-loader" viewBox="0 0 100 100">
           <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
@@ -3621,44 +3607,43 @@ app.get("/mini/:userId", (req, res) => {
             100% { stroke-dashoffset: -251.2; }
           }
         </style>
-        <p style="color:rgba(255,255,255,0.5);">Verifying transaction...</p>
+        <p style="color:rgba(255,255,255,0.5); font-size:12px;">Verifying transaction...</p>
       </div>
       
-      <div id="payment-status" style="margin-top:8px; text-align:center;"></div>
+      <div id="payment-status" style="margin-top:4px; text-align:center; font-size:12px;"></div>
     </div>
   </div>
 
-  <!-- ========== TAB: PROFILE (History, Leaderboard, Rating) ========== -->
+  <!-- ========== TAB: PROFILE ========== -->
   <div id="tab-profile" class="tab-content">
     <div class="glass">
-      <div class="profile-hdr" style="margin-bottom:16px;">
+      <div class="profile-hdr" style="margin-bottom:12px;">
         <img id="profile-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
         <div class="profile-info">
           <h2 id="profile-name">Loading...</h2>
           <p id="profile-id">ID: ${userId}</p>
         </div>
       </div>
-      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
+      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:14px;">
         <span>Mythopoints</span>
         <span id="profile-pts" style="color:#ffffff;">0</span>
       </div>
-      <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
+      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:14px;">
         <span>Streak</span>
         <span id="profile-streak">0</span>
       </div>
-      <div style="display:flex; justify-content:space-between; padding:12px 0;">
+      <div style="display:flex; justify-content:space-between; padding:8px 0; font-size:14px;">
         <span>Verification</span>
         <span id="profile-verified" style="color:#ff453a;">Unverified</span>
       </div>
     </div>
 
-    <!-- Rating Section -->
     <div class="glass">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         Rate MythoBot
       </div>
-      <p style="font-size:13px; color:rgba(255,255,255,0.4);">Earn 10 MythoPoints for rating!</p>
+      <p style="font-size:11px; color:rgba(255,255,255,0.4);">Earn 10 MythoPoints for rating!</p>
       <div id="rating-status"></div>
       <div class="star-rating" id="star-container">
         <svg class="star" data-value="1" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
@@ -3667,36 +3652,34 @@ app.get("/mini/:userId", (req, res) => {
         <svg class="star" data-value="4" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         <svg class="star" data-value="5" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
       </div>
-      <div id="rating-message" style="text-align:center; font-size:14px; margin-top:8px;"></div>
+      <div id="rating-message" style="text-align:center; font-size:12px; margin-top:4px;"></div>
     </div>
 
-    <!-- History with Infinite Scroll -->
-    <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.3); text-transform:uppercase;">Recent Transactions</div>
-    <div class="list-card" id="ui-history-list" style="margin:0 16px; max-height:400px; overflow-y:auto;">
+    <div style="padding:0 16px 4px 24px; font-size:11px; color:rgba(255,255,255,0.3); text-transform:uppercase;">Recent Transactions</div>
+    <div class="list-card" id="ui-history-list" style="margin:0 16px; max-height:300px; overflow-y:auto;">
       <div class="spinner"></div>
     </div>
-    <div id="history-loader" style="text-align:center; padding:12px; display:none;">
-      <div class="spinner" style="width:30px;height:30px;"></div>
+    <div id="history-loader" style="text-align:center; padding:8px; display:none;">
+      <div class="spinner" style="width:24px;height:24px;"></div>
     </div>
 
-    <!-- Leaderboard -->
-    <div style="padding:16px 16px 8px; font-size:16px; font-weight:600;">🏆 Mythopoints Leaderboard</div>
-    <div style="padding:0 16px; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="lb-filter active" data-filter="all" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:rgba(213,0,249,0.1); color:#fff; font-weight:600;">All-Time</button>
-      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4);">Weekly</button>
-      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:6px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4);">Monthly</button>
+    <div style="padding:12px 16px 4px; font-size:14px; font-weight:600;">🏆 Mythopoints Leaderboard</div>
+    <div style="padding:0 16px; display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="lb-filter active" data-filter="all" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:rgba(213,0,249,0.1); color:#fff; font-weight:600; font-size:11px;">All-Time</button>
+      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4); font-size:11px;">Weekly</button>
+      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4); font-size:11px;">Monthly</button>
     </div>
-    <div id="lb-list" style="margin:12px 16px;">
+    <div id="lb-list" style="margin:8px 16px;">
       <div class="spinner"></div>
     </div>
-    <div style="display:flex; justify-content:center; gap:16px; padding:8px 16px;">
-      <button id="lb-prev" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;"><</button>
-      <span id="lb-page-info" style="color:rgba(255,255,255,0.3);">Page 1</span>
-      <button id="lb-next" style="padding:6px 16px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff;">></button>
+    <div style="display:flex; justify-content:center; gap:12px; padding:4px 16px;">
+      <button id="lb-prev" style="padding:4px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff; font-size:12px;"><</button>
+      <span id="lb-page-info" style="color:rgba(255,255,255,0.3); font-size:12px;">Page 1</span>
+      <button id="lb-next" style="padding:4px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff; font-size:12px;">></button>
     </div>
   </div>
 
-  <!-- ========== TAB BAR (SVG Icons, no emojis) ========== -->
+  <!-- ========== TAB BAR ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
@@ -4113,11 +4096,11 @@ app.get("/mini/:userId", (req, res) => {
         const res = await fetch('/api/withdraw/history/' + userId);
         const data = await res.json();
         if (data.success && data.requests.length) {
-          let html = '<div style="font-size:13px; color:rgba(255,255,255,0.3); margin-bottom:8px;">Recent Withdrawals</div>';
+          let html = '<div style="font-size:11px; color:rgba(255,255,255,0.3); margin-bottom:4px;">Recent Withdrawals</div>';
           data.requests.forEach(w => {
             const statusColor = w.status === 'Pending' ? '#ffd60a' : (w.status === 'Paid' ? '#30d158' : '#ff453a');
             html += \`
-              <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.04);">
+              <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:12px;">
                 <span>₹\${w.amount} via \${w.method}</span>
                 <span style="color:\${statusColor};">\${w.status}</span>
               </div>
@@ -4125,7 +4108,7 @@ app.get("/mini/:userId", (req, res) => {
           });
           document.getElementById('withdraw-history').innerHTML = html;
         } else {
-          document.getElementById('withdraw-history').innerHTML = '<div class="empty">No withdrawals yet.</div>';
+          document.getElementById('withdraw-history').innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No withdrawals yet.</div>';
         }
       } catch (e) {}
     }
@@ -4204,7 +4187,6 @@ app.get("/mini/:userId", (req, res) => {
     let upiAmount = 0;
     let chatPollInterval = null;
 
-    // Search users
     document.getElementById('search-user').addEventListener('input', async function() {
       const query = this.value.trim();
       if (query.length < 2) {
@@ -4231,7 +4213,7 @@ app.get("/mini/:userId", (req, res) => {
           });
           document.getElementById('search-results').innerHTML = html;
         } else {
-          document.getElementById('search-results').innerHTML = '<div class="empty">No users found.</div>';
+          document.getElementById('search-results').innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No users found.</div>';
         }
       } catch (e) {}
     });
@@ -4240,10 +4222,11 @@ app.get("/mini/:userId", (req, res) => {
       selectedReceiver = id;
       document.getElementById('selected-user').style.display = 'block';
       document.getElementById('selected-name').innerText = name;
-      document.getElementById('selected-id').innerText = id;
       document.getElementById('search-results').innerHTML = '';
       document.getElementById('search-user').value = name;
       loadPaymentChat();
+      // Auto-focus chat input
+      document.getElementById('chat-input').focus();
     }
     window.selectUser = selectUser;
 
@@ -4251,7 +4234,7 @@ app.get("/mini/:userId", (req, res) => {
       selectedReceiver = null;
       document.getElementById('selected-user').style.display = 'none';
       document.getElementById('search-user').value = '';
-      document.getElementById('payment-chat-container').innerHTML = '<div class="empty">Select a user to start chatting.</div>';
+      document.getElementById('payment-chat-container').innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>';
       if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -4259,10 +4242,9 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.clearSelectedUser = clearSelectedUser;
 
-    // Load payment chat
     async function loadPaymentChat() {
       if (!selectedReceiver) {
-        document.getElementById('payment-chat-container').innerHTML = '<div class="empty">Select a user to start chatting.</div>';
+        document.getElementById('payment-chat-container').innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>';
         return;
       }
       try {
@@ -4270,7 +4252,6 @@ app.get("/mini/:userId", (req, res) => {
         const data = await res.json();
         if (data.success) {
           const container = document.getElementById('payment-chat-container');
-          // Filter chats with selected receiver
           const filtered = data.chats.filter(c => 
             (c.senderId === selectedReceiver || c.receiverId === selectedReceiver) ||
             (c.senderId === userId && c.receiverId === selectedReceiver) ||
@@ -4278,7 +4259,7 @@ app.get("/mini/:userId", (req, res) => {
           );
           
           if (filtered.length === 0) {
-            container.innerHTML = '<div class="empty">No messages yet. Start a conversation!</div>';
+            container.innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">No messages yet. Start a conversation!</div>';
           } else {
             let html = '';
             filtered.reverse().forEach(c => {
@@ -4293,7 +4274,7 @@ app.get("/mini/:userId", (req, res) => {
                 content = \`
                   <div class="payment-card">
                     💸 Payment of <span class="amount">\${c.amount}</span> Mythopoints sent!
-                    <div style="font-size:11px; color:rgba(255,255,255,0.4);">Tax: \${c.tax || 0} pts</div>
+                    <div style="font-size:10px; color:rgba(255,255,255,0.4);">Tax: \${c.tax || 0} pts</div>
                   </div>
                 \`;
               } else {
@@ -4319,7 +4300,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Send chat message
     async function sendChatMessage() {
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
@@ -4474,14 +4454,14 @@ app.get("/mini/:userId", (req, res) => {
             iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
           }
           return \`
-            <div class="list-item">
-              <div class="tx-icon \${iconClass}">\${iconSvg}</div>
+            <div class="list-item" style="padding:8px 12px;">
+              <div class="tx-icon" style="width:28px;height:28px;">\${iconSvg}</div>
               <div class="item-content">
                 <div class="item-left">
-                  <p>\${item.reason || item.type}</p>
-                  <span>\${date}</span>
+                  <p style="font-size:13px;">\${item.reason || item.type}</p>
+                  <span style="font-size:10px;">\${date}</span>
                 </div>
-                <div class="item-right \${cls}">\${sign}\${item.amount}</div>
+                <div class="item-right \${cls}" style="font-size:13px;">\${sign}\${item.amount}</div>
               </div>
             </div>
           \`;
@@ -4616,12 +4596,12 @@ app.get("/mini/:userId", (req, res) => {
           const msgDiv = document.getElementById('rating-message');
           if (data.userRating) {
             userRated = true;
-            statusDiv.innerHTML = \`<p style="color:#ffd60a;">You rated \${data.userRating} ⭐ | Avg: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            statusDiv.innerHTML = \`<p style="color:#ffd60a; font-size:12px;">You rated \${data.userRating} ⭐ | Avg: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
             starContainer.style.display = 'none';
             msgDiv.innerText = 'Thanks for rating!';
           } else {
             userRated = false;
-            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.3);">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.3); font-size:12px;">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
             starContainer.style.display = 'flex';
             msgDiv.innerText = 'Tap a star to rate!';
           }
@@ -4802,7 +4782,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // 3D Orb tilt
     const orbContainer = document.getElementById('orb3d-container');
     orbContainer.addEventListener('mousemove', (e) => {
       const rect = orbContainer.getBoundingClientRect();
@@ -4814,11 +4793,9 @@ app.get("/mini/:userId", (req, res) => {
       orb.style.transform = 'rotateY(0deg) rotateX(0deg)';
     });
 
-    // Tap handler with 1 second cooldown
     let lastTapTime = 0;
     orb.addEventListener('click', async function(e) {
       const now = Date.now();
-      // Enforce 1 second cooldown
       if (now - lastTapTime < 1000) {
         tg.HapticFeedback.impactOccurred('light');
         return;
@@ -4912,10 +4889,10 @@ app.get("/mini/:userId", (req, res) => {
           });
           list.innerHTML = html;
         } else {
-          list.innerHTML = '<div class="empty" style="font-size:12px; padding:6px 0;">No chanters yet.</div>';
+          list.innerHTML = '<div class="empty" style="font-size:11px; padding:4px 0;">No chanters yet.</div>';
         }
       } catch (e) {
-        list.innerHTML = '<div class="empty" style="font-size:12px; padding:6px 0;">Failed to load.</div>';
+        list.innerHTML = '<div class="empty" style="font-size:11px; padding:4px 0;">Failed to load.</div>';
       }
     }
 
