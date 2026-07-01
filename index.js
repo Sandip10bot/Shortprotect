@@ -3078,6 +3078,87 @@ app.get("/mini/:userId", (req, res) => {
       font-size: 12px;
       color: rgba(255,255,255,0.5);
     }
+
+    /* === SKELETON LOADERS === */
+    .skeleton {
+      background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    .skeleton-line { height: 16px; margin-bottom: 8px; }
+    .skeleton-avatar { width: 44px; height: 44px; border-radius: 50%; }
+    .skeleton-text { height: 12px; width: 60%; }
+
+    /* === UPI Numpad Styles === */
+    .upi-numpad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      max-width: 280px;
+      margin: 0 auto;
+    }
+    .upi-numpad button {
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 22px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 0.5px solid rgba(255,255,255,0.04);
+    }
+    .upi-numpad button:active {
+      transform: scale(0.92);
+      background: rgba(213,0,249,0.15);
+    }
+    .upi-numpad .clear-btn {
+      background: rgba(255,69,58,0.1);
+      color: #ff453a;
+    }
+    .upi-numpad .clear-btn:active {
+      background: rgba(255,69,58,0.2);
+    }
+    .upi-display {
+      font-size: 32px;
+      font-weight: 700;
+      text-align: center;
+      padding: 12px 0;
+      color: #fff;
+      letter-spacing: 2px;
+      min-height: 60px;
+    }
+
+    .payment-processing {
+      display: none;
+      text-align: center;
+      padding: 30px 0;
+    }
+    .payment-processing.active { display: block; }
+    .payment-processing .svg-loader {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 20px;
+    }
+
+    /* === 3D Orb Tilt === */
+    .chant-orb-3d {
+      perspective: 600px;
+      display: flex;
+      justify-content: center;
+    }
+    .chant-orb-3d .chant-orb {
+      transform-style: preserve-3d;
+      transition: transform 0.1s ease-out;
+    }
   </style>
 </head>
 <body>
@@ -3159,7 +3240,7 @@ app.get("/mini/:userId", (req, res) => {
       <div class="chant-counter">
         <span id="chant-tap-count">0</span> / 1000 taps • <span id="chant-reward-multiplier">1</span>× reward
       </div>
-      <div class="chant-orb-container">
+      <div class="chant-orb-container chant-orb-3d" id="orb3d-container">
         <div class="chant-orb" id="chant-orb">
           <span class="chant-text" id="chant-text">Radha Radha</span>
           <div class="edit-icon" id="chant-edit">✎</div>
@@ -3285,7 +3366,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: PAY ========== -->
+  <!-- ========== TAB: PAY (UPI-Style) ========== -->
   <div id="tab-pay" class="tab-content">
     <div class="glass">
       <div class="glass-title">
@@ -3293,13 +3374,50 @@ app.get("/mini/:userId", (req, res) => {
         Send Mythopoints
       </div>
       <p style="font-size:13px; color:rgba(255,255,255,0.4);">Min 200 pts | 15% tax | 1 payment/day</p>
+      
+      <!-- Contact Search -->
       <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
       <div id="search-results"></div>
       <div id="selected-user" style="display:none; margin:12px 0;">
         <p>Send to: <span id="selected-name"></span> (ID: <span id="selected-id"></span>)</p>
       </div>
-      <input type="number" id="payment-amount" placeholder="Amount" style="width:100%; padding:12px; border-radius:30px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff; margin-bottom:12px;" />
-      <button id="send-payment-btn" style="width:100%; padding:14px; border-radius:30px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600;">Send Payment</button>
+      
+      <!-- UPI Numpad -->
+      <div class="upi-display" id="upi-display">₹0</div>
+      <div class="upi-numpad" id="upi-numpad">
+        <button data-value="1">1</button>
+        <button data-value="2">2</button>
+        <button data-value="3">3</button>
+        <button data-value="4">4</button>
+        <button data-value="5">5</button>
+        <button data-value="6">6</button>
+        <button data-value="7">7</button>
+        <button data-value="8">8</button>
+        <button data-value="9">9</button>
+        <button data-value="clear" class="clear-btn">⌫</button>
+        <button data-value="0">0</button>
+        <button data-value="send" style="background:linear-gradient(135deg,#d500f9,#651fff);">Send</button>
+      </div>
+      
+      <!-- Processing State -->
+      <div class="payment-processing" id="payment-processing">
+        <svg class="svg-loader" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
+          <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" 
+            stroke-dasharray="251.2" stroke-dashoffset="251.2"
+            style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
+          <text x="50" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Processing</text>
+        </svg>
+        <style>
+          @keyframes dash {
+            0% { stroke-dashoffset: 251.2; }
+            50% { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: -251.2; }
+          }
+        </style>
+        <p style="color:rgba(255,255,255,0.5);">Verifying transaction...</p>
+      </div>
+      
       <div id="payment-status" style="margin-top:12px; text-align:center;"></div>
     </div>
   </div>
@@ -3346,10 +3464,13 @@ app.get("/mini/:userId", (req, res) => {
       <div id="rating-message" style="text-align:center; font-size:14px; margin-top:8px;"></div>
     </div>
 
-    <!-- History -->
+    <!-- History with Infinite Scroll -->
     <div style="padding:0 16px 8px 24px; font-size:13px; color:rgba(255,255,255,0.3); text-transform:uppercase;">Recent Transactions</div>
-    <div class="list-card" id="ui-history-list" style="margin:0 16px;">
+    <div class="list-card" id="ui-history-list" style="margin:0 16px; max-height:400px; overflow-y:auto;">
       <div class="spinner"></div>
+    </div>
+    <div id="history-loader" style="text-align:center; padding:12px; display:none;">
+      <div class="spinner" style="width:30px;height:30px;"></div>
     </div>
 
     <!-- Leaderboard -->
@@ -3384,8 +3505,7 @@ app.get("/mini/:userId", (req, res) => {
       <span>Store</span>
     </div>
     <div class="tab-btn" data-tab="pay">
-      <!-- Payment / Wallet SVG -->
-      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v10zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
       <span>Pay</span>
     </div>
     <div class="tab-btn" data-tab="profile">
@@ -3437,7 +3557,6 @@ app.get("/mini/:userId", (req, res) => {
       }
       if (tgUser.photo_url) {
         document.querySelectorAll('#ui-dp, #profile-dp').forEach(el => el.src = tgUser.photo_url);
-        // Silently sync photo URL to backend
         fetch('/api/sync-profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3447,7 +3566,6 @@ app.get("/mini/:userId", (req, res) => {
     }
 
     // ─── CONFIRM & SUCCESS MODALS ───
-    // Confirm overlay
     const confirmOverlay = document.createElement('div');
     confirmOverlay.className = 'confirm-overlay';
     confirmOverlay.innerHTML = \`
@@ -3481,7 +3599,6 @@ app.get("/mini/:userId", (req, res) => {
       });
     }
 
-    // Success overlay
     const successOverlay = document.createElement('div');
     successOverlay.className = 'success-overlay';
     successOverlay.innerHTML = \`
@@ -3508,6 +3625,107 @@ app.get("/mini/:userId", (req, res) => {
       });
     }
 
+    // ─── REACTIVE STATE MANAGEMENT ───
+    const state = new Proxy({
+      mythopoints: 0,
+      streak: 0,
+      credits: 0,
+      premium: { active: false, plan: 'Free', daysLeft: 0 },
+      bank: { invested: 0, pendingYield: 0, loan: 0 },
+      stats: { earned: 0, spent: 0 },
+      chant: { totalTaps: 0, level: 'Seeker', multiplier: 1 },
+      verified: false,
+      payment: { used: 0, limit: 1 }
+    }, {
+      set(target, prop, value) {
+        target[prop] = value;
+        updateUI();
+        return true;
+      }
+    });
+
+    function updateUI() {
+      // Update all DOM elements based on state
+      document.getElementById('ui-pts').innerText = state.mythopoints.toLocaleString();
+      document.getElementById('ui-credits').innerText = state.credits;
+      document.getElementById('streak-count').innerText = state.streak + ' Day Streak';
+      document.getElementById('ui-life-earn').innerText = state.stats.earned.toLocaleString();
+      document.getElementById('ui-life-spent').innerText = state.stats.spent.toLocaleString();
+      document.getElementById('profile-pts').innerText = state.mythopoints.toLocaleString();
+      document.getElementById('profile-streak').innerText = state.streak;
+      
+      const badge = document.getElementById('ui-verified');
+      if (state.verified) {
+        badge.innerText = '✓ Secured Node';
+        badge.style.background = 'rgba(48,209,88,0.12)';
+        badge.style.color = '#30d158';
+      } else {
+        badge.innerText = '! Unverified';
+        badge.style.background = 'rgba(255,69,58,0.12)';
+        badge.style.color = '#ff453a';
+      }
+      
+      if (state.premium.active) {
+        document.getElementById('ui-prem-status').innerText = state.premium.plan;
+        document.getElementById('ui-prem-days').innerText = state.premium.daysLeft + ' Days Left';
+      } else {
+        document.getElementById('ui-prem-status').innerText = 'Free';
+        document.getElementById('ui-prem-days').innerText = 'Upgrade';
+      }
+      
+      document.getElementById('ui-bank-invest').innerText = state.bank.invested.toLocaleString() + ' pts';
+      document.getElementById('ui-bank-yield').innerText = '+' + state.bank.pendingYield.toLocaleString();
+      document.getElementById('ui-bank-loan').innerText = state.bank.loan.toLocaleString();
+      
+      document.getElementById('chant-level').innerText = state.chant.level;
+      document.getElementById('chant-reward-multiplier').innerText = state.chant.multiplier;
+      
+      const remainder = state.chant.totalTaps % 1000;
+      document.getElementById('chant-tap-count').innerText = remainder;
+      
+      // Update progress
+      const levels = [
+        { name: 'Seeker', min: 0, multiplier: 1 },
+        { name: 'Devotee', min: 100, multiplier: 1 },
+        { name: 'Priest', min: 500, multiplier: 1 },
+        { name: 'Ascended', min: 2000, multiplier: 2 },
+        { name: 'Moksha', min: 10000, multiplier: 3 }
+      ];
+      let currentLevel = levels[0];
+      for (let i = levels.length - 1; i >= 0; i--) {
+        if (state.chant.totalTaps >= levels[i].min) {
+          currentLevel = levels[i];
+          break;
+        }
+      }
+      let nextLevel = null;
+      for (let i = 0; i < levels.length; i++) {
+        if (levels[i].min > currentLevel.min) {
+          nextLevel = levels[i];
+          break;
+        }
+      }
+      const progressEl = document.getElementById('chant-progress');
+      if (nextLevel) {
+        const progress = (state.chant.totalTaps - currentLevel.min) / (nextLevel.min - currentLevel.min) * 100;
+        progressEl.style.width = Math.min(progress, 100) + '%';
+      } else {
+        progressEl.style.width = '100%';
+      }
+      
+      const profileVerified = document.getElementById('profile-verified');
+      if (state.verified) {
+        profileVerified.innerText = '✅ Verified';
+        profileVerified.style.color = '#30d158';
+      } else {
+        profileVerified.innerText = '❌ Unverified';
+        profileVerified.style.color = '#ff453a';
+      }
+      
+      // Payment status
+      document.getElementById('payment-status').innerHTML = \`Daily payments: \${state.payment.used}/\${state.payment.limit}\`;
+    }
+
     // ─── TAB SWITCHING ───
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabContents = {
@@ -3528,7 +3746,7 @@ app.get("/mini/:userId", (req, res) => {
       navTitle.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
       tg.HapticFeedback.selectionChanged();
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
-      if (tabId === 'profile') { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
+      if (tabId === 'profile') { loadHistory(1, true); loadLeaderboard(); loadRatingStatus(); }
       if (tabId === 'pay') loadPaymentStatus();
     }
     window.switchTab = switchTab;
@@ -3545,30 +3763,29 @@ app.get("/mini/:userId", (req, res) => {
         const res = await fetch('/api/ios-dashboard-data/' + userId);
         const data = await res.json();
         if (!data.success) return;
-        // Home
-        document.getElementById('ui-pts').innerText = data.profile.mythopoints.toLocaleString();
-        const streak = data.profile.streak || 0;
-        document.getElementById('streak-count').innerText = streak + ' Day Streak';
-        const badge = document.getElementById('ui-verified');
-        if (data.profile.is_verified) {
-          badge.innerText = '✓ Secured Node';
-          badge.style.background = 'rgba(48,209,88,0.12)';
-          badge.style.color = '#30d158';
-        } else {
-          badge.innerText = '! Unverified';
-          badge.style.background = 'rgba(255,69,58,0.12)';
-          badge.style.color = '#ff453a';
-        }
-        if (data.premium.active) {
-          document.getElementById('ui-prem-status').innerText = data.premium.plan;
-          document.getElementById('ui-prem-days').innerText = data.premium.daysLeft + ' Days Left';
-        } else {
-          document.getElementById('ui-prem-status').innerText = 'Free';
-          document.getElementById('ui-prem-days').innerText = 'Upgrade';
-        }
-        document.getElementById('ui-credits').innerText = data.search.credits;
-        document.getElementById('ui-life-earn').innerText = data.stats.lifetimeEarned.toLocaleString();
-        document.getElementById('ui-life-spent').innerText = data.stats.lifetimeSpent.toLocaleString();
+        
+        state.mythopoints = data.profile.mythopoints || 0;
+        state.streak = data.profile.streak || 0;
+        state.verified = data.profile.is_verified || false;
+        state.credits = data.search.credits || 0;
+        state.premium = {
+          active: data.premium.active || false,
+          plan: data.premium.plan || 'Free',
+          daysLeft: data.premium.daysLeft || 0
+        };
+        state.bank = {
+          invested: data.bank.invested || 0,
+          pendingYield: data.bank.pendingInterest || 0,
+          loan: data.bank.loanDue || 0
+        };
+        state.stats = {
+          earned: data.stats.lifetimeEarned || 0,
+          spent: data.stats.lifetimeSpent || 0
+        };
+        state.payment = {
+          used: data.payment?.usedToday || 0,
+          limit: data.payment?.dailyLimit || 1
+        };
       } catch (e) {
         console.error('Dashboard error:', e);
       }
@@ -3580,16 +3797,10 @@ app.get("/mini/:userId", (req, res) => {
         const res = await fetch('/api/bank/status/' + userId);
         const data = await res.json();
         if (!data.success) return;
-        document.getElementById('ui-bank-invest').innerText = data.invested.toLocaleString() + ' pts';
-        document.getElementById('ui-bank-yield').innerText = '+' + data.pendingInterest.toLocaleString();
-        if (data.loanActive) {
-          document.getElementById('ui-bank-loan').innerText = data.loanDue.toLocaleString();
-          document.getElementById('ui-loan-status').innerText = 'Accumulating 10%/day';
-        } else {
-          document.getElementById('ui-bank-loan').innerText = '0';
-          document.getElementById('ui-bank-loan').style.color = '#30d158';
-          document.getElementById('ui-loan-status').innerText = 'Eligible for loan';
-        }
+        state.bank.invested = data.invested || 0;
+        state.bank.pendingYield = data.pendingInterest || 0;
+        state.bank.loan = data.loanDue || 0;
+        
         const claimBtn = document.getElementById('bank-claim-btn');
         if (data.pendingInterest > 0) {
           claimBtn.style.display = 'block';
@@ -3598,6 +3809,7 @@ app.get("/mini/:userId", (req, res) => {
         } else {
           claimBtn.style.display = 'none';
         }
+        updateUI();
       } catch (e) {}
     }
 
@@ -3784,8 +3996,9 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT ───
+    // ─── PAYMENT (UPI-Style) ───
     let selectedReceiver = null;
+    let upiAmount = 0;
 
     document.getElementById('search-user').addEventListener('input', async function() {
       const query = this.value.trim();
@@ -3822,12 +4035,30 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.selectUser = selectUser;
 
-    document.getElementById('send-payment-btn').addEventListener('click', async () => {
-      const amount = parseInt(document.getElementById('payment-amount').value);
+    // UPI Numpad
+    document.querySelectorAll('.upi-numpad button').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const value = this.dataset.value;
+        if (value === 'clear') {
+          upiAmount = Math.floor(upiAmount / 10);
+        } else if (value === 'send') {
+          sendPayment();
+          return;
+        } else {
+          const num = parseInt(value);
+          upiAmount = upiAmount * 10 + num;
+        }
+        document.getElementById('upi-display').innerText = '₹' + upiAmount;
+        tg.HapticFeedback.impactOccurred('light');
+      });
+    });
+
+    async function sendPayment() {
       if (!selectedReceiver) return alert('Select a receiver first.');
-      if (!amount || amount < 200) return alert('Minimum 200 Mythopoints.');
-      const confirmed = await showConfirm(\`Send \${amount} Mythopoints to user \${selectedReceiver}?\`);
-      if (!confirmed) return;
+      if (upiAmount < 200) return alert('Minimum 200 Mythopoints.');
+      
+      const processing = document.getElementById('payment-processing');
+      processing.classList.add('active');
       
       try {
         const res = await fetch('/api/payment/send', {
@@ -3836,53 +4067,82 @@ app.get("/mini/:userId", (req, res) => {
           body: JSON.stringify({
             senderId: userId,
             receiverId: selectedReceiver,
-            amount: amount
+            amount: upiAmount
           })
         });
         const data = await res.json();
+        processing.classList.remove('active');
+        
         if (data.success) {
-          await showSuccess(\`Payment of \${amount} Mythopoints sent successfully!\`, 'Payment Successful');
+          tg.HapticFeedback.notificationOccurred('success');
+          await showSuccess(\`Payment of \${upiAmount} Mythopoints sent successfully!\`, 'Payment Successful');
           loadDashboard();
           loadPaymentStatus();
-          document.getElementById('payment-amount').value = '';
+          upiAmount = 0;
+          document.getElementById('upi-display').innerText = '₹0';
           selectedReceiver = null;
           document.getElementById('selected-user').style.display = 'none';
         } else {
           alert(data.error);
+          tg.HapticFeedback.notificationOccurred('error');
         }
-      } catch (e) {}
-    });
+      } catch (e) {
+        processing.classList.remove('active');
+        alert('Network error. Please try again.');
+      }
+    }
 
     async function loadPaymentStatus() {
       try {
         const res = await fetch('/api/ios-dashboard-data/' + userId);
         const data = await res.json();
         if (data.success && data.payment) {
-          const used = data.payment.usedToday || 0;
-          const limit = data.payment.dailyLimit || 1;
-          document.getElementById('payment-status').innerHTML = \`Daily payments: \${used}/\${limit}\`;
+          state.payment.used = data.payment.usedToday || 0;
+          state.payment.limit = data.payment.dailyLimit || 1;
+          updateUI();
         }
       } catch (e) {}
     }
 
-    // ─── HISTORY ───
-    async function loadHistory() {
-      const container = document.getElementById('ui-history-list');
-      container.innerHTML = '<div class="spinner"></div>';
+    // ─── HISTORY with Infinite Scroll ───
+    let historyPage = 1;
+    let historyLoading = false;
+    let historyHasMore = true;
+    const historyContainer = document.getElementById('ui-history-list');
+
+    async function loadHistory(page, reset = false) {
+      if (historyLoading) return;
+      historyLoading = true;
+      
+      if (reset) {
+        historyPage = 1;
+        historyHasMore = true;
+        historyContainer.innerHTML = '';
+        document.getElementById('history-loader').style.display = 'none';
+      }
+      
+      const loader = document.getElementById('history-loader');
+      if (page > 1) loader.style.display = 'block';
+      
       try {
-        const res = await fetch('/api/history/' + userId + '?filter=ALL&page=1');
+        const res = await fetch(\`/api/history/\${userId}?filter=ALL&page=\${page}\`);
         const data = await res.json();
         if (!data.success || data.history.length === 0) {
-          container.innerHTML = '<div class="empty">No transactions found.</div>';
+          historyHasMore = false;
+          loader.style.display = 'none';
+          if (page === 1) {
+            historyContainer.innerHTML = '<div class="empty">No transactions found.</div>';
+          }
+          historyLoading = false;
           return;
         }
-        container.innerHTML = data.history.map(item => {
+        
+        const html = data.history.map(item => {
           const isEarn = item.type === 'EARNED';
           const isTax = item.type === 'TAX';
           const sign = isEarn ? '+' : '-';
           const cls = isEarn ? 'val-pos' : 'val-neg';
           const date = new Date(item.date).toLocaleDateString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
-          // Icon based on type
           let iconClass = 'default';
           let iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>';
           if (isEarn) {
@@ -3908,9 +4168,45 @@ app.get("/mini/:userId", (req, res) => {
             </div>
           \`;
         }).join('');
+        
+        if (reset || page === 1) {
+          historyContainer.innerHTML = html;
+        } else {
+          historyContainer.innerHTML += html;
+        }
+        
+        historyPage = page;
+        historyHasMore = data.history.length >= 15;
+        loader.style.display = 'none';
+        historyLoading = false;
+        
+        // Setup IntersectionObserver for infinite scroll
+        setupHistoryObserver();
       } catch (e) {
-        container.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load history.</div>';
+        console.error('History error:', e);
+        historyContainer.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load history.</div>';
+        loader.style.display = 'none';
+        historyLoading = false;
       }
+    }
+
+    let historyObserver = null;
+    function setupHistoryObserver() {
+      if (historyObserver) historyObserver.disconnect();
+      
+      const sentinel = document.createElement('div');
+      sentinel.id = 'history-sentinel';
+      sentinel.style.height = '2px';
+      sentinel.style.opacity = '0';
+      historyContainer.appendChild(sentinel);
+      
+      historyObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && historyHasMore && !historyLoading) {
+          loadHistory(historyPage + 1, false);
+        }
+      }, { root: historyContainer, rootMargin: '100px' });
+      
+      historyObserver.observe(sentinel);
     }
 
     // ─── LEADERBOARD ───
@@ -3940,7 +4236,6 @@ app.get("/mini/:userId", (req, res) => {
           if (isSelf) rankClass += ' self';
           const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
           const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
-          // Avatar: use photo_url if available, else initials
           let avatarHtml = '';
           if (u.photo_url) {
             avatarHtml = \`<img src="\${u.photo_url}" class="lb-avatar" style="object-fit: cover;" />\`;
@@ -3996,30 +4291,6 @@ app.get("/mini/:userId", (req, res) => {
       if (lbPage < lbTotalPages) { lbPage++; loadLeaderboard(); }
     });
 
-    // ─── PROFILE ───
-    async function loadProfile() {
-      try {
-        const res = await fetch('/api/ios-profile-data/' + userId);
-        const data = await res.json();
-        if (data.success) {
-          document.getElementById('profile-pts').innerText = data.mythopoints.toLocaleString();
-        }
-        const dash = await fetch('/api/ios-dashboard-data/' + userId);
-        const dashData = await dash.json();
-        if (dashData.success) {
-          document.getElementById('profile-streak').innerText = dashData.profile.streak;
-          const v = document.getElementById('profile-verified');
-          if (dashData.profile.is_verified) {
-            v.innerText = '✅ Verified';
-            v.style.color = '#30d158';
-          } else {
-            v.innerText = '❌ Unverified';
-            v.style.color = '#ff453a';
-          }
-        }
-      } catch (e) {}
-    }
-
     // ─── RATING ───
     let userRated = false;
     async function loadRatingStatus() {
@@ -4045,7 +4316,6 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     }
 
-    // Star click – SVG stars
     document.querySelectorAll('.star').forEach(star => {
       star.addEventListener('click', async function() {
         if (userRated) return;
@@ -4141,55 +4411,83 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // ============================================================
-    // CHANT & EARN – TAP TO EARN LOGIC (Integrated into Home)
-    // ============================================================
-    let chantTapCount = 0;        // unredeemed taps since last 1000
-    let chantTotalTaps = 0;       // lifetime taps (from server)
-    let chantText = 'Radha Radha';
-    let chantLastTapTime = 0;     // for cooldown (1 sec)
-    let chantLevels = [
-      { name: 'Seeker', min: 0, multiplier: 1 },
-      { name: 'Devotee', min: 100, multiplier: 1 },
-      { name: 'Priest', min: 500, multiplier: 1 },
-      { name: 'Ascended', min: 2000, multiplier: 2 },
-      { name: 'Moksha', min: 10000, multiplier: 3 }
-    ];
-
-    const ORB = document.getElementById('chant-orb');
-    const TEXT_EL = document.getElementById('chant-text');
-    const EDIT_BTN = document.getElementById('chant-edit');
-    const TAP_COUNT_EL = document.getElementById('chant-tap-count');
-    const LEVEL_EL = document.getElementById('chant-level');
-    const PROGRESS_EL = document.getElementById('chant-progress');
-    const MULTIPLIER_EL = document.getElementById('chant-reward-multiplier');
-
-    // Load saved chant text from localStorage
-    const savedText = localStorage.getItem('chantText');
-    if (savedText) {
-      chantText = savedText;
-      TEXT_EL.innerText = chantText;
-    }
-
-    // Edit chant text
-    EDIT_BTN.addEventListener('click', (e) => {
+    // ─── CHANT & EARN (with localStorage persistence) ───
+    const CHANT_KEY = 'mytho_chant_' + userId;
+    let chantTapCount = 0;
+    const orb = document.getElementById('chant-orb');
+    const textEl = document.getElementById('chant-text');
+    const editBtn = document.getElementById('chant-edit');
+    
+    // Load persisted chant text
+    let chantText = localStorage.getItem('chantText') || 'Radha Radha';
+    textEl.innerText = chantText;
+    
+    editBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const newText = prompt('Enter your chant:', chantText);
       if (newText && newText.trim().length > 0) {
         chantText = newText.trim();
-        TEXT_EL.innerText = chantText;
+        textEl.innerText = chantText;
         localStorage.setItem('chantText', chantText);
         tg.HapticFeedback.selectionChanged();
       }
     });
 
-    // Fetch total taps from server
+    // Load persisted tap count
+    function loadChantPersistence() {
+      try {
+        const saved = localStorage.getItem(CHANT_KEY);
+        if (saved) {
+          const data = JSON.parse(saved);
+          chantTapCount = data.taps || 0;
+          const lastTap = data.lastTap || 0;
+          // If more than 10 minutes passed, reset local unsynced taps
+          if (Date.now() - lastTap > 600000) {
+            chantTapCount = 0;
+            localStorage.removeItem(CHANT_KEY);
+          }
+        }
+      } catch (e) {}
+    }
+
+    function saveChantPersistence() {
+      try {
+        localStorage.setItem(CHANT_KEY, JSON.stringify({
+          taps: chantTapCount,
+          lastTap: Date.now()
+        }));
+      } catch (e) {}
+    }
+
+    // Sync chant stats from server
     async function fetchChantStats() {
       try {
         const res = await fetch('/api/chant/stats/' + userId);
         const data = await res.json();
         if (data.success) {
-          chantTotalTaps = data.totalTaps || 0;
+          const serverTaps = data.totalTaps || 0;
+          // Merge local unsynced taps
+          const total = serverTaps + chantTapCount;
+          state.chant.totalTaps = total;
+          updateUI();
+          
+          // Update level and progress via state
+          const levels = [
+            { name: 'Seeker', min: 0, multiplier: 1 },
+            { name: 'Devotee', min: 100, multiplier: 1 },
+            { name: 'Priest', min: 500, multiplier: 1 },
+            { name: 'Ascended', min: 2000, multiplier: 2 },
+            { name: 'Moksha', min: 10000, multiplier: 3 }
+          ];
+          let currentLevel = levels[0];
+          for (let i = levels.length - 1; i >= 0; i--) {
+            if (state.chant.totalTaps >= levels[i].min) {
+              currentLevel = levels[i];
+              break;
+            }
+          }
+          state.chant.level = currentLevel.name;
+          state.chant.multiplier = currentLevel.multiplier;
           updateUI();
         }
       } catch (e) {
@@ -4197,55 +4495,34 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Update UI: level, progress, tap counter, multiplier
-    function updateUI() {
-      // Update tap counter (remainder)
-      const remainder = chantTotalTaps % 1000;
-      TAP_COUNT_EL.innerText = remainder;
+    // 3D Orb tilt
+    const orbContainer = document.getElementById('orb3d-container');
+    orbContainer.addEventListener('mousemove', (e) => {
+      const rect = orbContainer.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width - 0.5;
+      const y = (e.clientY - rect.top) / rect.height - 0.5;
+      orb.style.transform = \`rotateY(\${x * 15}deg) rotateX(\${-y * 15}deg)\`;
+    });
+    orbContainer.addEventListener('mouseleave', () => {
+      orb.style.transform = 'rotateY(0deg) rotateX(0deg)';
+    });
 
-      // Determine current level
-      let currentLevel = chantLevels[0];
-      for (let i = chantLevels.length - 1; i >= 0; i--) {
-        if (chantTotalTaps >= chantLevels[i].min) {
-          currentLevel = chantLevels[i];
-          break;
-        }
-      }
-      LEVEL_EL.innerText = currentLevel.name;
-      MULTIPLIER_EL.innerText = currentLevel.multiplier;
-
-      // Progress to next level
-      let nextLevel = null;
-      for (let i = 0; i < chantLevels.length; i++) {
-        if (chantLevels[i].min > currentLevel.min) {
-          nextLevel = chantLevels[i];
-          break;
-        }
-      }
-      if (nextLevel) {
-        const progress = (chantTotalTaps - currentLevel.min) / (nextLevel.min - currentLevel.min) * 100;
-        PROGRESS_EL.style.width = Math.min(progress, 100) + '%';
-      } else {
-        PROGRESS_EL.style.width = '100%';
-      }
-    }
-
-    // Handle tap on orb with cooldown
-    ORB.addEventListener('click', async function(e) {
-      // Cooldown: 1 second
+    // Tap handler with anti-cheat (15ms minimum between taps)
+    let lastTapTime = 0;
+    orb.addEventListener('click', async function(e) {
       const now = Date.now();
-      if (now - chantLastTapTime < 1000) {
-        // Too fast: light haptic feedback to indicate wait
+      if (now - lastTapTime < 15) {
+        // Too fast - block autoclickers
         tg.HapticFeedback.impactOccurred('light');
         return;
       }
-      chantLastTapTime = now;
-
-      // Visual feedback: scale down, ripple effect
+      lastTapTime = now;
+      
+      // Visual feedback
       this.style.transform = 'scale(0.92)';
       setTimeout(() => { this.style.transform = ''; }, 150);
-
-      // Ripple effect
+      
+      // Ripple
       const rect = this.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -4257,49 +4534,35 @@ app.get("/mini/:userId", (req, res) => {
       ripple.style.top = (y - 10) + 'px';
       this.appendChild(ripple);
       setTimeout(() => ripple.remove(), 600);
-
-      // Haptic feedback (light)
+      
       tg.HapticFeedback.impactOccurred('light');
-
-      // Floating +1 at tap position (view‑relative)
+      
+      // Floating +1
       spawnFloatingText(e.clientX || (rect.left + rect.width/2), e.clientY || (rect.top + rect.height/2), '+1');
-
-      // Increment local counter
+      
       chantTapCount++;
-
-      // If we reached 1000 taps, sync and reset
+      saveChantPersistence();
+      
+      // Update local display immediately
+      const currentTotal = state.chant.totalTaps || 0;
+      state.chant.totalTaps = currentTotal + 1;
+      updateUI();
+      
+      // Sync every 1000 taps
       if (chantTapCount >= 1000) {
-        // Heavy haptic
         tg.HapticFeedback.impactOccurred('heavy');
-        // Sync to server (the multiplier determines how many points are awarded? Actually server uses total taps, we'll just send taps)
-        await syncTaps(chantTapCount);
+        await syncChantTaps(chantTapCount);
         chantTapCount = 0;
-        // Refresh total taps from server
+        localStorage.removeItem(CHANT_KEY);
         await fetchChantStats();
-        // Trigger success animation on orb
-        ORB.classList.add('chant-mint-animation');
-        setTimeout(() => ORB.classList.remove('chant-mint-animation'), 600);
-        // Show success notification
-        const multiplier = getCurrentMultiplier();
-        const pointsEarned = multiplier; // Actually server handles points, but we can show the multiplier
+        orb.classList.add('chant-mint-animation');
+        setTimeout(() => orb.classList.remove('chant-mint-animation'), 600);
+        const multiplier = state.chant.multiplier || 1;
         await showSuccess(\`You earned \${multiplier} Mythopoint(s) for 1000 chants!\`, 'Chant Rewarded!');
-        loadDashboard(); // refresh home balance
-      } else {
-        // Update tap counter with local count (temporary)
-        TAP_COUNT_EL.innerText = chantTapCount;
+        loadDashboard();
       }
     });
 
-    function getCurrentMultiplier() {
-      for (let i = chantLevels.length - 1; i >= 0; i--) {
-        if (chantTotalTaps >= chantLevels[i].min) {
-          return chantLevels[i].multiplier;
-        }
-      }
-      return 1;
-    }
-
-    // Spawn floating text at given coordinates
     function spawnFloatingText(x, y, text) {
       const el = document.createElement('div');
       el.className = 'floating-tap';
@@ -4310,8 +4573,7 @@ app.get("/mini/:userId", (req, res) => {
       setTimeout(() => el.remove(), 800);
     }
 
-    // Sync taps to server
-    async function syncTaps(taps) {
+    async function syncChantTaps(taps) {
       try {
         const res = await fetch('/api/chant/sync/' + userId, {
           method: 'POST',
@@ -4321,18 +4583,13 @@ app.get("/mini/:userId", (req, res) => {
         const data = await res.json();
         if (!data.success) {
           console.error('Sync failed:', data.error);
-          alert('Sync failed: ' + data.error);
-          chantTapCount = 0;
-        } else {
-          if (data.totalTaps !== undefined) chantTotalTaps = data.totalTaps;
         }
       } catch (e) {
         console.error('Sync error:', e);
-        alert('Network error during sync. Please try again later.');
       }
     }
 
-    // Fetch chant leaderboard
+    // Load chant leaderboard
     async function loadChantLeaderboard() {
       const list = document.getElementById('chant-lb-list');
       try {
@@ -4361,23 +4618,26 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Initialize chant on Home tab load
-    async function initChant() {
-      await fetchChantStats();
-      chantTapCount = 0;
-      await loadChantLeaderboard();
-    }
-
-    // If home tab is active on load, init
-    if (document.getElementById('tab-home').classList.contains('active')) {
-      initChant();
-    }
-
     // ─── INIT ───
-    loadDashboard();
-    if (document.getElementById('tab-bank').classList.contains('active')) { loadBankData(); loadWithdrawHistory(); }
-    if (document.getElementById('tab-profile').classList.contains('active')) { loadHistory(); loadLeaderboard(); loadProfile(); loadRatingStatus(); }
-    if (document.getElementById('tab-pay').classList.contains('active')) loadPaymentStatus();
+    async function init() {
+      loadChantPersistence();
+      await loadDashboard();
+      await fetchChantStats();
+      await loadChantLeaderboard();
+      
+      if (document.getElementById('tab-bank').classList.contains('active')) { 
+        loadBankData(); 
+        loadWithdrawHistory(); 
+      }
+      if (document.getElementById('tab-profile').classList.contains('active')) { 
+        loadHistory(1, true); 
+        loadLeaderboard(); 
+        loadRatingStatus(); 
+      }
+      if (document.getElementById('tab-pay').classList.contains('active')) loadPaymentStatus();
+    }
+    
+    init();
   </script>
 </body>
 </html>
@@ -4691,11 +4951,6 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
         res.status(500).json({ success: false, error: "Failed to clear memory" });
     }
 });
-
-
-
-
-
 
 // ========================
 // FALLBACK HOME ROUTE
