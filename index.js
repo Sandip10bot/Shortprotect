@@ -25,6 +25,7 @@ let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollectio
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
+let paymentChatCollection;
 
 
 async function connectDB() {
@@ -47,6 +48,7 @@ async function connectDB() {
     ipVerificationCollection = db.collection("ip_verification");
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
+    paymentChatCollection = db.collection("payment_chats");
     
     
     console.log("✅ MongoDB connected for all collections");
@@ -1718,7 +1720,7 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 💸 PAYMENT API – unchanged
+// 💸 PAYMENT API – WITH CHAT SUPPORT
 // ==========================================
 
 async function canMakePayment(userId) {
@@ -1819,6 +1821,18 @@ app.post("/api/payment/send", async (req, res) => {
                     reason: `Tax on payment ${sender}->${receiver}`,
                     date: new Date()
                 }, { session });
+                
+                // Save payment chat message
+                await paymentChatCollection.insertOne({
+                    senderId: sender,
+                    receiverId: receiver,
+                    amount: amt,
+                    receiverAmount: receiverAmount,
+                    tax: tax,
+                    message: `💸 Payment of ${amt} Mythopoints sent!`,
+                    timestamp: new Date(),
+                    type: 'payment'
+                });
             });
             await session.endSession();
         } catch (error) {
@@ -1854,17 +1868,86 @@ app.get("/api/users/search", async (req, res) => {
 
         const users = await usersCollection.find(query)
             .limit(10)
-            .project({ user_id: 1, username: 1, first_name: 1, mythopoints: 1 })
+            .project({ user_id: 1, username: 1, first_name: 1, mythopoints: 1, photo_url: 1 })
             .toArray();
 
         const formatted = users.map(u => ({
             id: u.user_id,
             name: u.first_name || u.username || `User ${u.user_id}`,
             username: u.username || null,
-            points: u.mythopoints || 0
+            points: u.mythopoints || 0,
+            photo_url: u.photo_url || null
         }));
 
         res.json({ success: true, users: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// PAYMENT CHAT API
+// ==========================================
+
+app.get("/api/payment/chat/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const chats = await paymentChatCollection
+            .find({
+                $or: [{ senderId: uid }, { receiverId: uid }]
+            })
+            .sort({ timestamp: -1 })
+            .limit(50)
+            .toArray();
+        
+        // Get user details for each chat
+        const userIds = new Set();
+        chats.forEach(c => {
+            userIds.add(c.senderId);
+            userIds.add(c.receiverId);
+        });
+        const users = await usersCollection
+            .find({ user_id: { $in: Array.from(userIds) } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+        const userMap = {};
+        users.forEach(u => userMap[u.user_id] = u);
+        
+        const formatted = chats.map(c => {
+            const sender = userMap[c.senderId] || { first_name: `User ${c.senderId}` };
+            const receiver = userMap[c.receiverId] || { first_name: `User ${c.receiverId}` };
+            return {
+                ...c,
+                senderName: sender.first_name || sender.username || `User ${c.senderId}`,
+                senderPhoto: sender.photo_url || null,
+                receiverName: receiver.first_name || receiver.username || `User ${c.receiverId}`,
+                receiverPhoto: receiver.photo_url || null,
+                isSent: c.senderId === uid
+            };
+        });
+        
+        res.json({ success: true, chats: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/payment/chat/message", async (req, res) => {
+    try {
+        const { senderId, receiverId, message } = req.body;
+        if (!senderId || !receiverId || !message) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        await paymentChatCollection.insertOne({
+            senderId: parseInt(senderId),
+            receiverId: parseInt(receiverId),
+            message: message,
+            timestamp: new Date(),
+            type: 'message'
+        });
+        
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -2032,7 +2115,7 @@ app.post("/api/sync-profile", async (req, res) => {
 });
 
 // ==========================================
-// CHANT & EARN (Tap to Earn) – UPDATED
+// CHANT & EARN (Tap to Earn) – UPDATED WITH 1 SECOND COOLDOWN
 // ==========================================
 
 // In-memory rate limiting: last sync timestamps per user
@@ -2068,9 +2151,9 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
         if (history.length >= 2) {
             const timeSpan = now - history[0];
             const avgTapsPerSec = (newTaps) / (timeSpan / 1000);
-            // Allow maximum 15 taps per second (humanly impossible to tap more than ~10/sec)
-            if (avgTapsPerSec > 15) {
-                return res.status(429).json({ success: false, error: "Too many taps! Please slow down." });
+            // Allow maximum 1 tap per second (strict 1/sec)
+            if (avgTapsPerSec > 1.5) {
+                return res.status(429).json({ success: false, error: "Too many taps! Maximum 1 tap per second." });
             }
         }
 
@@ -2681,7 +2764,98 @@ app.get("/mini/:userId", (req, res) => {
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === PAYMENT === */
+    /* === PAYMENT - CHAT STYLE === */
+    .payment-chat-container {
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      padding: 8px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 16px;
+    }
+    .payment-chat-container .chat-msg {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+      animation: fadeSlide 0.3s ease;
+    }
+    .payment-chat-container .chat-msg.sent { flex-direction: row-reverse; }
+    .payment-chat-container .chat-msg .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 12px;
+      color: #fff;
+    }
+    .payment-chat-container .chat-msg .bubble {
+      max-width: 70%;
+      padding: 8px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+    .payment-chat-container .chat-msg.sent .bubble {
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .payment-chat-container .chat-msg.received .bubble {
+      background: rgba(255,255,255,0.06);
+      color: #eee;
+      border-bottom-left-radius: 4px;
+    }
+    .payment-chat-container .chat-msg .bubble .payment-card {
+      background: rgba(0,230,118,0.1);
+      border: 1px solid rgba(0,230,118,0.2);
+      border-radius: 12px;
+      padding: 8px 12px;
+      margin-top: 4px;
+    }
+    .payment-chat-container .chat-msg .bubble .payment-card .amount {
+      font-weight: 700;
+      color: #30d158;
+    }
+    .payment-chat-container .chat-msg .time {
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+      margin-top: 2px;
+    }
+    .payment-chat-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .payment-chat-input-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+    .payment-chat-input-row input::placeholder { color: rgba(255,255,255,0.2); }
+    .payment-chat-input-row button {
+      padding: 10px 18px;
+      border-radius: 20px;
+      border: none;
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .payment-chat-input-row button:active { transform: scale(0.95); }
+
     .search-user-input {
       width: 100%;
       padding: 12px 16px;
@@ -2697,14 +2871,30 @@ app.get("/mini/:userId", (req, res) => {
     .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
     .user-result {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding: 12px 0;
+      gap: 12px;
+      padding: 10px 0;
       border-bottom: 0.5px solid rgba(255,255,255,0.04);
       cursor: pointer;
       transition: background 0.15s;
     }
     .user-result:active { background: rgba(255,255,255,0.02); }
+    .user-result .result-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+      color: #fff;
+    }
+    .user-result .result-info { flex: 1; }
+    .user-result .result-info .name { font-weight: 500; font-size: 15px; }
+    .user-result .result-info .sub { font-size: 12px; color: rgba(255,255,255,0.3); }
     .quick-action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -3366,37 +3556,53 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: PAY (UPI-Style) ========== -->
+  <!-- ========== TAB: PAY (UPI-Style with Chat) ========== -->
   <div id="tab-pay" class="tab-content">
     <div class="glass">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
-        Send Mythopoints
+        Payment Chat
       </div>
       <p style="font-size:13px; color:rgba(255,255,255,0.4);">Min 200 pts | 15% tax | 1 payment/day</p>
       
-      <!-- Contact Search -->
+      <!-- Search User -->
       <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
       <div id="search-results"></div>
-      <div id="selected-user" style="display:none; margin:12px 0;">
-        <p>Send to: <span id="selected-name"></span> (ID: <span id="selected-id"></span>)</p>
+      
+      <!-- Selected User Display -->
+      <div id="selected-user" style="display:none; margin:12px 0; padding:8px 12px; background:rgba(213,0,249,0.05); border-radius:12px; border:0.5px solid rgba(213,0,249,0.1);">
+        <span>💬 Sending to: <strong id="selected-name"></strong> (ID: <span id="selected-id"></span>)</span>
+        <button onclick="clearSelectedUser()" style="float:right; background:none; border:none; color:#ff453a; font-size:18px;">✕</button>
+      </div>
+      
+      <!-- Chat Messages -->
+      <div class="payment-chat-container" id="payment-chat-container">
+        <div class="empty" style="padding:10px;">Loading chat...</div>
+      </div>
+      
+      <!-- Chat Input -->
+      <div class="payment-chat-input-row">
+        <input type="text" id="chat-input" placeholder="Type a message..." />
+        <button id="chat-send-btn">Send</button>
       </div>
       
       <!-- UPI Numpad -->
-      <div class="upi-display" id="upi-display">₹0</div>
-      <div class="upi-numpad" id="upi-numpad">
-        <button data-value="1">1</button>
-        <button data-value="2">2</button>
-        <button data-value="3">3</button>
-        <button data-value="4">4</button>
-        <button data-value="5">5</button>
-        <button data-value="6">6</button>
-        <button data-value="7">7</button>
-        <button data-value="8">8</button>
-        <button data-value="9">9</button>
-        <button data-value="clear" class="clear-btn">⌫</button>
-        <button data-value="0">0</button>
-        <button data-value="send" style="background:linear-gradient(135deg,#d500f9,#651fff);">Send</button>
+      <div style="margin-top:12px; border-top:0.5px solid rgba(255,255,255,0.06); padding-top:12px;">
+        <div class="upi-display" id="upi-display">₹0</div>
+        <div class="upi-numpad" id="upi-numpad">
+          <button data-value="1">1</button>
+          <button data-value="2">2</button>
+          <button data-value="3">3</button>
+          <button data-value="4">4</button>
+          <button data-value="5">5</button>
+          <button data-value="6">6</button>
+          <button data-value="7">7</button>
+          <button data-value="8">8</button>
+          <button data-value="9">9</button>
+          <button data-value="clear" class="clear-btn">⌫</button>
+          <button data-value="0">0</button>
+          <button data-value="send" style="background:linear-gradient(135deg,#d500f9,#651fff);">Pay</button>
+        </div>
       </div>
       
       <!-- Processing State -->
@@ -3418,7 +3624,7 @@ app.get("/mini/:userId", (req, res) => {
         <p style="color:rgba(255,255,255,0.5);">Verifying transaction...</p>
       </div>
       
-      <div id="payment-status" style="margin-top:12px; text-align:center;"></div>
+      <div id="payment-status" style="margin-top:8px; text-align:center;"></div>
     </div>
   </div>
 
@@ -3645,7 +3851,6 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     function updateUI() {
-      // Update all DOM elements based on state
       document.getElementById('ui-pts').innerText = state.mythopoints.toLocaleString();
       document.getElementById('ui-credits').innerText = state.credits;
       document.getElementById('streak-count').innerText = state.streak + ' Day Streak';
@@ -3683,7 +3888,6 @@ app.get("/mini/:userId", (req, res) => {
       const remainder = state.chant.totalTaps % 1000;
       document.getElementById('chant-tap-count').innerText = remainder;
       
-      // Update progress
       const levels = [
         { name: 'Seeker', min: 0, multiplier: 1 },
         { name: 'Devotee', min: 100, multiplier: 1 },
@@ -3722,7 +3926,6 @@ app.get("/mini/:userId", (req, res) => {
         profileVerified.style.color = '#ff453a';
       }
       
-      // Payment status
       document.getElementById('payment-status').innerHTML = \`Daily payments: \${state.payment.used}/\${state.payment.limit}\`;
     }
 
@@ -3747,7 +3950,7 @@ app.get("/mini/:userId", (req, res) => {
       tg.HapticFeedback.selectionChanged();
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
       if (tabId === 'profile') { loadHistory(1, true); loadLeaderboard(); loadRatingStatus(); }
-      if (tabId === 'pay') loadPaymentStatus();
+      if (tabId === 'pay') { loadPaymentChat(); loadPaymentStatus(); }
     }
     window.switchTab = switchTab;
 
@@ -3996,10 +4199,12 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT (UPI-Style) ───
+    // ─── PAYMENT CHAT ───
     let selectedReceiver = null;
     let upiAmount = 0;
+    let chatPollInterval = null;
 
+    // Search users
     document.getElementById('search-user').addEventListener('input', async function() {
       const query = this.value.trim();
       if (query.length < 2) {
@@ -4012,10 +4217,15 @@ app.get("/mini/:userId", (req, res) => {
         if (data.success && data.users.length) {
           let html = '';
           data.users.forEach(u => {
+            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
+                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
             html += \`
-              <div class="user-result" onclick="selectUser(\${u.id}, '\${u.name}')">
-                <span>\${u.name} \${u.username ? '@' + u.username : ''}</span>
-                <span style="color:rgba(255,255,255,0.3);">\${u.points} pts</span>
+              <div class="user-result" onclick="selectUser(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')">
+                \${avatar}
+                <div class="result-info">
+                  <div class="name">\${u.name} \${u.username ? '@' + u.username : ''}</div>
+                  <div class="sub">\${u.points} pts</div>
+                </div>
               </div>
             \`;
           });
@@ -4026,14 +4236,117 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     });
 
-    function selectUser(id, name) {
+    function selectUser(id, name, photo) {
       selectedReceiver = id;
       document.getElementById('selected-user').style.display = 'block';
       document.getElementById('selected-name').innerText = name;
       document.getElementById('selected-id').innerText = id;
       document.getElementById('search-results').innerHTML = '';
+      document.getElementById('search-user').value = name;
+      loadPaymentChat();
     }
     window.selectUser = selectUser;
+
+    function clearSelectedUser() {
+      selectedReceiver = null;
+      document.getElementById('selected-user').style.display = 'none';
+      document.getElementById('search-user').value = '';
+      document.getElementById('payment-chat-container').innerHTML = '<div class="empty">Select a user to start chatting.</div>';
+      if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+      }
+    }
+    window.clearSelectedUser = clearSelectedUser;
+
+    // Load payment chat
+    async function loadPaymentChat() {
+      if (!selectedReceiver) {
+        document.getElementById('payment-chat-container').innerHTML = '<div class="empty">Select a user to start chatting.</div>';
+        return;
+      }
+      try {
+        const res = await fetch('/api/payment/chat/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const container = document.getElementById('payment-chat-container');
+          // Filter chats with selected receiver
+          const filtered = data.chats.filter(c => 
+            (c.senderId === selectedReceiver || c.receiverId === selectedReceiver) ||
+            (c.senderId === userId && c.receiverId === selectedReceiver) ||
+            (c.receiverId === userId && c.senderId === selectedReceiver)
+          );
+          
+          if (filtered.length === 0) {
+            container.innerHTML = '<div class="empty">No messages yet. Start a conversation!</div>';
+          } else {
+            let html = '';
+            filtered.reverse().forEach(c => {
+              const isSent = c.senderId === userId;
+              const time = new Date(c.timestamp).toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+              const avatar = isSent ? 
+                (tgUser?.photo_url ? \`<img src="\${tgUser.photo_url}" class="avatar" />\` : \`<div class="avatar">\${(tgUser?.first_name || 'U').charAt(0)}</div>\`) :
+                (c.senderPhoto ? \`<img src="\${c.senderPhoto}" class="avatar" />\` : \`<div class="avatar">\${(c.senderName || 'U').charAt(0)}</div>\`);
+              
+              let content = '';
+              if (c.type === 'payment') {
+                content = \`
+                  <div class="payment-card">
+                    💸 Payment of <span class="amount">\${c.amount}</span> Mythopoints sent!
+                    <div style="font-size:11px; color:rgba(255,255,255,0.4);">Tax: \${c.tax || 0} pts</div>
+                  </div>
+                \`;
+              } else {
+                content = c.message || '';
+              }
+              
+              html += \`
+                <div class="chat-msg \${isSent ? 'sent' : 'received'}">
+                  \${avatar}
+                  <div>
+                    <div class="bubble">\${content}</div>
+                    <div class="time">\${time}</div>
+                  </div>
+                </div>
+              \`;
+            });
+            container.innerHTML = html;
+            container.scrollTop = container.scrollHeight;
+          }
+        }
+      } catch (e) {
+        console.error('Chat load error:', e);
+      }
+    }
+
+    // Send chat message
+    async function sendChatMessage() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg || !selectedReceiver) return;
+      
+      try {
+        await fetch('/api/payment/chat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderId: userId,
+            receiverId: selectedReceiver,
+            message: msg
+          })
+        });
+        input.value = '';
+        tg.HapticFeedback.impactOccurred('light');
+        loadPaymentChat();
+      } catch (e) {
+        alert('Failed to send message.');
+      }
+    }
+
+    document.getElementById('chat-send-btn').addEventListener('click', sendChatMessage);
+    document.getElementById('chat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendChatMessage();
+    });
 
     // UPI Numpad
     document.querySelectorAll('.upi-numpad button').forEach(btn => {
@@ -4054,8 +4367,14 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     async function sendPayment() {
-      if (!selectedReceiver) return alert('Select a receiver first.');
-      if (upiAmount < 200) return alert('Minimum 200 Mythopoints.');
+      if (!selectedReceiver) {
+        alert('Please select a receiver first.');
+        return;
+      }
+      if (upiAmount < 200) {
+        alert('Minimum 200 Mythopoints.');
+        return;
+      }
       
       const processing = document.getElementById('payment-processing');
       processing.classList.add('active');
@@ -4078,10 +4397,9 @@ app.get("/mini/:userId", (req, res) => {
           await showSuccess(\`Payment of \${upiAmount} Mythopoints sent successfully!\`, 'Payment Successful');
           loadDashboard();
           loadPaymentStatus();
+          loadPaymentChat();
           upiAmount = 0;
           document.getElementById('upi-display').innerText = '₹0';
-          selectedReceiver = null;
-          document.getElementById('selected-user').style.display = 'none';
         } else {
           alert(data.error);
           tg.HapticFeedback.notificationOccurred('error');
@@ -4179,8 +4497,6 @@ app.get("/mini/:userId", (req, res) => {
         historyHasMore = data.history.length >= 15;
         loader.style.display = 'none';
         historyLoading = false;
-        
-        // Setup IntersectionObserver for infinite scroll
         setupHistoryObserver();
       } catch (e) {
         console.error('History error:', e);
@@ -4193,19 +4509,16 @@ app.get("/mini/:userId", (req, res) => {
     let historyObserver = null;
     function setupHistoryObserver() {
       if (historyObserver) historyObserver.disconnect();
-      
       const sentinel = document.createElement('div');
       sentinel.id = 'history-sentinel';
       sentinel.style.height = '2px';
       sentinel.style.opacity = '0';
       historyContainer.appendChild(sentinel);
-      
       historyObserver = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && historyHasMore && !historyLoading) {
           loadHistory(historyPage + 1, false);
         }
       }, { root: historyContainer, rootMargin: '100px' });
-      
       historyObserver.observe(sentinel);
     }
 
@@ -4411,14 +4724,13 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // ─── CHANT & EARN (with localStorage persistence) ───
+    // ─── CHANT & EARN (1 second cooldown) ───
     const CHANT_KEY = 'mytho_chant_' + userId;
     let chantTapCount = 0;
     const orb = document.getElementById('chant-orb');
     const textEl = document.getElementById('chant-text');
     const editBtn = document.getElementById('chant-edit');
     
-    // Load persisted chant text
     let chantText = localStorage.getItem('chantText') || 'Radha Radha';
     textEl.innerText = chantText;
     
@@ -4433,7 +4745,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // Load persisted tap count
     function loadChantPersistence() {
       try {
         const saved = localStorage.getItem(CHANT_KEY);
@@ -4441,7 +4752,6 @@ app.get("/mini/:userId", (req, res) => {
           const data = JSON.parse(saved);
           chantTapCount = data.taps || 0;
           const lastTap = data.lastTap || 0;
-          // If more than 10 minutes passed, reset local unsynced taps
           if (Date.now() - lastTap > 600000) {
             chantTapCount = 0;
             localStorage.removeItem(CHANT_KEY);
@@ -4459,19 +4769,16 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     }
 
-    // Sync chant stats from server
     async function fetchChantStats() {
       try {
         const res = await fetch('/api/chant/stats/' + userId);
         const data = await res.json();
         if (data.success) {
           const serverTaps = data.totalTaps || 0;
-          // Merge local unsynced taps
           const total = serverTaps + chantTapCount;
           state.chant.totalTaps = total;
           updateUI();
           
-          // Update level and progress via state
           const levels = [
             { name: 'Seeker', min: 0, multiplier: 1 },
             { name: 'Devotee', min: 100, multiplier: 1 },
@@ -4507,22 +4814,20 @@ app.get("/mini/:userId", (req, res) => {
       orb.style.transform = 'rotateY(0deg) rotateX(0deg)';
     });
 
-    // Tap handler with anti-cheat (15ms minimum between taps)
+    // Tap handler with 1 second cooldown
     let lastTapTime = 0;
     orb.addEventListener('click', async function(e) {
       const now = Date.now();
-      if (now - lastTapTime < 15) {
-        // Too fast - block autoclickers
+      // Enforce 1 second cooldown
+      if (now - lastTapTime < 1000) {
         tg.HapticFeedback.impactOccurred('light');
         return;
       }
       lastTapTime = now;
       
-      // Visual feedback
       this.style.transform = 'scale(0.92)';
       setTimeout(() => { this.style.transform = ''; }, 150);
       
-      // Ripple
       const rect = this.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -4537,18 +4842,15 @@ app.get("/mini/:userId", (req, res) => {
       
       tg.HapticFeedback.impactOccurred('light');
       
-      // Floating +1
       spawnFloatingText(e.clientX || (rect.left + rect.width/2), e.clientY || (rect.top + rect.height/2), '+1');
       
       chantTapCount++;
       saveChantPersistence();
       
-      // Update local display immediately
       const currentTotal = state.chant.totalTaps || 0;
       state.chant.totalTaps = currentTotal + 1;
       updateUI();
       
-      // Sync every 1000 taps
       if (chantTapCount >= 1000) {
         tg.HapticFeedback.impactOccurred('heavy');
         await syncChantTaps(chantTapCount);
@@ -4589,7 +4891,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Load chant leaderboard
     async function loadChantLeaderboard() {
       const list = document.getElementById('chant-lb-list');
       try {
@@ -4634,7 +4935,10 @@ app.get("/mini/:userId", (req, res) => {
         loadLeaderboard(); 
         loadRatingStatus(); 
       }
-      if (document.getElementById('tab-pay').classList.contains('active')) loadPaymentStatus();
+      if (document.getElementById('tab-pay').classList.contains('active')) { 
+        loadPaymentChat(); 
+        loadPaymentStatus(); 
+      }
     }
     
     init();
