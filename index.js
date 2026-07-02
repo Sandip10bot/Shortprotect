@@ -1,5 +1,5 @@
 // ============================================================
-// index.js – Premium Frontend (No Emojis, All SVG, Enhanced UI)
+// index.js – Premium Frontend + Mythoreel (Reels)
 // ============================================================
 
 import express from "express";
@@ -26,9 +26,7 @@ let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection;
-// --- NEW COLLECTIONS FOR REELS ---
-let userLikesCollection, commentsCollection;
-let reelsCollection;  
+let reelsCollection; // for Mythoreel
 
 async function connectDB() {
   try {
@@ -51,12 +49,9 @@ async function connectDB() {
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
     paymentChatCollection = db.collection("payment_chats");
-    // --- new ---
     reelsCollection = db.collection("reels");
-    userLikesCollection = db.collection("user_likes");
-    commentsCollection = db.collection("comments");
     
-    console.log("✅ MongoDB connected for all collections");
+    console.log("✅ MongoDB connected for all collections (including reels)");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
   }
@@ -64,7 +59,7 @@ async function connectDB() {
 connectDB();
 
 // ========================
-// GLOBAL THEME (used by other pages)
+// GLOBAL THEME
 // ========================
 const THEME_CSS = `
   <style>
@@ -201,7 +196,7 @@ function base62_decode(encoded) {
 }
 
 // ========================
-// THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
+// THE ENTRY SHIELD
 // ========================
 function renderAntiBypassPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -277,7 +272,7 @@ function renderAntiBypassPage(res, targetUrl) {
 }
 
 // ========================
-// THE EXIT SHIELD (Silent Telegram Launcher)
+// THE EXIT SHIELD
 // ========================
 function renderSecureFinalPage(res, targetUrl) {
     const b64Url = Buffer.from(targetUrl).toString('base64');
@@ -836,7 +831,7 @@ app.post("/api/claim-scratch", async (req, res) => {
 });
 
 // ========================
-// ENTRY POINTS (unchanged)
+// ENTRY POINTS
 // ========================
 app.get("/link/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
@@ -1006,7 +1001,7 @@ app.get("/Bypass/:userId/:token", async (req, res) => {
 });
 
 // ==========================================
-// UNIFIED APPLE iOS PROFILE MINI APP (unchanged)
+// UNIFIED APPLE iOS PROFILE MINI APP
 // ==========================================
 app.get("/api/ios-profile-data/:userId", async (req, res) => {
     try {
@@ -1044,7 +1039,6 @@ app.get("/ios-app/:userId", (req, res) => {
         <title>My Profile</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <style>
-            /* iOS System Variables */
             :root {
                 --ios-bg: #F2F2F7;
                 --ios-card: #FFFFFF;
@@ -1272,7 +1266,7 @@ app.get("/ios-app/:userId", (req, res) => {
 });
 
 // ==========================================
-// UNIFIED iOS PURPLE DASHBOARD – ADD RATING & WITHDRAW
+// UNIFIED iOS PURPLE DASHBOARD
 // ==========================================
 
 app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
@@ -1371,7 +1365,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 🏦 BANKING API (cbank.py logic) – CORRECTED INTEREST RATE
+// BANKING API
 // ==========================================
 
 async function getBank(userId) {
@@ -1613,7 +1607,7 @@ app.post("/api/bank/loan/repay/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 🛍️ STORE API (cstore.py logic) – unchanged
+// STORE API
 // ==========================================
 
 async function generateCoupon(userId, discount) {
@@ -1725,7 +1719,7 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 💸 PAYMENT API – WITH CHAT SUPPORT
+// PAYMENT API
 // ==========================================
 
 async function canMakePayment(userId) {
@@ -1827,7 +1821,6 @@ app.post("/api/payment/send", async (req, res) => {
                     date: new Date()
                 }, { session });
                 
-                // Save payment chat message
                 await paymentChatCollection.insertOne({
                     senderId: sender,
                     receiverId: receiver,
@@ -1837,7 +1830,7 @@ app.post("/api/payment/send", async (req, res) => {
                     message: `💸 Payment of ${amt} Mythopoints sent!`,
                     timestamp: new Date(),
                     type: 'payment'
-                });
+                }, { session });
             });
             await session.endSession();
         } catch (error) {
@@ -1905,7 +1898,6 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
             .limit(50)
             .toArray();
         
-        // Get user details for each chat
         const userIds = new Set();
         chats.forEach(c => {
             userIds.add(c.senderId);
@@ -1959,7 +1951,7 @@ app.post("/api/payment/chat/message", async (req, res) => {
 });
 
 // ==========================================
-// ⭐ RATING API
+// RATING API
 // ==========================================
 
 app.get("/api/rating/status/:userId", async (req, res) => {
@@ -2028,10 +2020,10 @@ app.post("/api/rating/submit/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 💰 WITHDRAW API (cwithdraw.py logic)
+// WITHDRAW API
 // ==========================================
 
-const CONVERSION_RATE = 10000; // 10,000 pts = ₹1
+const CONVERSION_RATE = 10000;
 
 app.post("/api/withdraw/request/:userId", async (req, res) => {
     try {
@@ -2094,7 +2086,7 @@ app.get("/api/withdraw/history/:userId", async (req, res) => {
 });
 
 // ==========================================
-// NEW: SYNC PROFILE API
+// SYNC PROFILE API
 // ==========================================
 app.post("/api/sync-profile", async (req, res) => {
     try {
@@ -2120,10 +2112,9 @@ app.post("/api/sync-profile", async (req, res) => {
 });
 
 // ==========================================
-// CHANT & EARN (Tap to Earn) – UPDATED WITH 1 SECOND COOLDOWN
+// CHANT & EARN
 // ==========================================
 
-// In-memory rate limiting: last sync timestamps per user
 const userTapHistory = new Map();
 
 app.get("/api/chant/stats/:userId", async (req, res) => {
@@ -2140,15 +2131,13 @@ app.get("/api/chant/stats/:userId", async (req, res) => {
 app.post("/api/chant/sync/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
-        const { newTaps } = req.body;  // number of new taps since last sync
+        const { newTaps } = req.body;
         if (typeof newTaps !== 'number' || newTaps <= 0) {
             return res.status(400).json({ success: false, error: "Invalid taps count." });
         }
 
-        // --- ANTI-CHEAT: rate limiting ---
         const now = Date.now();
         const history = userTapHistory.get(uid) || [];
-        // Keep only last 10 requests
         history.push(now);
         if (history.length > 10) history.shift();
         userTapHistory.set(uid, history);
@@ -2156,16 +2145,13 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
         if (history.length >= 2) {
             const timeSpan = now - history[0];
             const avgTapsPerSec = (newTaps) / (timeSpan / 1000);
-            // Allow maximum 1 tap per second (strict 1/sec)
             if (avgTapsPerSec > 1.5) {
                 return res.status(429).json({ success: false, error: "Too many taps! Maximum 1 tap per second." });
             }
         }
 
-        // Fetch current stats
         let stats = await userStatsCollection.findOne({ user_id: uid });
         if (!stats) {
-            // Initialize
             await userStatsCollection.insertOne({
                 user_id: uid,
                 chant_taps: 0,
@@ -2178,16 +2164,14 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
 
         const oldTotal = stats.chant_taps || 0;
         const newTotal = oldTotal + newTaps;
-        const pointsEarned = Math.floor(newTotal / 1000) - Math.floor(oldTotal / 1000); // how many new 1000-thresholds crossed
+        const pointsEarned = Math.floor(newTotal / 1000) - Math.floor(oldTotal / 1000);
 
         let mythopointsAdded = 0;
         if (pointsEarned > 0) {
-            // Add points to user
             await usersCollection.updateOne(
                 { user_id: uid },
                 { $inc: { mythopoints: pointsEarned } }
             );
-            // Log each point separately or as one entry? We'll log total points earned in one history entry.
             await mpHistoryCollection.insertOne({
                 user_id: uid,
                 amount: pointsEarned,
@@ -2198,7 +2182,6 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
             mythopointsAdded = pointsEarned;
         }
 
-        // Update total taps
         await userStatsCollection.updateOne(
             { user_id: uid },
             { $set: { chant_taps: newTotal } }
@@ -2217,9 +2200,6 @@ app.post("/api/chant/sync/:userId", async (req, res) => {
     }
 });
 
-// ==========================================
-// CHANT LEADERBOARD (top by total taps)
-// ==========================================
 app.get("/api/chant/leaderboard", async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 5;
@@ -2229,7 +2209,6 @@ app.get("/api/chant/leaderboard", async (req, res) => {
             .limit(limit)
             .toArray();
 
-        // Fetch user details (name, photo) for each
         const userIds = top.map(s => s.user_id);
         const users = await usersCollection
             .find({ user_id: { $in: userIds } })
@@ -2255,64 +2234,329 @@ app.get("/api/chant/leaderboard", async (req, res) => {
     }
 });
 
-
-// Replace the /api/reels/feed endpoint with:
-app.get("/api/reels/feed", async (req, res) => {
+// ==========================================
+// LEADERBOARD API
+// ==========================================
+app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
-        const userId = parseInt(req.query.userId) || 0;
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
+        const uid = parseInt(req.params.userId);
+        const { timeframe = "all", page = 1 } = req.query;
+        const limit = 10;
+        const skip = (parseInt(page) - 1) * limit;
 
-        // Query only the reels collection
-        const reels = await reelsCollection
-            .find({})
-            .sort({ uploaded_at: -1 })
+        let pointField = "mythopoints";
+        if (timeframe === "weekly") pointField = "weekly_points";
+        if (timeframe === "monthly") pointField = "monthly_points";
+
+        const query = {};
+        query[pointField] = { $gt: 0 };
+
+        const totalUsers = await usersCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+        const users = await usersCollection
+            .find(query)
+            .sort({ [pointField]: -1 })
             .skip(skip)
             .limit(limit)
             .toArray();
 
-        // Get uploader details from users collection
-        const userIds = reels.map(r => r.uploader_user_id).filter(id => id);
-        let userMap = {};
-        if (userIds.length) {
-            const users = await usersCollection
-                .find({ user_id: { $in: userIds } })
-                .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
-                .toArray();
-            users.forEach(u => userMap[u.user_id] = u);
-        }
-
-        // Enrich with likes, comments, and user info
-        const enriched = await Promise.all(reels.map(async (reel) => {
-            const fileId = reel.file_id;
-            const likes = await userLikesCollection.countDocuments({ file_id: fileId, like_type: "like" });
-            const comments = await commentsCollection.countDocuments({ file_id: fileId });
-            const isLiked = userId ? await userLikesCollection.countDocuments({ user_id: userId, file_id: fileId, like_type: "like" }) > 0 : false;
-            const uploader = userMap[reel.uploader_user_id] || {};
-            return {
-                file_id: fileId,
-                file_name: reel.file_name || "Untitled",
-                caption: reel.caption || "",
-                uploader_user_id: reel.uploader_user_id,
-                uploader_name: uploader.first_name || uploader.username || `User ${reel.uploader_user_id}`,
-                uploader_avatar: uploader.photo_url || "",
-                uploaded_at: reel.uploaded_at,
-                likes,
-                comments_count: comments,
-                is_liked: isLiked
-            };
+        const formattedUsers = users.map(u => ({
+            user_id: u.user_id,
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            points: u[pointField] || 0,
+            photo_url: u.photo_url || null
         }));
 
-        res.json({ success: true, reels: enriched, page });
+        let currentUser = null;
+        const userDoc = await usersCollection.findOne({ user_id: uid });
+        if (userDoc && userDoc[pointField] > 0) {
+            const rankQuery = {};
+            rankQuery[pointField] = { $gt: userDoc[pointField] };
+            const higherCount = await usersCollection.countDocuments(rankQuery);
+            currentUser = {
+                points: userDoc[pointField],
+                rank: higherCount + 1
+            };
+        }
+
+        res.json({
+            success: true,
+            page: parseInt(page),
+            totalPages: totalPages,
+            users: formattedUsers,
+            currentUser: currentUser
+        });
     } catch (error) {
-        console.error("Reels feed error:", error);
-        res.status(500).json({ success: false, error: error.message });
+        console.error("Leaderboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
     }
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Reels)
+// HISTORY API
+// ==========================================
+app.get("/api/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { filter = "ALL", page = 1 } = req.query;
+        const limit = 15;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let query = { user_id: uid };
+        if (filter !== "ALL") {
+            query.type = filter.toUpperCase();
+        }
+
+        const historyRecords = await mpHistoryCollection
+            .find(query)
+            .sort({ date: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ 
+            success: true, 
+            history: historyRecords 
+        });
+    } catch (error) {
+        console.error("History API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch history" });
+    }
+});
+
+// ==========================================
+// AI MEMORY FUNCTIONS
+// ==========================================
+async function addToMemory(userId, message) {
+    const key = `${userId}:${userId}`;
+    const doc = await usersCollection.findOne({ user_id: key });
+    if (!doc) {
+        await usersCollection.insertOne({
+            user_id: key,
+            chat_id: parseInt(userId),
+            user_id_num: parseInt(userId),
+            conversation: [message],
+            total_messages: 1,
+            first_seen: new Date(),
+            last_seen: new Date()
+        });
+    } else {
+        let conv = doc.conversation || [];
+        conv.push(message);
+        if (conv.length > 1000) conv = conv.slice(-1000);
+        await usersCollection.updateOne(
+            { user_id: key },
+            {
+                $set: {
+                    conversation: conv,
+                    total_messages: conv.length,
+                    last_seen: new Date()
+                }
+            }
+        );
+    }
+}
+
+async function getMemory(userId) {
+    const key = `${userId}:${userId}`;
+    const doc = await usersCollection.findOne({ user_id: key });
+    if (doc && doc.conversation) {
+        const recent = doc.conversation.slice(-14);
+        return recent.join('\n');
+    }
+    return '';
+}
+
+async function clearMemory(userId) {
+    const key = `${userId}:${userId}`;
+    await usersCollection.updateOne(
+        { user_id: key },
+        {
+            $set: {
+                conversation: [],
+                total_messages: 0
+            }
+        },
+        { upsert: true }
+    );
+}
+
+// ==========================================
+// AI API ENDPOINT
+// ==========================================
+app.post("/api/ai", async (req, res) => {
+    try {
+        const { userId, message } = req.body;
+        if (!userId || !message) {
+            return res.status(400).json({ success: false, error: "Missing userId or message" });
+        }
+
+        await addToMemory(userId, `User: ${message}`);
+
+        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
+
+        let finalPrompt = "";
+        let history = await getMemory(userId);
+        if (history && history.length > 400) {
+            history = "..." + history.slice(-400);
+        }
+        if (history) {
+            finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
+        } else {
+            finalPrompt = `${sysPrompt} User says: ${message}`;
+        }
+
+        const encoded = encodeURIComponent(finalPrompt);
+        const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
+        
+        let fetchModule;
+        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
+        
+        const response = await fetchModule(apiUrl);
+        let reply = null;
+        
+        if (response.ok) {
+            const data = await response.json();
+            reply = data.text || data.reply || data.response || data.message || data.data || null;
+            if (reply && typeof reply === 'string') {
+                reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                reply = reply.replace(/\n/g, ' ');
+            }
+        }
+
+        if (!reply) {
+            reply = "Arre yaar, lagta hai network devlok (API) mein thoda busy chal raha hai! Thodi der mein wapas try kar 😅✨";
+        }
+
+        await addToMemory(userId, `Mythobot: ${reply}`);
+
+        res.json({ success: true, reply });
+    } catch (error) {
+        console.error("AI API error:", error);
+        res.status(500).json({ success: false, error: "AI service unavailable" });
+    }
+});
+
+app.get("/api/ai/memory/:userId", async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const memory = await getMemory(userId);
+        res.json({ success: true, memory });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to fetch memory" });
+    }
+});
+
+app.post("/api/ai/clear/:userId", async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        await clearMemory(userId);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to clear memory" });
+    }
+});
+
+// ==========================================
+// MYTHOREEL API ROUTES
+// ==========================================
+
+// GET /api/reels - fetch reels
+app.get('/api/reels', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = parseInt(req.query.skip) || 0;
+    const reels = await reelsCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+    
+    const formatted = reels.map(r => ({
+      _id: r._id,
+      fileId: r.fileId,
+      caption: r.caption || '',
+      uploaderId: r.uploaderId,
+      uploaderName: r.uploaderName || 'Unknown',
+      uploaderAvatar: r.uploaderAvatar || null,
+      likes: r.likes || 0,
+      comments: r.comments || [],
+      views: r.views || 0,
+      createdAt: r.createdAt
+    }));
+    res.json({ success: true, reels: formatted });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/reel/like
+app.post('/api/reel/like', async (req, res) => {
+  try {
+    const { reelId, userId } = req.body;
+    if (!reelId || !userId) return res.status(400).json({ success: false, error: 'Missing data' });
+    const uid = parseInt(userId);
+    const reel = await reelsCollection.findOne({ _id: reelId });
+    if (!reel) return res.status(404).json({ success: false, error: 'Reel not found' });
+    
+    const likedUsers = reel.likedUsers || [];
+    const index = likedUsers.indexOf(uid);
+    let newLikes = reel.likes || 0;
+    if (index > -1) {
+      likedUsers.splice(index, 1);
+      newLikes = newLikes - 1;
+    } else {
+      likedUsers.push(uid);
+      newLikes = newLikes + 1;
+    }
+    await reelsCollection.updateOne(
+      { _id: reelId },
+      { $set: { likes: newLikes, likedUsers: likedUsers } }
+    );
+    res.json({ success: true, likes: newLikes });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/reel/comment
+app.post('/api/reel/comment', async (req, res) => {
+  try {
+    const { reelId, userId, text } = req.body;
+    if (!reelId || !userId || !text) return res.status(400).json({ success: false, error: 'Missing data' });
+    const uid = parseInt(userId);
+    const user = await usersCollection.findOne({ user_id: uid });
+    const name = user?.first_name || user?.username || 'User';
+    const comment = { userId: uid, name, text, timestamp: new Date() };
+    await reelsCollection.updateOne(
+      { _id: reelId },
+      { $push: { comments: comment }, $inc: { commentsCount: 1 } }
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/reel/view
+app.post('/api/reel/view', async (req, res) => {
+  try {
+    const { reelId } = req.body;
+    if (!reelId) return res.status(400).json({ success: false, error: 'Missing reelId' });
+    await reelsCollection.updateOne(
+      { _id: reelId },
+      { $inc: { views: 1 } }
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2326,7 +2570,6 @@ app.get("/mini/:userId", (req, res) => {
   <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
@@ -2345,7 +2588,6 @@ app.get("/mini/:userId", (req, res) => {
     ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
     ::-webkit-scrollbar-thumb { background: #d500f9; border-radius: 10px; }
 
-    /* === GLASS CARD === */
     .glass {
       background: rgba(255,255,255,0.04);
       backdrop-filter: blur(24px);
@@ -2366,17 +2608,10 @@ app.get("/mini/:userId", (req, res) => {
       align-items: center;
       gap: 10px;
     }
-    .glass-title svg {
-      width: 24px;
-      height: 24px;
-      fill: #ea80fc;
-    }
+    .glass-title svg { width: 24px; height: 24px; fill: #ea80fc; }
 
-    /* === NAVBAR === */
     .navbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
+      position: sticky; top: 0; z-index: 50;
       background: rgba(10,0,20,0.75);
       backdrop-filter: blur(30px);
       -webkit-backdrop-filter: blur(30px);
@@ -2389,7 +2624,6 @@ app.get("/mini/:userId", (req, res) => {
       color: #fff;
     }
 
-    /* === TAB CONTENT === */
     .tab-content { display: none; animation: fadeSlide 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
     .tab-content.active { display: block; }
     @keyframes fadeSlide {
@@ -2397,295 +2631,84 @@ app.get("/mini/:userId", (req, res) => {
       100% { opacity: 1; transform: translateY(0); }
     }
 
-    /* === TAB BAR === */
     .tab-bar {
-      position: fixed;
-      bottom: 0;
-      width: 100%;
+      position: fixed; bottom: 0; width: 100%;
       background: rgba(10,0,20,0.85);
       backdrop-filter: blur(30px);
       -webkit-backdrop-filter: blur(30px);
       border-top: 0.5px solid rgba(255,255,255,0.06);
-      display: flex;
-      justify-content: space-around;
+      display: flex; justify-content: space-around;
       padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 20px)) 0;
       z-index: 100;
     }
     .tab-btn {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      color: rgba(255,255,255,0.3);
-      font-size: 10px;
-      font-weight: 500;
-      transition: all 0.25s;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-      min-width: 48px;
+      display: flex; flex-direction: column; align-items: center;
+      color: rgba(255,255,255,0.3); font-size: 10px; font-weight: 500;
+      transition: all 0.25s; cursor: pointer;
+      -webkit-tap-highlight-color: transparent; min-width: 48px;
       position: relative;
     }
-    .tab-btn svg {
-      width: 28px;
-      height: 28px;
-      margin-bottom: 3px;
-      fill: currentColor;
-      transition: all 0.3s;
-    }
+    .tab-btn svg { width: 28px; height: 28px; margin-bottom: 3px; fill: currentColor; transition: all 0.3s; }
     .tab-btn.active { color: #ea80fc; }
     .tab-btn.active svg { fill: #ea80fc; filter: drop-shadow(0 0 10px rgba(234,128,252,0.4)); }
     .tab-btn::after {
-      content: '';
-      position: absolute;
-      top: -2px;
-      width: 0;
-      height: 2px;
-      background: #ea80fc;
-      border-radius: 2px;
-      transition: width 0.3s;
+      content: ''; position: absolute; top: -2px; width: 0; height: 2px;
+      background: #ea80fc; border-radius: 2px; transition: width 0.3s;
     }
     .tab-btn.active::after { width: 70%; }
 
-    /* === WIDGETS === */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
     .widget {
-      background: rgba(45,10,80,0.35);
-      border: 0.5px solid rgba(255,255,255,0.05);
-      border-radius: 22px;
-      padding: 16px;
+      background: rgba(45,10,80,0.35); border: 0.5px solid rgba(255,255,255,0.05);
+      border-radius: 22px; padding: 16px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.3), inset 0 0 15px rgba(213,0,249,0.03);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      transition: transform 0.2s;
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      display: flex; flex-direction: column; justify-content: center; transition: transform 0.2s;
     }
     .widget-full { grid-column: span 2; }
-    .widget-icon { width: 28px; height: 28px; fill: rgba(255,255,255,0.5); margin-bottom: 8px; }
-    .widget-title { 
-      font-size: 11px; 
-      color: rgba(255,255,255,0.45); 
-      font-weight: 500; 
-      text-transform: uppercase; 
-      letter-spacing: 0.8px; 
-      margin-bottom: 4px; 
-    }
-    .widget-value { 
-      font-size: 26px; 
-      font-weight: 700; 
-      letter-spacing: -0.5px; 
-      display: flex; 
-      align-items: center; 
-      gap: 6px; 
-      position: relative;
-      color: #ffffff;
-    }
-    .widget-value .mytho-label {
-      position: absolute;
-      bottom: -8px;
-      right: 0;
-      font-size: 10px;
-      font-weight: 400;
-      color: rgba(255,255,255,0.15);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
+    .widget-title { font-size: 11px; color: rgba(255,255,255,0.45); font-weight: 500; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
+    .widget-value { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; display: flex; align-items: center; gap: 6px; position: relative; color: #ffffff; }
+    .widget-value .mytho-label { position: absolute; bottom: -8px; right: 0; font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.15); letter-spacing: 1px; text-transform: uppercase; }
     .widget-sub { font-size: 12px; color: #ea80fc; margin-top: 4px; font-weight: 500; }
     
-    /* Premium Widget Enhanced */
-    .w-premium { 
-      border: 0.5px solid rgba(255,214,10,0.2); 
-      background: linear-gradient(135deg, rgba(255,214,10,0.08), rgba(213,0,249,0.08));
-      position: relative;
-      overflow: hidden;
-    }
-    .w-premium::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle at center, rgba(255,214,10,0.03), transparent 70%);
-      animation: premiumGlow 4s ease-in-out infinite alternate;
-      pointer-events: none;
-    }
-    @keyframes premiumGlow {
-      0% { transform: translate(0, 0) scale(1); opacity: 0.5; }
-      100% { transform: translate(5%, 5%) scale(1.1); opacity: 1; }
-    }
+    .w-premium { border: 0.5px solid rgba(255,214,10,0.2); background: linear-gradient(135deg, rgba(255,214,10,0.08), rgba(213,0,249,0.08)); position: relative; overflow: hidden; }
+    .w-premium::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at center, rgba(255,214,10,0.03), transparent 70%); animation: premiumGlow 4s ease-in-out infinite alternate; pointer-events: none; }
+    @keyframes premiumGlow { 0% { transform: translate(0, 0) scale(1); opacity: 0.5; } 100% { transform: translate(5%, 5%) scale(1.1); opacity: 1; } }
     .w-premium .widget-value { color: #ffd60a; position: relative; z-index: 1; }
     .w-premium .widget-title { color: rgba(255,214,10,0.7); }
-    
-    .premium-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: linear-gradient(135deg, #ffd60a, #f59e0b);
-      padding: 2px 10px;
-      border-radius: 30px;
-      font-size: 10px;
-      font-weight: 700;
-      color: #000;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      box-shadow: 0 0 20px rgba(255,214,10,0.3);
-    }
-    
-    .upgrade-btn {
-      display: inline-block;
-      background: linear-gradient(135deg, #ffd60a, #f59e0b);
-      color: #000;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 30px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      transition: all 0.3s;
-      text-decoration: none;
-      box-shadow: 0 4px 15px rgba(255,214,10,0.4);
-    }
-    .upgrade-btn:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 25px rgba(255,214,10,0.6);
-    }
-    .upgrade-btn:active {
-      transform: scale(0.95);
-    }
+    .upgrade-btn { display: inline-block; background: linear-gradient(135deg, #ffd60a, #f59e0b); color: #000; border: none; padding: 6px 16px; border-radius: 30px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; transition: all 0.3s; text-decoration: none; box-shadow: 0 4px 15px rgba(255,214,10,0.4); }
+    .upgrade-btn:hover { transform: scale(1.05); box-shadow: 0 6px 25px rgba(255,214,10,0.6); }
+    .upgrade-btn:active { transform: scale(0.95); }
 
-    /* Search Credits Widget Enhanced */
-    .w-search {
-      border: 0.5px solid rgba(10,132,255,0.2);
-      background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05));
-      position: relative;
-      overflow: hidden;
-    }
+    .w-search { border: 0.5px solid rgba(10,132,255,0.2); background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05)); position: relative; overflow: hidden; }
     .w-search .widget-value { color: #0a84ff; }
     .w-search .widget-title { color: rgba(10,132,255,0.7); }
-    
-    .refill-btn {
-      display: inline-block;
-      background: linear-gradient(135deg, #0a84ff, #5e5ce6);
-      color: #fff;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 30px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      transition: all 0.3s;
-      text-decoration: none;
-      box-shadow: 0 4px 15px rgba(10,132,255,0.4);
-    }
-    .refill-btn:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 25px rgba(10,132,255,0.6);
-    }
-    .refill-btn:active {
-      transform: scale(0.95);
-    }
-
+    .refill-btn { display: inline-block; background: linear-gradient(135deg, #0a84ff, #5e5ce6); color: #fff; border: none; padding: 6px 16px; border-radius: 30px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; transition: all 0.3s; text-decoration: none; box-shadow: 0 4px 15px rgba(10,132,255,0.4); }
+    .refill-btn:hover { transform: scale(1.05); box-shadow: 0 6px 25px rgba(10,132,255,0.6); }
+    .refill-btn:active { transform: scale(0.95); }
     .w-bank { border: 0.5px solid rgba(48,209,88,0.2); background: rgba(48,209,88,0.04); }
     .w-bank .widget-value { color: #30d158; }
 
-    /* === PROFILE HEADER === */
-    .profile-hdr {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin: 16px 16px 8px;
-      position: relative;
-    }
-    .profile-pic {
-      width: 72px;
-      height: 72px;
-      border-radius: 50%;
-      border: 2px solid #00e676;
-      object-fit: cover;
-      background: #1c0a2b;
-      box-shadow: 0 0 20px rgba(0,230,118,0.25);
-    }
+    .profile-hdr { display: flex; align-items: center; gap: 16px; margin: 16px 16px 8px; position: relative; }
+    .profile-pic { width: 72px; height: 72px; border-radius: 50%; border: 2px solid #00e676; object-fit: cover; background: #1c0a2b; box-shadow: 0 0 20px rgba(0,230,118,0.25); }
     .profile-info { flex: 1; }
     .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
     .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: #ea80fc; font-weight: 500; }
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      background: rgba(213,0,249,0.12);
-      border-radius: 30px;
-      font-size: 11px;
-      font-weight: 600;
-      color: #fff;
-      margin-top: 6px;
-      border: 0.5px solid rgba(213,0,249,0.15);
-    }
-    .switch-btn {
-      background: rgba(255,255,255,0.06);
-      border: 0.5px solid rgba(255,255,255,0.08);
-      border-radius: 50%;
-      width: 44px;
-      height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: 0.2s;
-      color: #ea80fc;
-      flex-shrink: 0;
-    }
-    .switch-btn svg {
-      width: 24px;
-      height: 24px;
-      fill: currentColor;
-    }
+    .badge { display: inline-block; padding: 4px 12px; background: rgba(213,0,249,0.12); border-radius: 30px; font-size: 11px; font-weight: 600; color: #fff; margin-top: 6px; border: 0.5px solid rgba(213,0,249,0.15); }
+    .switch-btn { background: rgba(255,255,255,0.06); border: 0.5px solid rgba(255,255,255,0.08); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; color: #ea80fc; flex-shrink: 0; }
+    .switch-btn svg { width: 24px; height: 24px; fill: currentColor; }
     .switch-btn:active { transform: scale(0.9); background: rgba(213,0,249,0.15); }
 
-    /* === LIST CARD === */
-    .list-card { 
-      background: rgba(45,10,80,0.25); 
-      border-radius: 20px; 
-      border: 0.5px solid rgba(255,255,255,0.04); 
-      overflow: hidden; 
-    }
-    .list-item { 
-      display: flex; 
-      align-items: center;
-      padding: 14px 16px; 
-      border-bottom: 0.5px solid rgba(255,255,255,0.04); 
-      transition: background 0.15s;
-      gap: 12px;
-    }
+    .list-card { background: rgba(45,10,80,0.25); border-radius: 20px; border: 0.5px solid rgba(255,255,255,0.04); overflow: hidden; }
+    .list-item { display: flex; align-items: center; padding: 14px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.04); transition: background 0.15s; gap: 12px; }
     .list-item:last-child { border-bottom: none; }
-    .list-item .tx-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-    .list-item .tx-icon svg {
-      width: 18px;
-      height: 18px;
-      fill: #fff;
-    }
+    .list-item .tx-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .list-item .tx-icon svg { width: 18px; height: 18px; fill: #fff; }
     .tx-icon.earn { background: rgba(48,209,88,0.2); border: 1px solid rgba(48,209,88,0.3); }
     .tx-icon.spend { background: rgba(255,69,58,0.2); border: 1px solid rgba(255,69,58,0.3); }
     .tx-icon.tax { background: rgba(255,214,10,0.2); border: 1px solid rgba(255,214,10,0.3); }
     .tx-icon.default { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.05); }
-
-    .list-item .item-content {
-      flex: 1;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+    .list-item .item-content { flex: 1; display: flex; justify-content: space-between; align-items: center; }
     .item-left { display: flex; flex-direction: column; gap: 2px; }
     .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
     .item-left span { font-size: 12px; color: rgba(255,255,255,0.4); }
@@ -2693,972 +2716,305 @@ app.get("/mini/:userId", (req, res) => {
     .val-pos { color: #30d158; }
     .val-neg { color: #ff453a; }
 
-    /* === LOADING === */
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.12); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
 
-    /* === AI FAB === */
-    .ai-fab {
+    /* Floating buttons */
+    .floating-group {
       position: fixed;
       bottom: 100px;
       right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 200;
+    }
+    .floating-btn {
       width: 60px;
       height: 60px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #d500f9, #651fff);
       border: none;
       box-shadow: 0 4px 30px rgba(213,0,249,0.5);
       color: white;
       font-size: 20px;
       font-weight: 800;
       cursor: pointer;
-      z-index: 200;
       display: flex;
       align-items: center;
       justify-content: center;
       transition: transform 0.2s, box-shadow 0.2s;
       animation: pulseGlow 2s infinite alternate;
     }
-    .ai-fab:active { transform: scale(0.9); }
-    @keyframes pulseGlow {
-      0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
-      100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
-    }
+    .floating-btn:active { transform: scale(0.9); }
+    .floating-btn.ai-btn { background: linear-gradient(135deg, #d500f9, #651fff); }
+    .floating-btn.reel-btn { background: linear-gradient(135deg, #ff6b6b, #ee5a24); animation-delay: 0.5s; font-size: 28px; }
+    @keyframes pulseGlow { 0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); } 100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); } }
+    .floating-btn.reel-btn { animation-name: pulseGlowRed; }
+    @keyframes pulseGlowRed { 0% { box-shadow: 0 4px 30px rgba(238,90,36,0.3); } 100% { box-shadow: 0 4px 50px rgba(238,90,36,0.8); } }
 
-    /* === AI CHAT OVERLAY === */
-    .ai-chat-overlay {
+    /* Reel Overlay */
+    .reel-overlay {
       display: none;
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: #000;
       z-index: 300;
-      justify-content: center;
-      align-items: flex-end;
-    }
-    .ai-chat-overlay.open { display: flex; }
-    .ai-chat-panel {
-      width: 100%;
-      max-width: 420px;
-      height: 80vh;
-      background: #0a0014;
-      border-radius: 30px 30px 0 0;
-      box-shadow: 0 -10px 50px rgba(0,0,0,0.8);
-      display: flex;
       flex-direction: column;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.04);
+      color: #fff;
     }
-    .ai-chat-header {
-      padding: 16px 20px;
-      background: rgba(10,0,20,0.8);
-      backdrop-filter: blur(10px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.06);
+    .reel-overlay.open { display: flex; }
+    .reel-header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 12px 20px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+      z-index: 10;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-shrink: 0;
     }
-    .ai-chat-header h3 { font-weight: 600; font-size: 18px; }
-    .ai-chat-header .close-btn {
-      background: none;
-      border: none;
-      color: #fff;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0 8px;
-    }
-    .ai-chat-messages {
+    .reel-header h2 { margin: 0; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .reel-header .close-reel { background: none; border: none; color: #fff; font-size: 28px; cursor: pointer; }
+    .reel-container {
       flex: 1;
-      overflow-y: auto;
-      padding: 16px 20px;
+      position: relative;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      justify-content: center;
+      background: #000;
     }
-    .msg {
-      max-width: 80%;
-      padding: 10px 14px;
-      border-radius: 16px;
-      font-size: 15px;
-      line-height: 1.4;
-      word-wrap: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .msg.bot {
-      align-self: flex-start;
-      background: rgba(255,255,255,0.06);
-      color: #eee;
-      border-bottom-left-radius: 4px;
-    }
-    .msg.bot b { color: #ea80fc; }
-    .ai-chat-footer {
-      padding: 12px 16px;
-      background: rgba(10,0,20,0.8);
-      border-top: 0.5px solid rgba(255,255,255,0.04);
-      display: flex;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-    .ai-chat-footer input {
+    .reel-slider {
       flex: 1;
-      padding: 10px 14px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 15px;
-      outline: none;
-    }
-    .ai-chat-footer input::placeholder { color: rgba(255,255,255,0.2); }
-    .ai-chat-footer button {
-      padding: 10px 18px;
-      border-radius: 20px;
-      border: none;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.1s;
-    }
-    .ai-chat-footer button:active { transform: scale(0.95); }
-    .ai-clear-btn {
-      background: rgba(255,69,58,0.15) !important;
-      color: #ff453a !important;
-      border: 1px solid rgba(255,69,58,0.15) !important;
-    }
-    .typing-indicator {
-      align-self: flex-start;
-      color: rgba(255,255,255,0.25);
-      font-size: 14px;
-      padding: 4px 12px;
-    }
-    @media (max-width: 480px) {
-      .ai-chat-panel { height: 90vh; border-radius: 20px 20px 0 0; }
-      .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
-    }
-
-    /* === LEADERBOARD === */
-    .lb-item {
       display: flex;
-      align-items: center;
-      padding: 10px 16px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.04);
-      transition: all 0.2s;
-      cursor: default;
-      gap: 8px;
+      flex-direction: column;
+      transition: transform 0.3s ease;
+      will-change: transform;
     }
-    .lb-item:last-child { border-bottom: none; }
-
-    .lb-avatar-wrap {
+    .reel-item {
+      flex: 0 0 100vh;
       position: relative;
-      width: 44px;
-      height: 44px;
-      flex-shrink: 0;
-    }
-    .lb-avatar {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 600;
-      font-size: 16px;
-      color: #fff;
-      background: #651fff;
-      text-transform: uppercase;
+      background: #000;
+      height: 100vh;
+      width: 100%;
+      overflow: hidden;
+    }
+    .reel-item video {
+      width: 100%;
+      height: 100%;
       object-fit: cover;
-      border: 2px solid rgba(255,255,255,0.1);
+      background: #000;
     }
-    .lb-avatar-wrap .rank-badge {
+    .reel-overlay-info {
       position: absolute;
-      bottom: -4px;
-      right: -4px;
-      background: #0a0014;
-      border: 1.5px solid rgba(255,255,255,0.15);
-      border-radius: 50%;
-      width: 22px;
-      height: 22px;
+      bottom: 0; left: 0; right: 0;
+      padding: 20px 16px 30px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+      pointer-events: none;
+    }
+    .reel-overlay-info .uploader {
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      font-weight: 700;
-      color: #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+      gap: 12px;
+      pointer-events: auto;
+      margin-bottom: 8px;
     }
+    .reel-overlay-info .uploader img {
+      width: 40px; height: 40px; border-radius: 50%; border: 2px solid #ea80fc;
+      object-fit: cover;
+    }
+    .reel-overlay-info .uploader .name {
+      font-weight: 600; font-size: 16px;
+    }
+    .reel-overlay-info .caption { font-size: 14px; margin-bottom: 8px; line-height: 1.4; pointer-events: auto; }
+    .reel-actions {
+      display: flex;
+      gap: 20px;
+      pointer-events: auto;
+      align-items: center;
+    }
+    .reel-actions button {
+      background: none; border: none; color: #fff;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 14px; padding: 6px 12px; border-radius: 20px;
+      transition: background 0.2s; cursor: pointer;
+    }
+    .reel-actions button:active { background: rgba(255,255,255,0.1); }
+    .reel-actions button svg { width: 24px; height: 24px; fill: currentColor; }
+    .reel-actions .liked svg { fill: #ff6b6b; }
+    .reel-actions .liked span { color: #ff6b6b; }
+
+    .reel-comment-input {
+      display: flex; gap: 8px; margin-top: 8px; align-items: center;
+      pointer-events: auto;
+    }
+    .reel-comment-input input {
+      flex: 1; padding: 6px 12px; border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.1);
+      color: #fff; font-size: 13px; outline: none;
+    }
+    .reel-comment-input input::placeholder { color: rgba(255,255,255,0.4); }
+    .reel-comment-input button {
+      padding: 6px 12px; border-radius: 20px; border: none;
+      background: #ea80fc; color: #000; font-weight: 600; cursor: pointer;
+    }
+    .reel-comment-list { margin-top: 6px; max-height: 80px; overflow-y: auto; font-size: 12px; color: #ccc; pointer-events: auto; }
+    .reel-comment-list .cmt { padding: 4px 0; border-bottom: 0.5px solid rgba(255,255,255,0.05); }
+    .reel-comment-list .cmt strong { color: #ea80fc; }
+    .reel-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #aaa; font-size: 14px; }
+
+    .quick-action-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 16px; }
+    .quick-action { background: rgba(45,10,80,0.3); backdrop-filter: blur(12px); border: 0.5px solid rgba(255,255,255,0.04); border-radius: 16px; padding: 12px; text-align: center; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+    .quick-action:active { transform: scale(0.94); }
+    .quick-action .icon { font-size: 28px; }
+    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+
+    .withdraw-input { width: 100%; padding: 10px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02); color: #fff; font-size: 14px; margin-bottom: 8px; outline: none; }
+    .withdraw-input:focus { border-color: #d500f9; }
+    .withdraw-btn { width: 100%; padding: 12px; border-radius: 20px; border: none; background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; font-weight: 600; cursor: pointer; transition: transform 0.15s; font-size: 14px; }
+    .withdraw-btn:active { transform: scale(0.95); }
+
+    .star-rating { display: flex; gap: 10px; justify-content: center; margin: 12px 0; }
+    .star { width: 32px; height: 32px; cursor: pointer; transition: all 0.2s; fill: rgba(255,255,255,0.1); }
+    .star.active { fill: #ffd60a; filter: drop-shadow(0 0 10px rgba(255,214,10,0.5)); }
+    .star:active { transform: scale(1.2); }
+
+    .confirm-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); z-index: 500; justify-content: center; align-items: center; }
+    .confirm-overlay.open { display: flex; }
+    .confirm-box { background: #1a0a2b; border-radius: 24px; padding: 24px 28px; max-width: 340px; width: 90%; text-align: center; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.8); }
+    .confirm-box p { font-size: 16px; margin-bottom: 24px; color: #ddd; }
+    .confirm-box .btn-row { display: flex; gap: 12px; justify-content: center; }
+    .confirm-box .btn-row button { padding: 10px 28px; border-radius: 30px; border: none; font-weight: 600; cursor: pointer; transition: transform 0.15s; }
+    .confirm-box .btn-row button:active { transform: scale(0.94); }
+    .confirm-box .btn-cancel { background: rgba(255,255,255,0.06); color: #aaa; }
+    .confirm-box .btn-confirm { background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; }
+
+    .success-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); z-index: 600; justify-content: center; align-items: center; animation: fadeIn 0.3s; }
+    .success-overlay.open { display: flex; }
+    .success-box { background: #0a0014; border-radius: 32px; padding: 30px 28px; max-width: 340px; width: 90%; text-align: center; border: 1px solid rgba(0,230,118,0.2); box-shadow: 0 20px 60px rgba(0,0,0,0.8); animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    .success-box .check-circle { width: 64px; height: 64px; border-radius: 50%; background: #00e676; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+    .success-box .check-circle svg { fill: #fff; width: 36px; height: 36px; }
+    .success-box h3 { font-size: 22px; margin: 0; color: #fff; }
+    .success-box p { color: rgba(255,255,255,0.5); font-size: 14px; margin: 8px 0 0; }
+    @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .chant-level { text-align: center; font-size: 22px; font-weight: 700; margin: 4px 0 2px; background: linear-gradient(135deg, #ffd60a, #ff9f1c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
+    .chant-progress-container { background: rgba(255,255,255,0.06); border-radius: 30px; height: 8px; margin: 6px 0 10px; overflow: hidden; box-shadow: inset 0 2px 6px rgba(0,0,0,0.4); }
+    .chant-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #d500f9, #ffd60a); border-radius: 30px; transition: width 0.3s ease; box-shadow: 0 0 20px rgba(213,0,249,0.4); }
+    .chant-counter { text-align: center; font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 12px; font-weight: 500; }
+    .chant-counter span { color: #fff; font-weight: 700; }
+    .chant-orb-container { display: flex; justify-content: center; margin: 6px 0 10px; position: relative; }
+    .chant-orb { width: 160px; height: 160px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #ff9f1c, #d500f9); box-shadow: 0 0 40px rgba(213,0,249,0.5), 0 0 80px rgba(213,0,249,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.2s; user-select: none; -webkit-user-select: none; position: relative; border: 2px solid rgba(255,255,255,0.15); }
+    .chant-orb:active { transform: scale(0.92); box-shadow: 0 0 60px rgba(213,0,249,0.8); }
+    .chant-orb .chant-text { font-size: 20px; font-weight: 700; color: #fff; text-shadow: 0 0 20px rgba(0,0,0,0.5); pointer-events: none; text-align: center; padding: 0 10px; }
+    .chant-orb .edit-icon { position: absolute; bottom: 12px; right: 12px; background: rgba(0,0,0,0.5); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s; color: #fff; font-size: 12px; border: 1px solid rgba(255,255,255,0.2); }
+    .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
+    .ripple { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.3); transform: scale(0); animation: rippleAnim 0.6s ease-out forwards; pointer-events: none; }
+    @keyframes rippleAnim { to { transform: scale(2); opacity: 0; } }
+    .floating-tap { position: fixed; pointer-events: none; font-size: 20px; font-weight: 700; color: #ffd60a; text-shadow: 0 0 20px rgba(255,214,10,0.8); animation: floatUp 0.8s forwards ease-out; z-index: 999; }
+    @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-80px) scale(1.3); } }
+
+    .ai-chat-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 400; justify-content: center; align-items: flex-end; }
+    .ai-chat-overlay.open { display: flex; }
+    .ai-chat-panel { width: 100%; max-width: 420px; height: 80vh; background: #0a0014; border-radius: 30px 30px 0 0; box-shadow: 0 -10px 50px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,0.04); }
+    .ai-chat-header { padding: 16px 20px; background: rgba(10,0,20,0.8); backdrop-filter: blur(10px); border-bottom: 0.5px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .ai-chat-header h3 { font-weight: 600; font-size: 18px; }
+    .ai-chat-header .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; padding: 0 8px; }
+    .ai-chat-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 15px; line-height: 1.4; word-wrap: break-word; }
+    .msg.user { align-self: flex-end; background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; border-bottom-right-radius: 4px; }
+    .msg.bot { align-self: flex-start; background: rgba(255,255,255,0.06); color: #eee; border-bottom-left-radius: 4px; }
+    .msg.bot b { color: #ea80fc; }
+    .ai-chat-footer { padding: 12px 16px; background: rgba(10,0,20,0.8); border-top: 0.5px solid rgba(255,255,255,0.04); display: flex; gap: 8px; flex-shrink: 0; }
+    .ai-chat-footer input { flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02); color: #fff; font-size: 15px; outline: none; }
+    .ai-chat-footer input::placeholder { color: rgba(255,255,255,0.2); }
+    .ai-chat-footer button { padding: 10px 18px; border-radius: 20px; border: none; background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; font-weight: 600; cursor: pointer; transition: transform 0.1s; }
+    .ai-chat-footer button:active { transform: scale(0.95); }
+    .ai-clear-btn { background: rgba(255,69,58,0.15) !important; color: #ff453a !important; border: 1px solid rgba(255,69,58,0.15) !important; }
+
+    .payment-chat-container { max-height: 250px; overflow-y: auto; margin-bottom: 8px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 16px; min-height: 60px; }
+    .payment-chat-container .chat-msg { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; animation: fadeSlide 0.3s ease; }
+    .payment-chat-container .chat-msg.sent { flex-direction: row-reverse; }
+    .payment-chat-container .chat-msg .avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #651fff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 10px; color: #fff; }
+    .payment-chat-container .chat-msg .bubble { max-width: 75%; padding: 6px 12px; border-radius: 14px; font-size: 13px; line-height: 1.3; word-wrap: break-word; }
+    .payment-chat-container .chat-msg.sent .bubble { background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; border-bottom-right-radius: 4px; }
+    .payment-chat-container .chat-msg.received .bubble { background: rgba(255,255,255,0.06); color: #eee; border-bottom-left-radius: 4px; }
+    .payment-chat-container .chat-msg .bubble .payment-card { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.2); border-radius: 10px; padding: 4px 10px; margin-top: 2px; font-size: 12px; }
+    .payment-chat-container .chat-msg .bubble .payment-card .amount { font-weight: 700; color: #30d158; }
+    .payment-chat-container .chat-msg .time { font-size: 9px; color: rgba(255,255,255,0.2); margin-top: 2px; }
+    .payment-chat-input-row { display: flex; gap: 6px; margin-top: 4px; }
+    .payment-chat-input-row input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02); color: #fff; font-size: 13px; outline: none; }
+    .payment-chat-input-row input::placeholder { color: rgba(255,255,255,0.2); }
+    .payment-chat-input-row button { padding: 8px 14px; border-radius: 20px; border: none; background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; font-weight: 600; font-size: 12px; cursor: pointer; }
+    .payment-chat-input-row button:active { transform: scale(0.95); }
+
+    .search-user-input { width: 100%; padding: 8px 12px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02); color: #fff; font-size: 13px; margin-bottom: 8px; transition: border 0.3s; outline: none; }
+    .search-user-input:focus { border-color: #d500f9; }
+    .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
+    .user-result { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-bottom: 0.5px solid rgba(255,255,255,0.04); cursor: pointer; transition: background 0.15s; border-radius: 8px; }
+    .user-result:active { background: rgba(255,255,255,0.02); }
+    .user-result .result-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: #651fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; color: #fff; flex-shrink: 0; }
+    .user-result .result-info { flex: 1; }
+    .user-result .result-info .name { font-weight: 500; font-size: 13px; }
+    .user-result .result-info .sub { font-size: 10px; color: rgba(255,255,255,0.3); }
+    .selected-user-badge { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(213,0,249,0.08); border-radius: 30px; border: 0.5px solid rgba(213,0,249,0.15); margin: 4px 0 8px; font-size: 12px; }
+    .selected-user-badge .remove-btn { background: none; border: none; color: #ff453a; font-size: 16px; cursor: pointer; padding: 0 4px; }
+    .selected-user-badge .remove-btn:active { transform: scale(0.9); }
+    .upi-display { font-size: 28px; font-weight: 700; text-align: center; padding: 6px 0; color: #fff; letter-spacing: 2px; min-height: 50px; }
+    .upi-numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 240px; margin: 0 auto; }
+    .upi-numpad button { padding: 12px; border: none; border-radius: 10px; background: rgba(255,255,255,0.05); color: #fff; font-size: 18px; font-weight: 500; cursor: pointer; transition: all 0.15s; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 0.5px solid rgba(255,255,255,0.04); }
+    .upi-numpad button:active { transform: scale(0.92); background: rgba(213,0,249,0.15); }
+    .upi-numpad .clear-btn { background: rgba(255,69,58,0.1); color: #ff453a; }
+    .upi-numpad .clear-btn:active { background: rgba(255,69,58,0.2); }
+    .payment-processing { display: none; text-align: center; padding: 20px 0; }
+    .payment-processing.active { display: block; }
+    .payment-processing .svg-loader { width: 60px; height: 60px; margin: 0 auto 16px; }
+    @keyframes dash { 0% { stroke-dashoffset: 251.2; } 50% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -251.2; } }
+
+    .store-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 0.5px solid rgba(255,255,255,0.04); }
+    .store-item:last-child { border-bottom: none; }
+    .store-item button { background: linear-gradient(135deg, #d500f9, #651fff); border: none; padding: 4px 14px; border-radius: 20px; color: white; font-weight: 600; font-size: 12px; cursor: pointer; transition: transform 0.15s; }
+    .store-item button:active { transform: scale(0.92); }
+
+    .streak-ring { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,215,0,0.06); padding: 4px 12px 4px 8px; border-radius: 30px; border: 0.5px solid rgba(255,215,0,0.12); }
+    .streak-ring .flame { font-size: 18px; animation: flicker 1.5s infinite alternate; }
+    @keyframes flicker { 0% { opacity: 0.7; transform: scale(0.95); } 100% { opacity: 1; transform: scale(1.05); } }
+
+    .lb-item { display: flex; align-items: center; padding: 10px 16px; border-bottom: 0.5px solid rgba(255,255,255,0.04); transition: all 0.2s; cursor: default; gap: 8px; }
+    .lb-item:last-child { border-bottom: none; }
+    .lb-avatar-wrap { position: relative; width: 44px; height: 44px; flex-shrink: 0; }
+    .lb-avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; color: #fff; background: #651fff; text-transform: uppercase; object-fit: cover; border: 2px solid rgba(255,255,255,0.1); }
+    .lb-avatar-wrap .rank-badge { position: absolute; bottom: -4px; right: -4px; background: #0a0014; border: 1.5px solid rgba(255,255,255,0.15); border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.6); }
     .lb-rank.gold .lb-avatar { border-color: #FFD700; box-shadow: 0 0 20px rgba(255,215,0,0.4); }
     .lb-rank.silver .lb-avatar { border-color: #C0C0C0; box-shadow: 0 0 20px rgba(192,192,192,0.3); }
     .lb-rank.bronze .lb-avatar { border-color: #CD7F32; box-shadow: 0 0 20px rgba(205,127,50,0.3); }
-    .lb-rank.default .lb-avatar { border-color: rgba(255,255,255,0.08); }
     .lb-rank.self .lb-avatar { border-color: #d500f9; box-shadow: 0 0 20px rgba(213,0,249,0.3); }
-
     .lb-info { flex: 1; }
     .lb-name { font-weight: 600; font-size: 16px; }
     .lb-name.self-highlight { color: #ea80fc; }
     .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.15); padding: 2px 8px; border-radius: 30px; margin-left: 8px; color: #ea80fc; }
     .lb-pts { font-weight: 600; color: #ffffff; font-size: 15px; }
-
-    .lb-self-row {
-      margin-top: 12px;
-      padding: 12px 16px;
-      background: rgba(213,0,249,0.05);
-      border-radius: 16px;
-      border: 1px solid rgba(213,0,249,0.12);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      animation: fadeSlide 0.5s ease;
-    }
+    .lb-self-row { margin-top: 12px; padding: 12px 16px; background: rgba(213,0,249,0.05); border-radius: 16px; border: 1px solid rgba(213,0,249,0.12); display: flex; justify-content: space-between; align-items: center; animation: fadeSlide 0.5s ease; }
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === PAYMENT - CHAT STYLE === */
-    .payment-chat-container {
-      max-height: 250px;
-      overflow-y: auto;
-      margin-bottom: 8px;
-      padding: 6px 8px;
-      background: rgba(0,0,0,0.2);
-      border-radius: 16px;
-      min-height: 60px;
-    }
-    .payment-chat-container .chat-msg {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      margin-bottom: 6px;
-      animation: fadeSlide 0.3s ease;
-    }
-    .payment-chat-container .chat-msg.sent { flex-direction: row-reverse; }
-    .payment-chat-container .chat-msg .avatar {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      object-fit: cover;
-      background: #651fff;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      font-size: 10px;
-      color: #fff;
-    }
-    .payment-chat-container .chat-msg .bubble {
-      max-width: 75%;
-      padding: 6px 12px;
-      border-radius: 14px;
-      font-size: 13px;
-      line-height: 1.3;
-      word-wrap: break-word;
-    }
-    .payment-chat-container .chat-msg.sent .bubble {
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .payment-chat-container .chat-msg.received .bubble {
-      background: rgba(255,255,255,0.06);
-      color: #eee;
-      border-bottom-left-radius: 4px;
-    }
-    .payment-chat-container .chat-msg .bubble .payment-card {
-      background: rgba(0,230,118,0.1);
-      border: 1px solid rgba(0,230,118,0.2);
-      border-radius: 10px;
-      padding: 4px 10px;
-      margin-top: 2px;
-      font-size: 12px;
-    }
-    .payment-chat-container .chat-msg .bubble .payment-card .amount {
-      font-weight: 700;
-      color: #30d158;
-    }
-    .payment-chat-container .chat-msg .time {
-      font-size: 9px;
-      color: rgba(255,255,255,0.2);
-      margin-top: 2px;
-    }
-    .payment-chat-input-row {
-      display: flex;
-      gap: 6px;
-      margin-top: 4px;
-    }
-    .payment-chat-input-row input {
-      flex: 1;
-      padding: 8px 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 13px;
-      outline: none;
-    }
-    .payment-chat-input-row input::placeholder { color: rgba(255,255,255,0.2); }
-    .payment-chat-input-row button {
-      padding: 8px 14px;
-      border-radius: 20px;
-      border: none;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      font-weight: 600;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .payment-chat-input-row button:active { transform: scale(0.95); }
-
-    .search-user-input {
-      width: 100%;
-      padding: 8px 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 13px;
-      margin-bottom: 8px;
-      transition: border 0.3s;
-      outline: none;
-    }
-    .search-user-input:focus { border-color: #d500f9; }
-    .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
-    .user-result {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 8px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.04);
-      cursor: pointer;
-      transition: background 0.15s;
-      border-radius: 8px;
-    }
-    .user-result:active { background: rgba(255,255,255,0.02); }
-    .user-result .result-avatar {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      object-fit: cover;
-      background: #651fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      font-size: 12px;
-      color: #fff;
-      flex-shrink: 0;
-    }
-    .user-result .result-info { flex: 1; }
-    .user-result .result-info .name { font-weight: 500; font-size: 13px; }
-    .user-result .result-info .sub { font-size: 10px; color: rgba(255,255,255,0.3); }
-    .quick-action-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-      margin: 12px 16px;
-    }
-    .quick-action {
-      background: rgba(45,10,80,0.3);
-      backdrop-filter: blur(12px);
-      border: 0.5px solid rgba(255,255,255,0.04);
-      border-radius: 16px;
-      padding: 12px;
-      text-align: center;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .quick-action:active { transform: scale(0.94); }
-    .quick-action .icon { font-size: 28px; }
-    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; }
-    .quick-action.bank { border-color: rgba(48,209,88,0.15); }
-    .quick-action.store { border-color: rgba(255,214,10,0.15); }
-    .quick-action.pay { border-color: rgba(10,132,255,0.15); }
-
-    /* === STORE === */
-    .store-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.04);
-    }
-    .store-item:last-child { border-bottom: none; }
-    .store-item button {
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      border: none;
-      padding: 4px 14px;
-      border-radius: 20px;
-      color: white;
-      font-weight: 600;
-      font-size: 12px;
-      cursor: pointer;
-      transition: transform 0.15s;
-    }
-    .store-item button:active { transform: scale(0.92); }
-
-    /* === RATING STARS === */
-    .star-rating {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      margin: 12px 0;
-    }
-    .star {
-      width: 32px;
-      height: 32px;
-      cursor: pointer;
-      transition: all 0.2s;
-      fill: rgba(255,255,255,0.1);
-    }
-    .star.active { fill: #ffd60a; filter: drop-shadow(0 0 10px rgba(255,214,10,0.5)); }
-    .star:active { transform: scale(1.2); }
-
-    /* === WITHDRAW === */
-    .withdraw-input {
-      width: 100%;
-      padding: 10px 14px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 14px;
-      margin-bottom: 8px;
-      outline: none;
-    }
-    .withdraw-input:focus { border-color: #d500f9; }
-    .withdraw-btn {
-      width: 100%;
-      padding: 12px;
-      border-radius: 20px;
-      border: none;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.15s;
-      font-size: 14px;
-    }
-    .withdraw-btn:active { transform: scale(0.95); }
-
-    /* === STREAK RING === */
-    .streak-ring {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(255,215,0,0.06);
-      padding: 4px 12px 4px 8px;
-      border-radius: 30px;
-      border: 0.5px solid rgba(255,215,0,0.12);
-    }
-    .streak-ring .flame {
-      font-size: 18px;
-      animation: flicker 1.5s infinite alternate;
-    }
-    @keyframes flicker {
-      0% { opacity: 0.7; transform: scale(0.95); }
-      100% { opacity: 1; transform: scale(1.05); }
-    }
-
-    .mytho-label {
-      position: absolute;
-      bottom: -6px;
-      right: 0;
-      font-size: 10px;
-      font-weight: 400;
-      color: rgba(255,255,255,0.12);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
-    /* === Confirm Modal === */
-    .confirm-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.7);
-      backdrop-filter: blur(10px);
-      z-index: 500;
-      justify-content: center;
-      align-items: center;
-    }
-    .confirm-overlay.open { display: flex; }
-    .confirm-box {
-      background: #1a0a2b;
-      border-radius: 24px;
-      padding: 24px 28px;
-      max-width: 340px;
-      width: 90%;
-      text-align: center;
-      border: 1px solid rgba(255,255,255,0.06);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
-    }
-    .confirm-box p { font-size: 16px; margin-bottom: 24px; color: #ddd; }
-    .confirm-box .btn-row { display: flex; gap: 12px; justify-content: center; }
-    .confirm-box .btn-row button {
-      padding: 10px 28px;
-      border-radius: 30px;
-      border: none;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.15s;
-    }
-    .confirm-box .btn-row button:active { transform: scale(0.94); }
-    .confirm-box .btn-cancel { background: rgba(255,255,255,0.06); color: #aaa; }
-    .confirm-box .btn-confirm { background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; }
-
-    /* === Success Overlay === */
-    .success-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6);
-      backdrop-filter: blur(8px);
-      z-index: 600;
-      justify-content: center;
-      align-items: center;
-      animation: fadeIn 0.3s;
-    }
-    .success-overlay.open { display: flex; }
-    .success-box {
-      background: #0a0014;
-      border-radius: 32px;
-      padding: 30px 28px;
-      max-width: 340px;
-      width: 90%;
-      text-align: center;
-      border: 1px solid rgba(0,230,118,0.2);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
-      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    }
-    .success-box .check-circle {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      background: #00e676;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 16px;
-    }
-    .success-box .check-circle svg { fill: #fff; width: 36px; height: 36px; }
-    .success-box h3 { font-size: 22px; margin: 0; color: #fff; }
-    .success-box p { color: rgba(255,255,255,0.5); font-size: 14px; margin: 8px 0 0; }
-    @keyframes popIn {
-      0% { transform: scale(0.8); opacity: 0; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-    #ui-pts, #profile-pts, .lb-pts, .item-right, .widget-value, .lb-self-pts {
-      color: #ffffff !important;
-    }
-
-    /* ===== CHANT CARD STYLES ===== */
-    .chant-level {
-      text-align: center;
-      font-size: 22px;
-      font-weight: 700;
-      margin: 4px 0 2px;
-      background: linear-gradient(135deg, #ffd60a, #ff9f1c);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      letter-spacing: -0.5px;
-    }
-    .chant-progress-container {
-      background: rgba(255,255,255,0.06);
-      border-radius: 30px;
-      height: 8px;
-      margin: 6px 0 10px;
-      overflow: hidden;
-      box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
-    }
-    .chant-progress-bar {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #d500f9, #ffd60a);
-      border-radius: 30px;
-      transition: width 0.3s ease;
-      box-shadow: 0 0 20px rgba(213,0,249,0.4);
-    }
-    .chant-counter {
-      text-align: center;
-      font-size: 14px;
-      color: rgba(255,255,255,0.5);
-      margin-bottom: 12px;
-      font-weight: 500;
-    }
-    .chant-counter span { color: #fff; font-weight: 700; }
-    .chant-orb-container {
-      display: flex;
-      justify-content: center;
-      margin: 6px 0 10px;
-      position: relative;
-    }
-    .chant-orb {
-      width: 160px;
-      height: 160px;
-      border-radius: 50%;
-      background: radial-gradient(circle at 30% 30%, #ff9f1c, #d500f9);
-      box-shadow: 0 0 40px rgba(213,0,249,0.5), 0 0 80px rgba(213,0,249,0.2);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.2s;
-      user-select: none;
-      -webkit-user-select: none;
-      position: relative;
-      border: 2px solid rgba(255,255,255,0.15);
-    }
-    .chant-orb:active {
-      transform: scale(0.92);
-      box-shadow: 0 0 60px rgba(213,0,249,0.8);
-    }
-    .chant-orb .chant-text {
-      font-size: 20px;
-      font-weight: 700;
-      color: #fff;
-      text-shadow: 0 0 20px rgba(0,0,0,0.5);
-      pointer-events: none;
-      text-align: center;
-      padding: 0 10px;
-    }
-    .chant-orb .edit-icon {
-      position: absolute;
-      bottom: 12px;
-      right: 12px;
-      background: rgba(0,0,0,0.5);
-      border-radius: 50%;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: background 0.2s;
-      color: #fff;
-      font-size: 12px;
-      border: 1px solid rgba(255,255,255,0.2);
-    }
-    .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
-
-    .ripple {
-      position: absolute;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.3);
-      transform: scale(0);
-      animation: rippleAnim 0.6s ease-out forwards;
-      pointer-events: none;
-    }
-    @keyframes rippleAnim {
-      to { transform: scale(2); opacity: 0; }
-    }
-
-    .floating-tap {
-      position: fixed;
-      pointer-events: none;
-      font-size: 20px;
-      font-weight: 700;
-      color: #ffd60a;
-      text-shadow: 0 0 20px rgba(255,214,10,0.8);
-      animation: floatUp 0.8s forwards ease-out;
-      z-index: 999;
-    }
-    @keyframes floatUp {
-      0% { opacity: 1; transform: translateY(0) scale(1); }
-      100% { opacity: 0; transform: translateY(-80px) scale(1.3); }
-    }
-
-    .chant-mint-animation {
-      animation: mintPulse 0.6s ease;
-    }
-    @keyframes mintPulse {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.2); box-shadow: 0 0 80px rgba(255,214,10,0.9); }
-      100% { transform: scale(1); }
-    }
-
-    .chant-leaderboard {
-      margin-top: 12px;
-    }
-    .chant-lb-item {
-      display: flex;
-      align-items: center;
-      padding: 4px 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.04);
-      gap: 8px;
-    }
+    .chant-lb-item { display: flex; align-items: center; padding: 4px 0; border-bottom: 0.5px solid rgba(255,255,255,0.04); gap: 8px; }
     .chant-lb-item:last-child { border-bottom: none; }
-    .chant-lb-rank {
-      font-weight: 600;
-      color: rgba(255,255,255,0.3);
-      font-size: 11px;
-      width: 18px;
-    }
-    .chant-lb-avatar {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      object-fit: cover;
-      background: #651fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      font-size: 10px;
-      color: #fff;
-    }
-    .chant-lb-name {
-      flex: 1;
-      font-size: 12px;
-      font-weight: 500;
-      color: #fff;
-    }
-    .chant-lb-taps {
-      font-size: 11px;
-      color: rgba(255,255,255,0.5);
-    }
+    .chant-lb-rank { font-weight: 600; color: rgba(255,255,255,0.3); font-size: 11px; width: 18px; }
+    .chant-lb-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; background: #651fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 10px; color: #fff; }
+    .chant-lb-name { flex: 1; font-size: 12px; font-weight: 500; color: #fff; }
+    .chant-lb-taps { font-size: 11px; color: rgba(255,255,255,0.5); }
 
-    .skeleton {
-      background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-      border-radius: 8px;
-    }
-    @keyframes shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
-    }
-
-    .upi-numpad {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      max-width: 240px;
-      margin: 0 auto;
-    }
-    .upi-numpad button {
-      padding: 12px;
-      border: none;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.05);
-      color: #fff;
-      font-size: 18px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 0.5px solid rgba(255,255,255,0.04);
-    }
-    .upi-numpad button:active {
-      transform: scale(0.92);
-      background: rgba(213,0,249,0.15);
-    }
-    .upi-numpad .clear-btn {
-      background: rgba(255,69,58,0.1);
-      color: #ff453a;
-    }
-    .upi-numpad .clear-btn:active {
-      background: rgba(255,69,58,0.2);
-    }
-    .upi-display {
-      font-size: 28px;
-      font-weight: 700;
-      text-align: center;
-      padding: 6px 0;
-      color: #fff;
-      letter-spacing: 2px;
-      min-height: 50px;
-    }
-
-    .payment-processing {
-      display: none;
-      text-align: center;
-      padding: 20px 0;
-    }
-    .payment-processing.active { display: block; }
-    .payment-processing .svg-loader {
-      width: 60px;
-      height: 60px;
-      margin: 0 auto 16px;
-    }
-
-    .chant-orb-3d {
-      perspective: 600px;
-      display: flex;
-      justify-content: center;
-    }
-    .chant-orb-3d .chant-orb {
-      transform-style: preserve-3d;
-      transition: transform 0.1s ease-out;
-    }
-
-    .selected-user-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      background: rgba(213,0,249,0.08);
-      border-radius: 30px;
-      border: 0.5px solid rgba(213,0,249,0.15);
-      margin: 4px 0 8px;
-      font-size: 12px;
-    }
-    .selected-user-badge .remove-btn {
-      background: none;
-      border: none;
-      color: #ff453a;
-      font-size: 16px;
-      cursor: pointer;
-      padding: 0 4px;
-    }
-    .selected-user-badge .remove-btn:active { transform: scale(0.9); }
-
-    /* ===== REELS STYLES ===== */
-    .reels-fab {
-      position: fixed;
-      bottom: 170px;
-      right: 20px;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #ff6b6b, #d500f9);
-      border: none;
-      box-shadow: 0 4px 30px rgba(213,0,249,0.5);
-      color: white;
-      cursor: pointer;
-      z-index: 200;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: transform 0.2s, box-shadow 0.2s;
-      animation: pulseGlow 2s infinite alternate;
-    }
-    .reels-fab:active { transform: scale(0.9); }
     @media (max-width: 480px) {
-      .reels-fab { bottom: 150px; right: 16px; width: 54px; height: 54px; }
-    }
-
-    .reels-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: #000;
-      z-index: 400;
-      flex-direction: column;
-    }
-    .reels-overlay.open { display: flex; }
-
-    .reels-header {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      background: rgba(0,0,0,0.8);
-      backdrop-filter: blur(10px);
-      padding: 16px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #fff;
-      flex-shrink: 0;
-    }
-    .reels-close {
-      background: none;
-      border: none;
-      color: #fff;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0 8px;
-    }
-
-    .reels-container {
-      flex: 1;
-      overflow-y: scroll;
-      scroll-snap-type: y mandatory;
-      height: 100%;
-      background: #000;
-      scroll-behavior: smooth;
-    }
-    .reels-container::-webkit-scrollbar { display: none; }
-
-    .reel-item {
-      position: relative;
-      width: 100%;
-      height: 100vh;
-      scroll-snap-align: start;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-    }
-    .reel-item video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    .reel-item .reel-overlay-ui {
-      position: absolute;
-      bottom: 80px;
-      left: 20px;
-      right: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      color: #fff;
-      pointer-events: none;
-    }
-    .reel-item .reel-overlay-ui .left {
-      pointer-events: auto;
-    }
-    .reel-item .reel-overlay-ui .right {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-      pointer-events: auto;
-    }
-    .reel-item .reel-overlay-ui .right button {
-      background: none;
-      border: none;
-      color: #fff;
-      font-size: 24px;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-    }
-    .reel-item .reel-overlay-ui .right button span {
-      font-size: 12px;
-    }
-    .reel-item .reel-overlay-ui .user-info {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 6px;
-    }
-    .reel-item .reel-overlay-ui .user-info img {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      border: 2px solid #fff;
-    }
-    .reel-item .reel-overlay-ui .caption {
-      font-size: 14px;
-      line-height: 1.4;
-      max-width: 80%;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+      .floating-group { bottom: 90px; right: 16px; gap: 10px; }
+      .floating-btn { width: 54px; height: 54px; font-size: 18px; }
+      .reel-header h2 { font-size: 16px; }
     }
   </style>
 </head>
@@ -3695,7 +3051,6 @@ app.get("/mini/:userId", (req, res) => {
           </span>
         </div>
       </div>
-      <!-- Premium Widget - Enhanced -->
       <div class="widget w-premium">
         <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
           <div style="display:flex; align-items:center; gap:6px;">
@@ -3712,7 +3067,6 @@ app.get("/mini/:userId", (req, res) => {
           <span id="ui-prem-plan">No active plan</span>
         </div>
       </div>
-      <!-- Search Credits Widget - Enhanced -->
       <div class="widget w-search">
         <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
           <div style="display:flex; align-items:center; gap:6px;">
@@ -3746,7 +3100,7 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-    <!-- ========== CHANT & EARN CARD ========== -->
+    <!-- CHANT CARD -->
     <div class="glass" style="margin: 12px 16px 8px;">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
@@ -3916,13 +3270,6 @@ app.get("/mini/:userId", (req, res) => {
             style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
           <text x="50" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Processing</text>
         </svg>
-        <style>
-          @keyframes dash {
-            0% { stroke-dashoffset: 251.2; }
-            50% { stroke-dashoffset: 0; }
-            100% { stroke-dashoffset: -251.2; }
-          }
-        </style>
         <p style="color:rgba(255,255,255,0.5); font-size:12px;">Verifying transaction...</p>
       </div>
       
@@ -4019,15 +3366,23 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== AI FAB ========== -->
-  <button class="ai-fab" id="aiFab">AI</button>
+  <!-- ========== FLOATING BUTTONS ========== -->
+  <div class="floating-group">
+    <button class="floating-btn reel-btn" id="reelFab" title="Mythoreel">🎬</button>
+    <button class="floating-btn ai-btn" id="aiFab">AI</button>
+  </div>
 
-  <!-- ========== REELS FAB ========== -->
-  <button class="reels-fab" id="reelsFab">
-    <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
-      <path d="M18 4v1h-2V4c0-.552.448-1 1-1s1 .448 1 1zm-6 0v1H9V4c0-.552.448-1 1-1s1 .448 1 1zm4 4v1h-2V8c0-.552.448-1 1-1s1 .448 1 1zm-2-5V2c0-.552.448-1 1-1s1 .448 1 1v1h-2zM6 4v1H4V4c0-.552.448-1 1-1s1 .448 1 1zm-2 8V8c0-.552.448-1 1-1s1 .448 1 1v4c0 .552-.448 1-1 1s-1-.448-1-1zm2 6c0 .552-.448 1-1 1s-1-.448-1-1v-1h2v1zm12-4v3c0 .552-.448 1-1 1s-1-.448-1-1v-3c0-.552.448-1 1-1s1 .448 1 1zm-6 1h2v-1h-2v1zm-4 2h4v-1H8v1zm10-1v-2h-2v2h2z"/>
-    </svg>
-  </button>
+  <!-- ========== REEL OVERLAY ========== -->
+  <div class="reel-overlay" id="reelOverlay">
+    <div class="reel-header">
+      <h2>🎬 Mythoreel</h2>
+      <button class="close-reel" id="closeReel">✕</button>
+    </div>
+    <div class="reel-container" id="reelContainer">
+      <div class="reel-slider" id="reelSlider"></div>
+      <div class="reel-loading" id="reelLoading">Loading reels...</div>
+    </div>
+  </div>
 
   <!-- ========== AI CHAT OVERLAY ========== -->
   <div class="ai-chat-overlay" id="aiChatOverlay">
@@ -4044,17 +3399,6 @@ app.get("/mini/:userId", (req, res) => {
         <button id="aiSendBtn">Send</button>
         <button id="aiClearBtn" class="ai-clear-btn" title="Clear Memory">🗑️</button>
       </div>
-    </div>
-  </div>
-
-  <!-- ========== REELS OVERLAY ========== -->
-  <div class="reels-overlay" id="reelsOverlay">
-    <div class="reels-header">
-      <span style="font-weight:600; font-size:18px;">🎬 Reels</span>
-      <button class="reels-close" id="reelsClose">✕</button>
-    </div>
-    <div class="reels-container" id="reelsContainer">
-      <!-- Reels injected by JS -->
     </div>
   </div>
 
@@ -4088,7 +3432,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── CONFIRM & SUCCESS MODALS ───
+    // ─── CONFIRM MODAL ───
     const confirmOverlay = document.createElement('div');
     confirmOverlay.className = 'confirm-overlay';
     confirmOverlay.innerHTML = \`
@@ -4122,6 +3466,7 @@ app.get("/mini/:userId", (req, res) => {
       });
     }
 
+    // ─── SUCCESS MODAL ───
     const successOverlay = document.createElement('div');
     successOverlay.className = 'success-overlay';
     successOverlay.innerHTML = \`
@@ -4148,7 +3493,7 @@ app.get("/mini/:userId", (req, res) => {
       });
     }
 
-    // ─── REACTIVE STATE MANAGEMENT ───
+    // ─── STATE ───
     const state = new Proxy({
       mythopoints: 0,
       streak: 0,
@@ -4187,7 +3532,6 @@ app.get("/mini/:userId", (req, res) => {
         badge.style.color = '#ff453a';
       }
       
-      // Premium widget update
       if (state.premium.active) {
         document.getElementById('ui-prem-status').innerText = state.premium.plan || 'Premium';
         document.getElementById('ui-prem-days').innerText = state.premium.daysLeft + 'd left';
@@ -4280,7 +3624,7 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
-    // ─── LOAD DASHBOARD DATA ───
+    // ─── LOAD DASHBOARD ───
     async function loadDashboard() {
       try {
         const res = await fetch('/api/ios-dashboard-data/' + userId);
@@ -4314,7 +3658,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── BANK DATA ───
+    // ─── BANK ───
     async function loadBankData() {
       try {
         const res = await fetch('/api/bank/status/' + userId);
@@ -4562,7 +3906,6 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('search-results').innerHTML = '';
       document.getElementById('search-user').value = name;
       loadPaymentChat();
-      // Auto-focus chat input
       document.getElementById('chat-input').focus();
     }
     window.selectUser = selectUser;
@@ -4665,7 +4008,6 @@ app.get("/mini/:userId", (req, res) => {
       if (e.key === 'Enter') sendChatMessage();
     });
 
-    // UPI Numpad
     document.querySelectorAll('.upi-numpad button').forEach(btn => {
       btn.addEventListener('click', function() {
         const value = this.dataset.value;
@@ -4739,7 +4081,7 @@ app.get("/mini/:userId", (req, res) => {
       } catch (e) {}
     }
 
-    // ─── HISTORY with Infinite Scroll ───
+    // ─── HISTORY ───
     let historyPage = 1;
     let historyLoading = false;
     let historyHasMore = true;
@@ -5041,7 +4383,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // ─── CHANT & EARN (1 second cooldown) ───
+    // ─── CHANT ───
     const CHANT_KEY = 'mytho_chant_' + userId;
     let chantTapCount = 0;
     const orb = document.getElementById('chant-orb');
@@ -5233,175 +4575,219 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── REELS ───
-    let reelsData = [];
+    // ========================
+    // 🎬 MYTHOREEL
+    // ========================
     let currentReelIndex = 0;
-    let reelsPage = 1;
-    let reelsLoading = false;
-    let reelsHasMore = true;
+    let reelsData = [];
+    let isReelLoading = false;
+    let reelObserver = null;
 
-    const reelsFab = document.getElementById('reelsFab');
-    const reelsOverlay = document.getElementById('reelsOverlay');
-    const reelsClose = document.getElementById('reelsClose');
-    const reelsContainer = document.getElementById('reelsContainer');
+    const reelOverlay = document.getElementById('reelOverlay');
+    const reelSlider = document.getElementById('reelSlider');
+    const closeReelBtn = document.getElementById('closeReel');
+    const reelFab = document.getElementById('reelFab');
 
-    reelsFab.addEventListener('click', () => {
-      reelsOverlay.classList.add('open');
-      if (reelsData.length === 0) loadReels(1, true);
+    reelFab.addEventListener('click', () => {
+      reelOverlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      loadReels();
     });
 
-    reelsClose.addEventListener('click', () => {
-      reelsOverlay.classList.remove('open');
-      // Pause all videos
+    closeReelBtn.addEventListener('click', closeReel);
+    reelOverlay.addEventListener('click', (e) => {
+      if (e.target === reelOverlay) closeReel();
+    });
+
+    function closeReel() {
+      reelOverlay.classList.remove('open');
+      document.body.style.overflow = '';
       document.querySelectorAll('.reel-item video').forEach(v => v.pause());
-    });
+    }
 
-    async function loadReels(page, reset = false) {
-      if (reelsLoading) return;
-      reelsLoading = true;
+    async function loadReels() {
+      if (isReelLoading) return;
+      isReelLoading = true;
+      document.getElementById('reelLoading').style.display = 'block';
       try {
-        const res = await fetch(\`/api/reels/feed?userId=\${userId}&page=\${page}&limit=10\`);
+        const res = await fetch('/api/reels?limit=20');
         const data = await res.json();
-        if (data.success) {
-          if (reset) {
-            reelsData = data.reels;
-            reelsContainer.innerHTML = '';
-            reelsPage = page;
-            reelsHasMore = data.reels.length === 10;
-          } else {
-            reelsData = reelsData.concat(data.reels);
-            reelsHasMore = data.reels.length === 10;
-          }
-          renderReels(reset);
+        if (data.success && data.reels.length) {
+          reelsData = data.reels;
+          renderReels(reelsData);
+          setTimeout(() => {
+            const firstVideo = document.querySelector('.reel-item video');
+            if (firstVideo) {
+              firstVideo.muted = false;
+              firstVideo.play().catch(() => {});
+            }
+          }, 300);
+        } else {
+          reelSlider.innerHTML = '<div class="empty" style="color:#aaa; text-align:center; padding:40px;">No reels yet. Be the first to upload!</div>';
         }
       } catch (e) {
-        console.error('Reels fetch error:', e);
-      } finally {
-        reelsLoading = false;
+        reelSlider.innerHTML = '<div class="empty" style="color:#ff453a; text-align:center; padding:40px;">Failed to load reels.</div>';
       }
+      document.getElementById('reelLoading').style.display = 'none';
+      isReelLoading = false;
     }
 
-    function renderReels(reset) {
-      if (reset) reelsContainer.innerHTML = '';
-      reelsData.forEach((reel) => {
-        // Avoid duplicates
-        if (document.getElementById(\`reel-\${reel.file_id}\`)) return;
-        const reelDiv = document.createElement('div');
-        reelDiv.className = 'reel-item';
-        reelDiv.id = \`reel-\${reel.file_id}\`;
-        reelDiv.innerHTML = \`
-          <video src="/stream/\${reel.file_id}" muted playsinline preload="metadata" loop></video>
-          <div class="reel-overlay-ui">
-            <div class="left">
-              <div class="user-info">
-                <img src="\${reel.uploader_avatar || 'https://via.placeholder.com/36'}" alt="avatar">
-                <span style="font-weight:600;">\${reel.uploader_name}</span>
-              </div>
-              <div class="caption">\${reel.caption || reel.file_name || ''}</div>
-            </div>
-            <div class="right">
-              <button class="reel-like-btn" data-fileid="\${reel.file_id}" data-liked="\${reel.is_liked}">
-                <span style="font-size:32px;">\${reel.is_liked ? '❤️' : '🤍'}</span>
-                <span>\${reel.likes || 0}</span>
-              </button>
-              <button class="reel-comment-btn" data-fileid="\${reel.file_id}">
-                <span style="font-size:32px;">💬</span>
-                <span>\${reel.comments_count || 0}</span>
-              </button>
-            </div>
-          </div>
+    function renderReels(reels) {
+      reelSlider.innerHTML = '';
+      reels.forEach((reel, idx) => {
+        const uploaderName = reel.uploaderId == 5189870730 ? 'MythoserialBot' : (reel.uploaderName || 'Anonymous');
+        const avatar = reel.uploaderAvatar || 'https://via.placeholder.com/40/2d0a50/ea80fc?text=U';
+        const isSpecial = reel.uploaderId == 5189870730;
+        const likes = reel.likes || 0;
+        const comments = reel.comments || [];
+        const views = reel.views || 0;
+        const caption = reel.caption || '';
+
+        const item = document.createElement('div');
+        item.className = 'reel-item';
+        item.dataset.index = idx;
+
+        const video = document.createElement('video');
+        video.src = \`/stream/\${reel.fileId}\`;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+
+        const info = document.createElement('div');
+        info.className = 'reel-overlay-info';
+
+        const uploaderDiv = document.createElement('div');
+        uploaderDiv.className = 'uploader';
+        uploaderDiv.innerHTML = \`
+          <img src="\${avatar}" alt="avatar">
+          <span class="name">\${uploaderName} \${isSpecial ? '⭐' : ''}</span>
         \`;
-        reelsContainer.appendChild(reelDiv);
-      });
 
-      // Attach event listeners
-      document.querySelectorAll('.reel-like-btn').forEach(btn => {
-        btn.removeEventListener('click', handleReelLike);
-        btn.addEventListener('click', handleReelLike);
-      });
-      document.querySelectorAll('.reel-comment-btn').forEach(btn => {
-        btn.removeEventListener('click', handleReelComment);
-        btn.addEventListener('click', handleReelComment);
-      });
+        const captionDiv = document.createElement('div');
+        captionDiv.className = 'caption';
+        captionDiv.textContent = caption;
 
-      // Setup auto-play and infinite scroll
-      setupReelIntersection();
-    }
+        const actions = document.createElement('div');
+        actions.className = 'reel-actions';
 
-    function setupReelIntersection() {
-      const videos = document.querySelectorAll('.reel-item video');
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          const video = entry.target;
-          if (entry.isIntersecting) {
-            video.play().catch(() => {});
-          } else {
-            video.pause();
-          }
+        const likeBtn = document.createElement('button');
+        likeBtn.className = 'like-btn';
+        likeBtn.innerHTML = \`
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          <span>\${likes}</span>
+        \`;
+        likeBtn.addEventListener('click', () => handleReelLike(idx, likeBtn));
+
+        const commentBtn = document.createElement('button');
+        commentBtn.innerHTML = \`
+          <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z"/></svg>
+          <span>\${comments.length}</span>
+        \`;
+        commentBtn.addEventListener('click', () => {
+          const input = item.querySelector('.reel-comment-input input');
+          if (input) input.focus();
         });
-      }, { threshold: 0.6 });
-      videos.forEach(v => observer.observe(v));
 
-      // Infinite scroll
-      const lastReel = reelsContainer.lastElementChild;
-      if (lastReel) {
-        const scrollObserver = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting && reelsHasMore && !reelsLoading) {
-            loadReels(++reelsPage, false);
-          }
-        }, { root: reelsContainer, threshold: 0.1 });
-        scrollObserver.observe(lastReel);
-      }
+        const viewSpan = document.createElement('span');
+        viewSpan.style.fontSize = '12px';
+        viewSpan.style.color = '#aaa';
+        viewSpan.textContent = \`👁 \${views}\`;
+
+        actions.append(likeBtn, commentBtn, viewSpan);
+
+        const commentInput = document.createElement('div');
+        commentInput.className = 'reel-comment-input';
+        commentInput.innerHTML = \`
+          <input type="text" placeholder="Write a comment..." />
+          <button>Post</button>
+        \`;
+        const commentList = document.createElement('div');
+        commentList.className = 'reel-comment-list';
+        comments.slice(0, 3).forEach(c => {
+          const cmt = document.createElement('div');
+          cmt.className = 'cmt';
+          cmt.innerHTML = \`<strong>\${c.name || 'User'}:</strong> \${c.text}\`;
+          commentList.appendChild(cmt);
+        });
+        if (comments.length > 3) {
+          const more = document.createElement('div');
+          more.className = 'cmt';
+          more.style.color = '#888';
+          more.textContent = \`+ \${comments.length - 3} more\`;
+          commentList.appendChild(more);
+        }
+
+        const sendCommentBtn = commentInput.querySelector('button');
+        const commentInputField = commentInput.querySelector('input');
+        sendCommentBtn.addEventListener('click', () => {
+          const text = commentInputField.value.trim();
+          if (!text) return;
+          fetch('/api/reel/comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reelId: reel._id, userId, text })
+          }).then(res => res.json()).then(data => {
+            if (data.success) {
+              const cmt = document.createElement('div');
+              cmt.className = 'cmt';
+              const name = tgUser?.first_name || 'User';
+              cmt.innerHTML = \`<strong>\${name}:</strong> \${text}\`;
+              commentList.prepend(cmt);
+              commentInputField.value = '';
+              const countSpan = commentBtn.querySelector('span');
+              countSpan.textContent = parseInt(countSpan.textContent) + 1;
+              tg.HapticFeedback.notificationOccurred('success');
+            } else {
+              alert('Failed to post comment.');
+            }
+          });
+        });
+
+        info.append(uploaderDiv, captionDiv, actions, commentInput, commentList);
+        item.append(video, info);
+
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              video.play().catch(() => {});
+              if (!video.dataset.viewed) {
+                video.dataset.viewed = 'true';
+                fetch('/api/reel/view', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ reelId: reel._id, userId })
+                }).catch(() => {});
+              }
+            } else {
+              video.pause();
+            }
+          });
+        }, { threshold: 0.7 });
+        observer.observe(item);
+
+        reelSlider.appendChild(item);
+      });
     }
 
-    async function handleReelLike(e) {
-      const btn = e.currentTarget;
-      const fileId = btn.dataset.fileid;
-      const liked = btn.dataset.liked === 'true';
-      const action = liked ? 'remove' : 'like';
+    async function handleReelLike(index, btn) {
+      const reel = reelsData[index];
+      if (!reel) return;
       try {
-        const res = await fetch('/api/like', {
+        const res = await fetch('/api/reel/like', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: parseInt(fileId), action })
+          body: JSON.stringify({ reelId: reel._id, userId })
         });
         const data = await res.json();
         if (data.success) {
-          const newLiked = data.action === 'liked';
-          btn.dataset.liked = newLiked;
-          btn.innerHTML = \`<span style="font-size:32px;">\${newLiked ? '❤️' : '🤍'}</span><span>\${data.likes}</span>\`;
+          const newCount = data.likes;
+          btn.querySelector('span').textContent = newCount;
+          btn.classList.toggle('liked');
           tg.HapticFeedback.impactOccurred('light');
         }
       } catch (e) {}
     }
-
-    async function handleReelComment(e) {
-      const fileId = e.currentTarget.dataset.fileid;
-      const comment = prompt('Write a comment:');
-      if (comment && comment.trim()) {
-        try {
-          const res = await fetch('/api/add-comment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_id: parseInt(fileId), comment: comment.trim() })
-          });
-          if (res.ok) {
-            tg.HapticFeedback.notificationOccurred('success');
-            const btn = e.currentTarget;
-            const countSpan = btn.querySelector('span:last-child');
-            const currentCount = parseInt(countSpan.textContent) || 0;
-            countSpan.textContent = currentCount + 1;
-          }
-        } catch (e) {}
-      }
-    }
-
-    // Close overlay on outside click
-    reelsOverlay.addEventListener('click', (e) => {
-      if (e.target === reelsOverlay) {
-        reelsOverlay.classList.remove('open');
-      }
-    });
 
     // ─── INIT ───
     async function init() {
@@ -5430,314 +4816,6 @@ app.get("/mini/:userId", (req, res) => {
 </body>
 </html>
     `);
-});
-
-// ==========================================
-// LEADERBOARD API (UPDATED: includes photo_url)
-// ==========================================
-app.get("/api/leaderboard/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        const { timeframe = "all", page = 1 } = req.query;
-        const limit = 10;
-        const skip = (parseInt(page) - 1) * limit;
-
-        let pointField = "mythopoints";
-        if (timeframe === "weekly") pointField = "weekly_points";
-        if (timeframe === "monthly") pointField = "monthly_points";
-
-        const query = {};
-        query[pointField] = { $gt: 0 };
-
-        const totalUsers = await usersCollection.countDocuments(query);
-        const totalPages = Math.ceil(totalUsers / limit) || 1;
-
-        const users = await usersCollection
-            .find(query)
-            .sort({ [pointField]: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        const formattedUsers = users.map(u => {
-            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
-            let safeUsername = null;
-            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
-                safeUsername = rawUsername.trim().startsWith('@') 
-                    ? rawUsername.trim() 
-                    : `@${rawUsername.trim()}`;
-            }
-            let rawName = u.name || u.first_name || null;
-            if (!rawName) {
-                if (safeUsername) {
-                    rawName = safeUsername;
-                } else {
-                    rawName = `User ${u.user_id}`;
-                }
-            }
-            let finalName = String(rawName); 
-            if (finalName.length > 15) {
-                finalName = finalName.substring(0, 15) + "..";
-            }
-            return {
-                user_id: u.user_id,
-                name: finalName,
-                username: safeUsername,
-                points: u[pointField] || 0,
-                title: getRankTitle(u[pointField] || 0),
-                photo_url: u.photo_url || null
-            };
-        });
-
-        let currentUser = null;
-        const userDoc = await usersCollection.findOne({ user_id: uid });
-        if (userDoc && userDoc[pointField] > 0) {
-            const rankQuery = {};
-            rankQuery[pointField] = { $gt: userDoc[pointField] };
-            const higherCount = await usersCollection.countDocuments(rankQuery);
-            currentUser = {
-                points: userDoc[pointField],
-                rank: higherCount + 1,
-                title: getRankTitle(userDoc[pointField])
-            };
-        }
-
-        res.json({
-            success: true,
-            page: parseInt(page),
-            totalPages: totalPages,
-            users: formattedUsers,
-            currentUser: currentUser
-        });
-    } catch (error) {
-        console.error("Leaderboard API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
-    }
-});
-
-// ==========================================
-// HISTORY API (unchanged)
-// ==========================================
-app.get("/api/history/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        const { filter = "ALL", page = 1 } = req.query;
-        const limit = 15;
-        const skip = (parseInt(page) - 1) * limit;
-
-        let query = { user_id: uid };
-        if (filter !== "ALL") {
-            query.type = filter.toUpperCase();
-        }
-
-        const historyRecords = await mpHistoryCollection
-            .find(query)
-            .sort({ date: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        res.json({ 
-            success: true, 
-            history: historyRecords 
-        });
-    } catch (error) {
-        console.error("History API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch history" });
-    }
-});
-
-// ==========================================
-// AI MEMORY FUNCTIONS (unchanged)
-// ==========================================
-async function addToMemory(userId, message) {
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    if (!doc) {
-        await usersCollection.insertOne({
-            user_id: key,
-            chat_id: parseInt(userId),
-            user_id_num: parseInt(userId),
-            conversation: [message],
-            total_messages: 1,
-            first_seen: new Date(),
-            last_seen: new Date()
-        });
-    } else {
-        let conv = doc.conversation || [];
-        conv.push(message);
-        if (conv.length > 1000) conv = conv.slice(-1000);
-        await usersCollection.updateOne(
-            { user_id: key },
-            {
-                $set: {
-                    conversation: conv,
-                    total_messages: conv.length,
-                    last_seen: new Date()
-                }
-            }
-        );
-    }
-}
-
-async function getMemory(userId) {
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    if (doc && doc.conversation) {
-        const recent = doc.conversation.slice(-14);
-        return recent.join('\n');
-    }
-    return '';
-}
-
-async function clearMemory(userId) {
-    const key = `${userId}:${userId}`;
-    await usersCollection.updateOne(
-        { user_id: key },
-        {
-            $set: {
-                conversation: [],
-                total_messages: 0
-            }
-        },
-        { upsert: true }
-    );
-}
-
-// ==========================================
-// AI API ENDPOINT (unchanged)
-// ==========================================
-app.post("/api/ai", async (req, res) => {
-    try {
-        const { userId, message } = req.body;
-        if (!userId || !message) {
-            return res.status(400).json({ success: false, error: "Missing userId or message" });
-        }
-
-        await addToMemory(userId, `User: ${message}`);
-
-        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
-
-        const SERIAL_COMMANDS = {
-            "shiv shakti": "/ss s01e01",
-            "dwarkadheesh": "/d s01e01",
-            "karmadhikari shanidev": "/karm s01e01",
-            "chandra dev": "/cd s01e01",
-            "mahishasura mardini": "/mm s01e01",
-            "jai mahalakshmi": "/jm s01e01",
-            "chandra nandni": "/cn s01e01",
-            "brij ke gopal": "/bkg s01e01",
-            "yashomati maiya ke nandlala": "/ymkn s01e01",
-            "meera": "/meera s01e01",
-            "bangla": "/bang s01e01",
-            "dharm yoddha garud": "/dyg s01e01",
-            "siya ke ram": "/skr s01e01",
-            "ram siya ke luv kush": "/rsklk s01e01",
-            "tenali rama": "/tr s01e01",
-            "devon ke dev mahadev": "/dkdm s01e01",
-            "karn sangini": "/ks s01e01",
-            "bolo ambe maa ki jai": "/maa s01e01",
-            "sriman rama": "/rama s01e01",
-            "the legend of hanuman": "/tloh s01e01",
-            "ramayan luv kush": "/ramayan2 s01e01",
-            "hatim": "/hatim s01e01",
-            "ramanand sagar ramayan": "/ramayan s01e01",
-            "shrimad ramayan": "/sr s01e01",
-            "ramayan sabke jeevan ka aadhar": "/rsjka s01e01",
-            "radhakrishn": "/rk s1 e01",
-            "veer hanuman": "/vh s01e01",
-            "prithviraj chauhan": "/cspc s01e01",
-            "suryaputra karn": "/spk s01e01",
-            "jai kanhaiya laal ki": "/jklk s1 e01",
-            "kaamdhenu gaumata": "/kg s01e01",
-            "kakbhushundi ramayan": "/kr s01e01",
-            "mata saraswati": "/ms s01e01",
-            "shri krishna": "/sk s01e01",
-            "mahabharat": "/mb s01e01",
-            "jag jaanani maa vaishnodevi": "/jjmv s01e01",
-            "shri tirupati balaji": "/stb s01e01",
-            "ganesh kartikey": "/gk s01e01",
-            "kurukshetra": "/kurukshetra s01e01",
-            "mahabharat - ek dharmayudh": "/med s01e01",
-            "budh dev": "/bd s01e01"
-        };
-
-        function detectSerial(text) {
-            const lower = text.toLowerCase().trim();
-            for (const [name, cmd] of Object.entries(SERIAL_COMMANDS)) {
-                if (lower.includes(name)) return { serial: name, command: cmd };
-            }
-            return null;
-        }
-
-        let finalPrompt = "";
-        const serial = detectSerial(message);
-        if (serial) {
-            finalPrompt = `${sysPrompt} Task: User wants ${serial.serial}. Tell them to send: ${serial.command}`;
-        } else {
-            let history = await getMemory(userId);
-            if (history && history.length > 400) {
-                history = "..." + history.slice(-400);
-            }
-            if (history) {
-                finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
-            } else {
-                finalPrompt = `${sysPrompt} User says: ${message}`;
-            }
-        }
-
-        const encoded = encodeURIComponent(finalPrompt);
-        const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
-        
-        let fetchModule;
-        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
-        
-        const response = await fetchModule(apiUrl);
-        let reply = null;
-        
-        if (response.ok) {
-            const data = await response.json();
-            reply = data.text || data.reply || data.response || data.message || data.data || null;
-            if (reply && typeof reply === 'string') {
-                reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-                reply = reply.replace(/\n/g, ' ');
-            }
-        }
-
-        if (!reply) {
-            reply = "Arre yaar, lagta hai network devlok (API) mein thoda busy chal raha hai! Thodi der mein wapas try kar 😅✨";
-        }
-
-        await addToMemory(userId, `Mythobot: ${reply}`);
-
-        res.json({ success: true, reply });
-    } catch (error) {
-        console.error("AI API error:", error);
-        res.status(500).json({ success: false, error: "AI service unavailable" });
-    }
-});
-
-// ==========================================
-// AI MEMORY ENDPOINTS
-// ==========================================
-app.get("/api/ai/memory/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        const memory = await getMemory(userId);
-        res.json({ success: true, memory });
-    } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to fetch memory" });
-    }
-});
-
-app.post("/api/ai/clear/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        await clearMemory(userId);
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to clear memory" });
-    }
 });
 
 // ========================
