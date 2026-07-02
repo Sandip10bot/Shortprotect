@@ -1,10 +1,11 @@
 // ============================================================
-// index.js – Premium Frontend + Mythoreel (Reels)
+// index.js – Premium Frontend + Mythoreel (Reels) - FIXED
 // ============================================================
 
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
+import axios from "axios";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -126,7 +127,7 @@ function getRankTitle(points) {
 }
 
 // ========================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS (same as before)
 // ========================
 function renderBypassError(res) {
     res.send(`
@@ -1365,7 +1366,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
 });
 
 // ==========================================
-// BANKING API
+// BANKING API (same as before, abbreviated)
 // ==========================================
 
 async function getBank(userId) {
@@ -2488,6 +2489,7 @@ app.get('/api/reels', async (req, res) => {
     }));
     res.json({ success: true, reels: formatted });
   } catch (e) {
+    console.error('Reels fetch error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -2517,6 +2519,7 @@ app.post('/api/reel/like', async (req, res) => {
     );
     res.json({ success: true, likes: newLikes });
   } catch (e) {
+    console.error('Reel like error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -2536,6 +2539,7 @@ app.post('/api/reel/comment', async (req, res) => {
     );
     res.json({ success: true });
   } catch (e) {
+    console.error('Reel comment error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -2551,16 +2555,90 @@ app.post('/api/reel/view', async (req, res) => {
     );
     res.json({ success: true });
   } catch (e) {
+    console.error('Reel view error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND
+// REEL STREAM PROXY - FIXES THE BLACK SCREEN ISSUE
+// ==========================================
+app.get('/reel-stream/:fileId', async (req, res) => {
+  try {
+    const fileId = parseInt(req.params.fileId);
+    
+    // Get the reel from database to verify it exists
+    const reel = await reelsCollection.findOne({ fileId: fileId });
+    if (!reel) {
+      return res.status(404).send('Reel not found');
+    }
+
+    // Forward to the main stream endpoint with proper headers
+    // The stream endpoint is at /stream/{message_id}
+    // We need to proxy the request with proper headers
+    const streamUrl = `http://localhost:8080/stream/${fileId}`;
+    
+    // Get the original request headers and forward them
+    const headers = {
+      'Range': req.headers.range || '',
+      'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
+      'Accept': req.headers.accept || '*/*',
+      'Accept-Encoding': req.headers['accept-encoding'] || '',
+      'Connection': 'keep-alive'
+    };
+
+    // If there's an auth cookie, forward it
+    if (req.headers.cookie) {
+      headers['Cookie'] = req.headers.cookie;
+    }
+
+    try {
+      const response = await axios({
+        method: 'GET',
+        url: streamUrl,
+        headers: headers,
+        responseType: 'stream',
+        timeout: 30000
+      });
+
+      // Forward the response headers
+      res.status(response.status);
+      Object.keys(response.headers).forEach(key => {
+        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'transfer-encoding') {
+          res.setHeader(key, response.headers[key]);
+        }
+      });
+
+      // Pipe the stream
+      response.data.pipe(res);
+    } catch (error) {
+      console.error('Stream proxy error:', error.message);
+      if (error.response) {
+        res.status(error.response.status).send('Stream unavailable');
+      } else {
+        res.status(500).send('Stream error');
+      }
+    }
+  } catch (e) {
+    console.error('Reel stream error:', e);
+    res.status(500).send('Error loading reel');
+  }
+});
+
+// ==========================================
+// MINI APP ROUTE – With Reel Fix
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
     const userId = req.params.userId;
+    // The HTML is the same as before, but in the renderReels function,
+    // we need to use the proxied stream URL
+    // The JavaScript inside the HTML will use '/reel-stream/' instead of '/stream/'
+    
+    // The rest of the HTML is the same, but the video src will be:
+    // video.src = `/reel-stream/${reel.fileId}`;
+    // This is handled in the JavaScript below
+    
     res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -2720,7 +2798,6 @@ app.get("/mini/:userId", (req, res) => {
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
 
-    /* Floating buttons */
     .floating-group {
       position: fixed;
       bottom: 100px;
@@ -2753,7 +2830,6 @@ app.get("/mini/:userId", (req, res) => {
     .floating-btn.reel-btn { animation-name: pulseGlowRed; }
     @keyframes pulseGlowRed { 0% { box-shadow: 0 4px 30px rgba(238,90,36,0.3); } 100% { box-shadow: 0 4px 50px rgba(238,90,36,0.8); } }
 
-    /* Reel Overlay */
     .reel-overlay {
       display: none;
       position: fixed;
@@ -3658,7 +3734,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── BANK ───
+    // ─── BANK (abbreviated but functional) ───
     async function loadBankData() {
       try {
         const res = await fetch('/api/bank/status/' + userId);
@@ -4576,7 +4652,7 @@ app.get("/mini/:userId", (req, res) => {
     }
 
     // ========================
-    // 🎬 MYTHOREEL
+    // 🎬 MYTHOREEL - FIXED WITH PROXY STREAM
     // ========================
     let currentReelIndex = 0;
     let reelsData = [];
@@ -4626,6 +4702,7 @@ app.get("/mini/:userId", (req, res) => {
           reelSlider.innerHTML = '<div class="empty" style="color:#aaa; text-align:center; padding:40px;">No reels yet. Be the first to upload!</div>';
         }
       } catch (e) {
+        console.error('Load reels error:', e);
         reelSlider.innerHTML = '<div class="empty" style="color:#ff453a; text-align:center; padding:40px;">Failed to load reels.</div>';
       }
       document.getElementById('reelLoading').style.display = 'none';
@@ -4647,12 +4724,14 @@ app.get("/mini/:userId", (req, res) => {
         item.className = 'reel-item';
         item.dataset.index = idx;
 
+        // FIX: Use the proxy stream endpoint
         const video = document.createElement('video');
-        video.src = \`/stream/\${reel.fileId}\`;
+        video.src = \`/reel-stream/\${reel.fileId}\`;
         video.loop = true;
         video.muted = true;
         video.playsInline = true;
         video.preload = 'auto';
+        video.crossOrigin = 'anonymous';
 
         const info = document.createElement('div');
         info.className = 'reel-overlay-info';
