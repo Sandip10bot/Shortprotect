@@ -26,7 +26,8 @@ let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection;
-
+// --- NEW COLLECTIONS FOR REELS ---
+let filesCollection, userLikesCollection, commentsCollection;
 
 async function connectDB() {
   try {
@@ -49,7 +50,10 @@ async function connectDB() {
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
     paymentChatCollection = db.collection("payment_chats");
-    
+    // --- new ---
+    filesCollection = db.collection("files");
+    userLikesCollection = db.collection("user_likes");
+    commentsCollection = db.collection("comments");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -2251,7 +2255,65 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay)
+// 🎬 MYTHOREELS – API FEED
+// ==========================================
+
+app.get("/api/reels/feed", async (req, res) => {
+    try {
+        const userId = parseInt(req.query.userId) || 0;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Get videos from files collection (you may filter by mime_type if needed)
+        const files = await filesCollection
+            .find({})
+            .sort({ uploaded_at: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        // Get user details for all uploaders
+        const userIds = files.map(f => f.uploader_user_id).filter(id => id);
+        let userMap = {};
+        if (userIds.length) {
+            const users = await usersCollection
+                .find({ user_id: { $in: userIds } })
+                .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+                .toArray();
+            users.forEach(u => userMap[u.user_id] = u);
+        }
+
+        // Enrich each reel with likes, comments, and user info
+        const reels = await Promise.all(files.map(async (file) => {
+            const fileId = file.file_id;
+            const likes = await userLikesCollection.countDocuments({ file_id: fileId, like_type: "like" });
+            const comments = await commentsCollection.countDocuments({ file_id: fileId });
+            const isLiked = userId ? await userLikesCollection.countDocuments({ user_id: userId, file_id: fileId, like_type: "like" }) > 0 : false;
+            const uploader = userMap[file.uploader_user_id] || {};
+            return {
+                file_id: fileId,
+                file_name: file.file_name || "Untitled",
+                caption: file.caption || "",
+                uploader_user_id: file.uploader_user_id,
+                uploader_name: uploader.first_name || uploader.username || `User ${file.uploader_user_id}`,
+                uploader_avatar: uploader.photo_url || "",
+                uploaded_at: file.uploaded_at,
+                likes: likes,
+                comments_count: comments,
+                is_liked: isLiked
+            };
+        }));
+
+        res.json({ success: true, reels, page });
+    } catch (error) {
+        console.error("Reels feed error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Reels)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -3461,6 +3523,144 @@ app.get("/mini/:userId", (req, res) => {
       padding: 0 4px;
     }
     .selected-user-badge .remove-btn:active { transform: scale(0.9); }
+
+    /* ===== REELS STYLES ===== */
+    .reels-fab {
+      position: fixed;
+      bottom: 170px;
+      right: 20px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff6b6b, #d500f9);
+      border: none;
+      box-shadow: 0 4px 30px rgba(213,0,249,0.5);
+      color: white;
+      cursor: pointer;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+      animation: pulseGlow 2s infinite alternate;
+    }
+    .reels-fab:active { transform: scale(0.9); }
+    @media (max-width: 480px) {
+      .reels-fab { bottom: 150px; right: 16px; width: 54px; height: 54px; }
+    }
+
+    .reels-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: #000;
+      z-index: 400;
+      flex-direction: column;
+    }
+    .reels-overlay.open { display: flex; }
+
+    .reels-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(10px);
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .reels-close {
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0 8px;
+    }
+
+    .reels-container {
+      flex: 1;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      height: 100%;
+      background: #000;
+      scroll-behavior: smooth;
+    }
+    .reels-container::-webkit-scrollbar { display: none; }
+
+    .reel-item {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      scroll-snap-align: start;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    .reel-item video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .reel-item .reel-overlay-ui {
+      position: absolute;
+      bottom: 80px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      color: #fff;
+      pointer-events: none;
+    }
+    .reel-item .reel-overlay-ui .left {
+      pointer-events: auto;
+    }
+    .reel-item .reel-overlay-ui .right {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      pointer-events: auto;
+    }
+    .reel-item .reel-overlay-ui .right button {
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    }
+    .reel-item .reel-overlay-ui .right button span {
+      font-size: 12px;
+    }
+    .reel-item .reel-overlay-ui .user-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .reel-item .reel-overlay-ui .user-info img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+    }
+    .reel-item .reel-overlay-ui .caption {
+      font-size: 14px;
+      line-height: 1.4;
+      max-width: 80%;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    }
   </style>
 </head>
 <body>
@@ -3823,6 +4023,13 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== AI FAB ========== -->
   <button class="ai-fab" id="aiFab">AI</button>
 
+  <!-- ========== REELS FAB ========== -->
+  <button class="reels-fab" id="reelsFab">
+    <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
+      <path d="M18 4v1h-2V4c0-.552.448-1 1-1s1 .448 1 1zm-6 0v1H9V4c0-.552.448-1 1-1s1 .448 1 1zm4 4v1h-2V8c0-.552.448-1 1-1s1 .448 1 1zm-2-5V2c0-.552.448-1 1-1s1 .448 1 1v1h-2zM6 4v1H4V4c0-.552.448-1 1-1s1 .448 1 1zm-2 8V8c0-.552.448-1 1-1s1 .448 1 1v4c0 .552-.448 1-1 1s-1-.448-1-1zm2 6c0 .552-.448 1-1 1s-1-.448-1-1v-1h2v1zm12-4v3c0 .552-.448 1-1 1s-1-.448-1-1v-3c0-.552.448-1 1-1s1 .448 1 1zm-6 1h2v-1h-2v1zm-4 2h4v-1H8v1zm10-1v-2h-2v2h2z"/>
+    </svg>
+  </button>
+
   <!-- ========== AI CHAT OVERLAY ========== -->
   <div class="ai-chat-overlay" id="aiChatOverlay">
     <div class="ai-chat-panel">
@@ -3838,6 +4045,17 @@ app.get("/mini/:userId", (req, res) => {
         <button id="aiSendBtn">Send</button>
         <button id="aiClearBtn" class="ai-clear-btn" title="Clear Memory">🗑️</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ========== REELS OVERLAY ========== -->
+  <div class="reels-overlay" id="reelsOverlay">
+    <div class="reels-header">
+      <span style="font-weight:600; font-size:18px;">🎬 Reels</span>
+      <button class="reels-close" id="reelsClose">✕</button>
+    </div>
+    <div class="reels-container" id="reelsContainer">
+      <!-- Reels injected by JS -->
     </div>
   </div>
 
@@ -5015,6 +5233,176 @@ app.get("/mini/:userId", (req, res) => {
         list.innerHTML = '<div class="empty" style="font-size:11px; padding:4px 0;">Failed to load.</div>';
       }
     }
+
+    // ─── REELS ───
+    let reelsData = [];
+    let currentReelIndex = 0;
+    let reelsPage = 1;
+    let reelsLoading = false;
+    let reelsHasMore = true;
+
+    const reelsFab = document.getElementById('reelsFab');
+    const reelsOverlay = document.getElementById('reelsOverlay');
+    const reelsClose = document.getElementById('reelsClose');
+    const reelsContainer = document.getElementById('reelsContainer');
+
+    reelsFab.addEventListener('click', () => {
+      reelsOverlay.classList.add('open');
+      if (reelsData.length === 0) loadReels(1, true);
+    });
+
+    reelsClose.addEventListener('click', () => {
+      reelsOverlay.classList.remove('open');
+      // Pause all videos
+      document.querySelectorAll('.reel-item video').forEach(v => v.pause());
+    });
+
+    async function loadReels(page, reset = false) {
+      if (reelsLoading) return;
+      reelsLoading = true;
+      try {
+        const res = await fetch(\`/api/reels/feed?userId=\${userId}&page=\${page}&limit=10\`);
+        const data = await res.json();
+        if (data.success) {
+          if (reset) {
+            reelsData = data.reels;
+            reelsContainer.innerHTML = '';
+            reelsPage = page;
+            reelsHasMore = data.reels.length === 10;
+          } else {
+            reelsData = reelsData.concat(data.reels);
+            reelsHasMore = data.reels.length === 10;
+          }
+          renderReels(reset);
+        }
+      } catch (e) {
+        console.error('Reels fetch error:', e);
+      } finally {
+        reelsLoading = false;
+      }
+    }
+
+    function renderReels(reset) {
+      if (reset) reelsContainer.innerHTML = '';
+      reelsData.forEach((reel) => {
+        // Avoid duplicates
+        if (document.getElementById(\`reel-\${reel.file_id}\`)) return;
+        const reelDiv = document.createElement('div');
+        reelDiv.className = 'reel-item';
+        reelDiv.id = \`reel-\${reel.file_id}\`;
+        reelDiv.innerHTML = \`
+          <video src="/stream/\${reel.file_id}" muted playsinline preload="metadata" loop></video>
+          <div class="reel-overlay-ui">
+            <div class="left">
+              <div class="user-info">
+                <img src="\${reel.uploader_avatar || 'https://via.placeholder.com/36'}" alt="avatar">
+                <span style="font-weight:600;">\${reel.uploader_name}</span>
+              </div>
+              <div class="caption">\${reel.caption || reel.file_name || ''}</div>
+            </div>
+            <div class="right">
+              <button class="reel-like-btn" data-fileid="\${reel.file_id}" data-liked="\${reel.is_liked}">
+                <span style="font-size:32px;">\${reel.is_liked ? '❤️' : '🤍'}</span>
+                <span>\${reel.likes || 0}</span>
+              </button>
+              <button class="reel-comment-btn" data-fileid="\${reel.file_id}">
+                <span style="font-size:32px;">💬</span>
+                <span>\${reel.comments_count || 0}</span>
+              </button>
+            </div>
+          </div>
+        \`;
+        reelsContainer.appendChild(reelDiv);
+      });
+
+      // Attach event listeners
+      document.querySelectorAll('.reel-like-btn').forEach(btn => {
+        btn.removeEventListener('click', handleReelLike);
+        btn.addEventListener('click', handleReelLike);
+      });
+      document.querySelectorAll('.reel-comment-btn').forEach(btn => {
+        btn.removeEventListener('click', handleReelComment);
+        btn.addEventListener('click', handleReelComment);
+      });
+
+      // Setup auto-play and infinite scroll
+      setupReelIntersection();
+    }
+
+    function setupReelIntersection() {
+      const videos = document.querySelectorAll('.reel-item video');
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const video = entry.target;
+          if (entry.isIntersecting) {
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+        });
+      }, { threshold: 0.6 });
+      videos.forEach(v => observer.observe(v));
+
+      // Infinite scroll
+      const lastReel = reelsContainer.lastElementChild;
+      if (lastReel) {
+        const scrollObserver = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting && reelsHasMore && !reelsLoading) {
+            loadReels(++reelsPage, false);
+          }
+        }, { root: reelsContainer, threshold: 0.1 });
+        scrollObserver.observe(lastReel);
+      }
+    }
+
+    async function handleReelLike(e) {
+      const btn = e.currentTarget;
+      const fileId = btn.dataset.fileid;
+      const liked = btn.dataset.liked === 'true';
+      const action = liked ? 'remove' : 'like';
+      try {
+        const res = await fetch('/api/like', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: parseInt(fileId), action })
+        });
+        const data = await res.json();
+        if (data.success) {
+          const newLiked = data.action === 'liked';
+          btn.dataset.liked = newLiked;
+          btn.innerHTML = \`<span style="font-size:32px;">\${newLiked ? '❤️' : '🤍'}</span><span>\${data.likes}</span>\`;
+          tg.HapticFeedback.impactOccurred('light');
+        }
+      } catch (e) {}
+    }
+
+    async function handleReelComment(e) {
+      const fileId = e.currentTarget.dataset.fileid;
+      const comment = prompt('Write a comment:');
+      if (comment && comment.trim()) {
+        try {
+          const res = await fetch('/api/add-comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: parseInt(fileId), comment: comment.trim() })
+          });
+          if (res.ok) {
+            tg.HapticFeedback.notificationOccurred('success');
+            const btn = e.currentTarget;
+            const countSpan = btn.querySelector('span:last-child');
+            const currentCount = parseInt(countSpan.textContent) || 0;
+            countSpan.textContent = currentCount + 1;
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Close overlay on outside click
+    reelsOverlay.addEventListener('click', (e) => {
+      if (e.target === reelsOverlay) {
+        reelsOverlay.classList.remove('open');
+      }
+    });
 
     // ─── INIT ───
     async function init() {
