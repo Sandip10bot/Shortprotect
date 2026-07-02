@@ -27,7 +27,8 @@ let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollec
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection;
 // --- NEW COLLECTIONS FOR REELS ---
-let filesCollection, userLikesCollection, commentsCollection;
+let userLikesCollection, commentsCollection;
+let reelsCollection;  
 
 async function connectDB() {
   try {
@@ -51,7 +52,7 @@ async function connectDB() {
     withdrawsCollection = db.collection("withdraws");
     paymentChatCollection = db.collection("payment_chats");
     // --- new ---
-    filesCollection = db.collection("files");
+    reelsCollection = db.collection("reels");
     userLikesCollection = db.collection("user_likes");
     commentsCollection = db.collection("comments");
     
