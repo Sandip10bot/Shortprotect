@@ -2430,8 +2430,105 @@ app.get("/mini/:userId", (req, res) => {
       text-transform: uppercase;
     }
     .widget-sub { font-size: 12px; color: #ea80fc; margin-top: 4px; font-weight: 500; }
-    .w-premium { border: 0.5px solid rgba(255,214,10,0.2); background: rgba(255,214,10,0.04); }
-    .w-premium .widget-value { color: #ffd60a; }
+    
+    /* Premium Widget Enhanced */
+    .w-premium { 
+      border: 0.5px solid rgba(255,214,10,0.2); 
+      background: linear-gradient(135deg, rgba(255,214,10,0.08), rgba(213,0,249,0.08));
+      position: relative;
+      overflow: hidden;
+    }
+    .w-premium::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at center, rgba(255,214,10,0.03), transparent 70%);
+      animation: premiumGlow 4s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes premiumGlow {
+      0% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+      100% { transform: translate(5%, 5%) scale(1.1); opacity: 1; }
+    }
+    .w-premium .widget-value { color: #ffd60a; position: relative; z-index: 1; }
+    .w-premium .widget-title { color: rgba(255,214,10,0.7); }
+    
+    .premium-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, #ffd60a, #f59e0b);
+      padding: 2px 10px;
+      border-radius: 30px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #000;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      box-shadow: 0 0 20px rgba(255,214,10,0.3);
+    }
+    
+    .upgrade-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #ffd60a, #f59e0b);
+      color: #000;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 30px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-decoration: none;
+      box-shadow: 0 4px 15px rgba(255,214,10,0.4);
+    }
+    .upgrade-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 25px rgba(255,214,10,0.6);
+    }
+    .upgrade-btn:active {
+      transform: scale(0.95);
+    }
+
+    /* Search Credits Widget Enhanced */
+    .w-search {
+      border: 0.5px solid rgba(10,132,255,0.2);
+      background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05));
+      position: relative;
+      overflow: hidden;
+    }
+    .w-search .widget-value { color: #0a84ff; }
+    .w-search .widget-title { color: rgba(10,132,255,0.7); }
+    
+    .refill-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #0a84ff, #5e5ce6);
+      color: #fff;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 30px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-decoration: none;
+      box-shadow: 0 4px 15px rgba(10,132,255,0.4);
+    }
+    .refill-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 25px rgba(10,132,255,0.6);
+    }
+    .refill-btn:active {
+      transform: scale(0.95);
+    }
+
     .w-bank { border: 0.5px solid rgba(48,209,88,0.2); background: rgba(48,209,88,0.04); }
     .w-bank .widget-value { color: #30d158; }
 
@@ -3399,19 +3496,39 @@ app.get("/mini/:userId", (req, res) => {
           </span>
         </div>
       </div>
+      <!-- Premium Widget - Enhanced -->
       <div class="widget w-premium">
-        <div style="display:flex; align-items:center; gap:6px;">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
+        <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
+            <span class="widget-title" style="font-size:10px; margin:0;">Premium</span>
+          </div>
+          <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium')">Upgrade</a>
         </div>
-        <div class="widget-title">Premium</div>
-        <div class="widget-value" id="ui-prem-status" style="color:#ffffff;">Free</div>
-        <div class="widget-sub" id="ui-prem-days">Upgrade</div>
+        <div class="widget-value" style="font-size:20px; margin-top:4px;">
+          <span id="ui-prem-status">Free</span>
+          <span id="ui-prem-days" style="font-size:12px; color:rgba(255,255,255,0.3); font-weight:400; margin-left:4px;"></span>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
+          <span id="ui-prem-plan">No active plan</span>
+        </div>
       </div>
-      <div class="widget">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="#0a84ff"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-        <div class="widget-title">Search Credits</div>
-        <div class="widget-value"><span id="ui-credits" style="color:#0a84ff;">0</span><span style="font-size:16px; color:rgba(255,255,255,0.2)">/5</span></div>
-        <div class="widget-sub">Auto-Refill</div>
+      <!-- Search Credits Widget - Enhanced -->
+      <div class="widget w-search">
+        <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="#0a84ff"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <span class="widget-title" style="font-size:10px; margin:0;">Search Credits</span>
+          </div>
+          <a href="https://t.me/MythoSerialBot?start=get" target="_blank" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium')">Refill</a>
+        </div>
+        <div class="widget-value" style="font-size:22px; margin-top:4px;">
+          <span id="ui-credits">0</span>
+          <span style="font-size:14px; color:rgba(255,255,255,0.2)">/5</span>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
+          Auto-refills daily
+        </div>
       </div>
     </div>
 
@@ -3853,12 +3970,15 @@ app.get("/mini/:userId", (req, res) => {
         badge.style.color = '#ff453a';
       }
       
+      // Premium widget update
       if (state.premium.active) {
-        document.getElementById('ui-prem-status').innerText = state.premium.plan;
-        document.getElementById('ui-prem-days').innerText = state.premium.daysLeft + ' Days Left';
+        document.getElementById('ui-prem-status').innerText = state.premium.plan || 'Premium';
+        document.getElementById('ui-prem-days').innerText = state.premium.daysLeft + 'd left';
+        document.getElementById('ui-prem-plan').innerText = 'Active subscription';
       } else {
         document.getElementById('ui-prem-status').innerText = 'Free';
-        document.getElementById('ui-prem-days').innerText = 'Upgrade';
+        document.getElementById('ui-prem-days').innerText = '';
+        document.getElementById('ui-prem-plan').innerText = 'No active plan';
       }
       
       document.getElementById('ui-bank-invest').innerText = state.bank.invested.toLocaleString() + ' pts';
