@@ -2576,7 +2576,7 @@ app.get('/reel-stream/:fileId', async (req, res) => {
     // Forward to the main stream endpoint with proper headers
     // The stream endpoint is at /stream/{message_id}
     // We need to proxy the request with proper headers
-    const streamUrl = `http://localhost:8080/stream/${fileId}`;
+    const streamUrl = `http://mythobot.koyeb.app:3000/stream/${fileId}`;
     
     // Get the original request headers and forward them
     const headers = {
