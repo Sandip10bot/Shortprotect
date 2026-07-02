@@ -2255,10 +2255,8 @@ app.get("/api/chant/leaderboard", async (req, res) => {
     }
 });
 
-// ==========================================
-// 🎬 MYTHOREELS – API FEED
-// ==========================================
 
+// Replace the /api/reels/feed endpoint with:
 app.get("/api/reels/feed", async (req, res) => {
     try {
         const userId = parseInt(req.query.userId) || 0;
@@ -2266,16 +2264,16 @@ app.get("/api/reels/feed", async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        // Get videos from files collection (you may filter by mime_type if needed)
-        const files = await filesCollection
+        // Query only the reels collection
+        const reels = await reelsCollection
             .find({})
             .sort({ uploaded_at: -1 })
             .skip(skip)
             .limit(limit)
             .toArray();
 
-        // Get user details for all uploaders
-        const userIds = files.map(f => f.uploader_user_id).filter(id => id);
+        // Get uploader details from users collection
+        const userIds = reels.map(r => r.uploader_user_id).filter(id => id);
         let userMap = {};
         if (userIds.length) {
             const users = await usersCollection
@@ -2285,28 +2283,28 @@ app.get("/api/reels/feed", async (req, res) => {
             users.forEach(u => userMap[u.user_id] = u);
         }
 
-        // Enrich each reel with likes, comments, and user info
-        const reels = await Promise.all(files.map(async (file) => {
-            const fileId = file.file_id;
+        // Enrich with likes, comments, and user info
+        const enriched = await Promise.all(reels.map(async (reel) => {
+            const fileId = reel.file_id;
             const likes = await userLikesCollection.countDocuments({ file_id: fileId, like_type: "like" });
             const comments = await commentsCollection.countDocuments({ file_id: fileId });
             const isLiked = userId ? await userLikesCollection.countDocuments({ user_id: userId, file_id: fileId, like_type: "like" }) > 0 : false;
-            const uploader = userMap[file.uploader_user_id] || {};
+            const uploader = userMap[reel.uploader_user_id] || {};
             return {
                 file_id: fileId,
-                file_name: file.file_name || "Untitled",
-                caption: file.caption || "",
-                uploader_user_id: file.uploader_user_id,
-                uploader_name: uploader.first_name || uploader.username || `User ${file.uploader_user_id}`,
+                file_name: reel.file_name || "Untitled",
+                caption: reel.caption || "",
+                uploader_user_id: reel.uploader_user_id,
+                uploader_name: uploader.first_name || uploader.username || `User ${reel.uploader_user_id}`,
                 uploader_avatar: uploader.photo_url || "",
-                uploaded_at: file.uploaded_at,
-                likes: likes,
+                uploaded_at: reel.uploaded_at,
+                likes,
                 comments_count: comments,
                 is_liked: isLiked
             };
         }));
 
-        res.json({ success: true, reels, page });
+        res.json({ success: true, reels: enriched, page });
     } catch (error) {
         console.error("Reels feed error:", error);
         res.status(500).json({ success: false, error: error.message });
