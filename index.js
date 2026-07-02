@@ -3527,7 +3527,7 @@ app.get("/mini/:userId", (req, res) => {
           <span style="font-size:14px; color:rgba(255,255,255,0.2)">/5</span>
         </div>
         <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
-          Auto-refills daily
+          Refill With /get
         </div>
       </div>
     </div>
