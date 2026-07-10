@@ -27,13 +27,27 @@ const io = new Server(server, {
 // ========================
 // MONGODB SETUP
 // ========================
+// ========================
+// MONGODB SETUP WITH RETRY LOGIC
+// ========================
 const MONGO_URI = process.env.DATABASE_URI;
 if (!MONGO_URI) {
   console.error("❌ Missing DATABASE_URI in environment variables");
   process.exit(1);
 }
 
-const client = new MongoClient(MONGO_URI);
+// MongoDB connection options for better reliability
+const mongoOptions = {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
+  maxPoolSize: 10,
+  minPoolSize: 2,
+  retryWrites: true,
+  retryReads: true,
+};
+
+const client = new MongoClient(MONGO_URI, mongoOptions);
 let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollection;
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
@@ -41,35 +55,97 @@ let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection;
 let plotsCollection; // Mytholand plots collection
 
+// Collection ready flag
+let collectionsReady = false;
+
 async function connectDB() {
-  try {
-    await client.connect();
-    const db = client.db("Mytho");
-    
-    doubleCollection = db.collection("double_points");
-    urlShortenerCollection = db.collection("url_shortener");
-    maskCollection = db.collection("masked_links");
-    searchAdsCollection = db.collection("search_ads");
-    scratchCollection = db.collection("scratch_cards");
-    usersCollection = db.collection("users");
-    mpHistoryCollection = db.collection("mphistory");
-    userStatsCollection = db.collection("user_stats");
-    bankCollection = db.collection("bank");
-    couponsCollection = db.collection("coupons");
-    searchLimitCollection = db.collection("search_limits");
-    paymentLimitCollection = db.collection("payment_limits");
-    ipVerificationCollection = db.collection("ip_verification");
-    ratingsCollection = db.collection("ratings");
-    withdrawsCollection = db.collection("withdraws");
-    paymentChatCollection = db.collection("payment_chats");
-    plotsCollection = db.collection("mytholand_plots");
-    
-    console.log("✅ MongoDB connected for all collections");
-  } catch (error) {
-    console.error("❌ MongoDB connection error:", error.message);
+  let retries = 5;
+  let delay = 1000;
+  
+  while (retries > 0) {
+    try {
+      console.log(`🔄 Attempting MongoDB connection... (${retries} retries left)`);
+      
+      await client.connect();
+      console.log("✅ MongoDB connected successfully");
+      
+      const db = client.db("Mytho");
+      
+      // Initialize all collections
+      doubleCollection = db.collection("double_points");
+      urlShortenerCollection = db.collection("url_shortener");
+      maskCollection = db.collection("masked_links");
+      searchAdsCollection = db.collection("search_ads");
+      scratchCollection = db.collection("scratch_cards");
+      usersCollection = db.collection("users");
+      mpHistoryCollection = db.collection("mphistory");
+      userStatsCollection = db.collection("user_stats");
+      bankCollection = db.collection("bank");
+      couponsCollection = db.collection("coupons");
+      searchLimitCollection = db.collection("search_limits");
+      paymentLimitCollection = db.collection("payment_limits");
+      ipVerificationCollection = db.collection("ip_verification");
+      ratingsCollection = db.collection("ratings");
+      withdrawsCollection = db.collection("withdraws");
+      paymentChatCollection = db.collection("payment_chats");
+      plotsCollection = db.collection("mytholand_plots");
+      
+      collectionsReady = true;
+      console.log("✅ All collections initialized");
+      
+      // Create indexes for better performance
+      try {
+        await plotsCollection.createIndex({ user_id: 1 }, { unique: true });
+        await plotsCollection.createIndex({ x: 1, y: 1 }, { unique: true });
+        console.log("✅ Database indexes created");
+      } catch (indexError) {
+        console.warn("⚠️ Index creation warning:", indexError.message);
+      }
+      
+      return true;
+      
+    } catch (error) {
+      console.error(`❌ MongoDB connection error: ${error.message}`);
+      
+      if (error.message.includes('Authentication failed')) {
+        console.error('❌ MongoDB Authentication failed. Please check your username and password.');
+        process.exit(1);
+      }
+      
+      retries--;
+      if (retries === 0) {
+        console.error('❌ Failed to connect to MongoDB after multiple attempts.');
+        console.error('⚠️ Server will continue running but some features may not work.');
+        return false;
+      }
+      
+      console.log(`⏳ Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
+    }
   }
+  return false;
 }
+
+// Connect with retry
 connectDB();
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  const status = {
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+    mongodb: collectionsReady ? 'connected' : 'disconnected'
+  };
+  res.status(collectionsReady ? 200 : 503).json(status);
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🛑 Shutting down gracefully...');
+  await client.close();
+  process.exit(0);
+});
 
 // ==========================================
 // MYTHOLAND GAME SCHEMAS & FUNCTIONS
