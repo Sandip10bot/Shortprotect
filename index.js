@@ -1,12 +1,10 @@
 // ============================================================
-// index.js – Premium Frontend with Mytholand Game Integration
+// index.js – Premium Frontend (No Emojis, All SVG, Enhanced UI)
 // ============================================================
 
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
-import { createServer } from "http";
-import { Server } from "socket.io";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,21 +12,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // ========================
-// SOCKET.IO SETUP
-// ========================
-const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
-
-// ========================
 // MONGODB SETUP
-// ========================
-// ========================
-// MONGODB SETUP WITH RETRY LOGIC
 // ========================
 const MONGO_URI = process.env.DATABASE_URI;
 if (!MONGO_URI) {
@@ -36,534 +20,46 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-// MongoDB connection options for better reliability
-const mongoOptions = {
-  serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 10000,
-  socketTimeoutMS: 45000,
-  maxPoolSize: 10,
-  minPoolSize: 2,
-  retryWrites: true,
-  retryReads: true,
-};
-
-const client = new MongoClient(MONGO_URI, mongoOptions);
+const client = new MongoClient(MONGO_URI);
 let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollection;
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection;
-let plotsCollection; // Mytholand plots collection
 
-// Collection ready flag
-let collectionsReady = false;
 
 async function connectDB() {
-  let retries = 5;
-  let delay = 1000;
-  
-  while (retries > 0) {
-    try {
-      console.log(`🔄 Attempting MongoDB connection... (${retries} retries left)`);
-      
-      await client.connect();
-      console.log("✅ MongoDB connected successfully");
-      
-      const db = client.db("Mytho");
-      
-      // Initialize all collections
-      doubleCollection = db.collection("double_points");
-      urlShortenerCollection = db.collection("url_shortener");
-      maskCollection = db.collection("masked_links");
-      searchAdsCollection = db.collection("search_ads");
-      scratchCollection = db.collection("scratch_cards");
-      usersCollection = db.collection("users");
-      mpHistoryCollection = db.collection("mphistory");
-      userStatsCollection = db.collection("user_stats");
-      bankCollection = db.collection("bank");
-      couponsCollection = db.collection("coupons");
-      searchLimitCollection = db.collection("search_limits");
-      paymentLimitCollection = db.collection("payment_limits");
-      ipVerificationCollection = db.collection("ip_verification");
-      ratingsCollection = db.collection("ratings");
-      withdrawsCollection = db.collection("withdraws");
-      paymentChatCollection = db.collection("payment_chats");
-      plotsCollection = db.collection("mytholand_plots");
-      
-      collectionsReady = true;
-      console.log("✅ All collections initialized");
-      
-      // Create indexes for better performance
-      try {
-        await plotsCollection.createIndex({ user_id: 1 }, { unique: true });
-        await plotsCollection.createIndex({ x: 1, y: 1 }, { unique: true });
-        console.log("✅ Database indexes created");
-      } catch (indexError) {
-        console.warn("⚠️ Index creation warning:", indexError.message);
-      }
-      
-      return true;
-      
-    } catch (error) {
-      console.error(`❌ MongoDB connection error: ${error.message}`);
-      
-      if (error.message.includes('Authentication failed')) {
-        console.error('❌ MongoDB Authentication failed. Please check your username and password.');
-        process.exit(1);
-      }
-      
-      retries--;
-      if (retries === 0) {
-        console.error('❌ Failed to connect to MongoDB after multiple attempts.');
-        console.error('⚠️ Server will continue running but some features may not work.');
-        return false;
-      }
-      
-      console.log(`⏳ Retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2; // Exponential backoff
-    }
+  try {
+    await client.connect();
+    const db = client.db("Mytho");
+    
+    doubleCollection = db.collection("double_points");
+    urlShortenerCollection = db.collection("url_shortener");
+    maskCollection = db.collection("masked_links");
+    searchAdsCollection = db.collection("search_ads");
+    scratchCollection = db.collection("scratch_cards");
+    usersCollection = db.collection("users");
+    mpHistoryCollection = db.collection("mphistory");
+    userStatsCollection = db.collection("user_stats");
+    bankCollection = db.collection("bank");
+    couponsCollection = db.collection("coupons");
+    searchLimitCollection = db.collection("search_limits");
+    paymentLimitCollection = db.collection("payment_limits");
+    ipVerificationCollection = db.collection("ip_verification");
+    ratingsCollection = db.collection("ratings");
+    withdrawsCollection = db.collection("withdraws");
+    paymentChatCollection = db.collection("payment_chats");
+    
+    
+    console.log("✅ MongoDB connected for all collections");
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error.message);
   }
-  return false;
 }
-
-// Connect with retry
 connectDB();
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  const status = {
-    uptime: process.uptime(),
-    timestamp: Date.now(),
-    mongodb: collectionsReady ? 'connected' : 'disconnected'
-  };
-  res.status(collectionsReady ? 200 : 503).json(status);
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('🛑 Shutting down gracefully...');
-  await client.close();
-  process.exit(0);
-});
-
-// ==========================================
-// MYTHOLAND GAME SCHEMAS & FUNCTIONS
-// ==========================================
-
-// Building tier definitions
-const BUILDING_TIERS = [
-  { level: 0, name: "Ruins", sprite: "ruins", woodCost: 0, goldCost: 0, multiplier: 0.5, waterCost: 1 },
-  { level: 1, name: "Hut", sprite: "hut", woodCost: 10, goldCost: 0, multiplier: 1, waterCost: 2 },
-  { level: 2, name: "Stone House", sprite: "stone_house", woodCost: 25, goldCost: 5, multiplier: 1.5, waterCost: 3 },
-  { level: 3, name: "Wooden Mansion", sprite: "wooden_mansion", woodCost: 50, goldCost: 15, multiplier: 2.5, waterCost: 4 },
-  { level: 4, name: "Stone Palace", sprite: "stone_palace", woodCost: 100, goldCost: 40, multiplier: 4, waterCost: 5 },
-  { level: 5, name: "Mythic Citadel", sprite: "mythic_citadel", woodCost: 250, goldCost: 100, multiplier: 7, waterCost: 6 }
-];
-
-function getRandomPlot() {
-  return {
-    x: Math.floor(Math.random() * 10000) - 5000,
-    y: Math.floor(Math.random() * 10000) - 5000
-  };
-}
-
-function getChunkKey(x, y) {
-  const chunkX = Math.floor(x / 10);
-  const chunkY = Math.floor(y / 10);
-  return `${chunkX}_${chunkY}`;
-}
-
-function getResourceRate(buildingLevel) {
-  const tier = BUILDING_TIERS.find(t => t.level === buildingLevel) || BUILDING_TIERS[0];
-  return tier.multiplier;
-}
-
-// Initialize or get user plot
-async function getOrCreatePlot(userId) {
-  let plot = await plotsCollection.findOne({ user_id: userId });
-  if (!plot) {
-    let coords;
-    let attempts = 0;
-    do {
-      coords = getRandomPlot();
-      attempts++;
-    } while (attempts < 20 && await plotsCollection.findOne({ x: coords.x, y: coords.y }));
-    
-    plot = {
-      user_id: userId,
-      x: coords.x,
-      y: coords.y,
-      building_level: 0,
-      resources: {
-        water: 10,
-        wood: 0,
-        gold: 0
-      },
-      last_claim: new Date(),
-      created_at: new Date()
-    };
-    await plotsCollection.insertOne(plot);
-  }
-  return plot;
-}
-
-// Calculate resource generation since last claim
-function calculateResources(plot) {
-  const tier = BUILDING_TIERS.find(t => t.level === plot.building_level) || BUILDING_TIERS[0];
-  const rate = tier.multiplier;
-  const now = Date.now();
-  const lastClaim = plot.last_claim ? new Date(plot.last_claim).getTime() : now;
-  const hours = Math.min((now - lastClaim) / (1000 * 60 * 60), 24); // Max 24 hours
-  
-  // Water consumption: tier.waterCost per hour
-  const waterConsumed = hours * tier.waterCost;
-  const waterLeft = Math.max(0, plot.resources.water - waterConsumed);
-  
-  // If water is depleted, no resources generated
-  const isExhausted = waterLeft <= 0;
-  const generationMultiplier = isExhausted ? 0 : 1;
-  
-  const woodGenerated = Math.floor(hours * 5 * rate * generationMultiplier);
-  const goldGenerated = Math.floor(hours * 0.5 * rate * generationMultiplier);
-  
-  return {
-    waterConsumed,
-    waterLeft,
-    isExhausted,
-    woodGenerated,
-    goldGenerated,
-    hours
-  };
-}
-
 // ========================
-// SOCKET.IO ARCHITECTURE
-// ========================
-
-// Store active user rooms and chunk subscriptions
-const userSockets = new Map(); // userId -> socketId
-const socketUsers = new Map(); // socketId -> userId
-const chunkRooms = new Map(); // chunkKey -> Set of userIds
-
-// Broadcast to all users in a chunk
-function broadcastToChunk(chunkKey, event, data) {
-  const room = io.sockets.adapter.rooms.get(chunkKey);
-  if (room) {
-    io.to(chunkKey).emit(event, data);
-  }
-}
-
-// Update chunk membership for a user
-async function updateChunkMembership(socket, userId, viewportChunks) {
-  const socketId = socket.id;
-  
-  // Get current chunks for this user
-  const currentChunks = [];
-  for (const [chunkKey, users] of chunkRooms.entries()) {
-    if (users.has(userId)) {
-      currentChunks.push(chunkKey);
-    }
-  }
-  
-  // Leave chunks not in new viewport
-  for (const chunkKey of currentChunks) {
-    if (!viewportChunks.includes(chunkKey)) {
-      socket.leave(chunkKey);
-      const chunkUsers = chunkRooms.get(chunkKey);
-      if (chunkUsers) {
-        chunkUsers.delete(userId);
-        if (chunkUsers.size === 0) {
-          chunkRooms.delete(chunkKey);
-        }
-      }
-    }
-  }
-  
-  // Join new chunks
-  for (const chunkKey of viewportChunks) {
-    if (!currentChunks.includes(chunkKey)) {
-      socket.join(chunkKey);
-      if (!chunkRooms.has(chunkKey)) {
-        chunkRooms.set(chunkKey, new Set());
-      }
-      chunkRooms.get(chunkKey).add(userId);
-    }
-  }
-}
-
-// Socket.io connection handler
-io.on("connection", (socket) => {
-  console.log("🔌 New socket connection:", socket.id);
-  
-  let currentUserId = null;
-  let currentChunks = [];
-  
-  socket.on("game_init", async (data) => {
-    try {
-      const { userId, viewportX, viewportY } = data;
-      const uid = parseInt(userId);
-      if (isNaN(uid)) return;
-      
-      currentUserId = uid;
-      userSockets.set(uid, socket.id);
-      socketUsers.set(socket.id, uid);
-      
-      // Get or create plot
-      const plot = await getOrCreatePlot(uid);
-      
-      // Calculate viewport chunks (5x5 grid around player)
-      const chunkX = Math.floor(plot.x / 10);
-      const chunkY = Math.floor(plot.y / 10);
-      const viewportChunks = [];
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = -2; dy <= 2; dy++) {
-          viewportChunks.push(`${chunkX + dx}_${chunkY + dy}`);
-        }
-      }
-      
-      currentChunks = viewportChunks;
-      await updateChunkMembership(socket, uid, viewportChunks);
-      
-      // Send initial plot data
-      const resources = calculateResources(plot);
-      socket.emit("game_state", {
-        plot: {
-          x: plot.x,
-          y: plot.y,
-          building_level: plot.building_level,
-          resources: {
-            water: Math.floor(resources.waterLeft),
-            wood: plot.resources.wood + resources.woodGenerated,
-            gold: plot.resources.gold + resources.goldGenerated
-          },
-          tier: BUILDING_TIERS[plot.building_level] || BUILDING_TIERS[0],
-          isExhausted: resources.isExhausted
-        },
-        chunks: viewportChunks
-      });
-      
-      // Broadcast user presence to nearby chunks
-      const user = await usersCollection.findOne({ user_id: uid });
-      if (user) {
-        broadcastToChunk(`${chunkX}_${chunkY}`, "player_joined", {
-          userId: uid,
-          name: user.first_name || user.username || `User ${uid}`,
-          photo: user.photo_url || null,
-          x: plot.x,
-          y: plot.y,
-          buildingLevel: plot.building_level
-        });
-      }
-      
-    } catch (error) {
-      console.error("Game init error:", error);
-      socket.emit("game_error", { message: "Failed to initialize game" });
-    }
-  });
-  
-  // Handle building upgrade
-  socket.on("upgrade_building", async (data) => {
-    try {
-      const { userId } = data;
-      const uid = parseInt(userId);
-      if (uid !== currentUserId) return;
-      
-      const plot = await plotsCollection.findOne({ user_id: uid });
-      if (!plot) return;
-      
-      const currentTier = BUILDING_TIERS[plot.building_level];
-      const nextTier = BUILDING_TIERS[plot.building_level + 1];
-      if (!nextTier) {
-        socket.emit("upgrade_result", { success: false, message: "Already at max level!" });
-        return;
-      }
-      
-      // Check resources
-      if (plot.resources.wood < nextTier.woodCost) {
-        socket.emit("upgrade_result", { success: false, message: `Need ${nextTier.woodCost} wood` });
-        return;
-      }
-      if (plot.resources.gold < nextTier.goldCost) {
-        socket.emit("upgrade_result", { success: false, message: `Need ${nextTier.goldCost} gold` });
-        return;
-      }
-      
-      // Deduct resources
-      await plotsCollection.updateOne(
-        { user_id: uid },
-        {
-          $inc: {
-            "resources.wood": -nextTier.woodCost,
-            "resources.gold": -nextTier.goldCost
-          },
-          $set: { building_level: plot.building_level + 1 }
-        }
-      );
-      
-      const updatedPlot = await plotsCollection.findOne({ user_id: uid });
-      socket.emit("upgrade_result", { 
-        success: true, 
-        message: `Upgraded to ${nextTier.name}!`,
-        newLevel: updatedPlot.building_level,
-        tier: nextTier
-      });
-      
-      // Broadcast to nearby chunks
-      const chunkKey = getChunkKey(updatedPlot.x, updatedPlot.y);
-      broadcastToChunk(chunkKey, "building_upgraded", {
-        userId: uid,
-        newLevel: updatedPlot.building_level,
-        x: updatedPlot.x,
-        y: updatedPlot.y,
-        sprite: nextTier.sprite
-      });
-      
-    } catch (error) {
-      console.error("Upgrade error:", error);
-      socket.emit("upgrade_result", { success: false, message: "Server error" });
-    }
-  });
-  
-  // Handle resource claim
-  socket.on("claim_resources", async (data) => {
-    try {
-      const { userId } = data;
-      const uid = parseInt(userId);
-      if (uid !== currentUserId) return;
-      
-      const plot = await plotsCollection.findOne({ user_id: uid });
-      if (!plot) return;
-      
-      const resources = calculateResources(plot);
-      
-      // Update resources
-      const newWood = plot.resources.wood + resources.woodGenerated;
-      const newGold = plot.resources.gold + resources.goldGenerated;
-      const newWater = Math.floor(resources.waterLeft);
-      
-      await plotsCollection.updateOne(
-        { user_id: uid },
-        {
-          $set: {
-            "resources.water": newWater,
-            "resources.wood": newWood,
-            "resources.gold": newGold,
-            last_claim: new Date()
-          }
-        }
-      );
-      
-      socket.emit("claim_result", {
-        success: true,
-        water: newWater,
-        wood: newWood,
-        gold: newGold,
-        generated: {
-          wood: resources.woodGenerated,
-          gold: resources.goldGenerated
-        }
-      });
-      
-    } catch (error) {
-      console.error("Claim error:", error);
-      socket.emit("claim_result", { success: false, message: "Server error" });
-    }
-  });
-  
-  // Handle water consumption (drink water)
-  socket.on("drink_water", async (data) => {
-    try {
-      const { userId } = data;
-      const uid = parseInt(userId);
-      if (uid !== currentUserId) return;
-      
-      const plot = await plotsCollection.findOne({ user_id: uid });
-      if (!plot) return;
-      
-      if (plot.resources.water < 2) {
-        socket.emit("drink_result", { success: false, message: "Not enough water!" });
-        return;
-      }
-      
-      await plotsCollection.updateOne(
-        { user_id: uid },
-        { $inc: { "resources.water": -2 } }
-      );
-      
-      const updatedPlot = await plotsCollection.findOne({ user_id: uid });
-      socket.emit("drink_result", {
-        success: true,
-        water: updatedPlot.resources.water,
-        message: "Refreshed! +2 water consumed"
-      });
-      
-    } catch (error) {
-      console.error("Drink error:", error);
-      socket.emit("drink_result", { success: false, message: "Server error" });
-    }
-  });
-  
-  // Handle movement (viewport change)
-  socket.on("move_viewport", async (data) => {
-    try {
-      const { userId, viewportX, viewportY } = data;
-      const uid = parseInt(userId);
-      if (uid !== currentUserId) return;
-      
-      const plot = await plotsCollection.findOne({ user_id: uid });
-      if (!plot) return;
-      
-      const chunkX = Math.floor(viewportX / 10);
-      const chunkY = Math.floor(viewportY / 10);
-      const viewportChunks = [];
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = -2; dy <= 2; dy++) {
-          viewportChunks.push(`${chunkX + dx}_${chunkY + dy}`);
-        }
-      }
-      
-      currentChunks = viewportChunks;
-      await updateChunkMembership(socket, uid, viewportChunks);
-      
-      socket.emit("viewport_updated", { chunks: viewportChunks });
-      
-    } catch (error) {
-      console.error("Viewport move error:", error);
-    }
-  });
-  
-  // Handle disconnection
-  socket.on("disconnect", () => {
-    console.log("🔌 Socket disconnected:", socket.id);
-    const userId = socketUsers.get(socket.id);
-    if (userId) {
-      userSockets.delete(userId);
-      socketUsers.delete(socket.id);
-      
-      // Remove from chunks
-      for (const [chunkKey, users] of chunkRooms.entries()) {
-        if (users.has(userId)) {
-          users.delete(userId);
-          if (users.size === 0) {
-            chunkRooms.delete(chunkKey);
-          }
-        }
-      }
-      
-      // Broadcast player left
-      plotsCollection.findOne({ user_id: userId }).then(plot => {
-        if (plot) {
-          const chunkKey = getChunkKey(plot.x, plot.y);
-          broadcastToChunk(chunkKey, "player_left", { userId });
-        }
-      }).catch(() => {});
-    }
-  });
-});
-
-// ========================
-// GLOBAL THEME
+// GLOBAL THEME (used by other pages)
 // ========================
 const THEME_CSS = `
   <style>
@@ -699,900 +195,202 @@ function base62_decode(encoded) {
     }
 }
 
-app.get("/mytholand/:userId", async (req, res) => {
-    const userId = req.params.userId;
-    
-    // Initialize plot for user
-    const uid = parseInt(userId);
-    if (!isNaN(uid)) {
-        await getOrCreatePlot(uid);
-    }
-    
+// ========================
+// THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
+// ========================
+function renderAntiBypassPage(res, targetUrl) {
+    const b64Url = Buffer.from(targetUrl).toString('base64');
     res.send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mytholand</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0a0014;
-            overflow: hidden;
-            font-family: 'Segoe UI', sans-serif;
-            height: 100vh;
-            width: 100vw;
-            touch-action: none;
-        }
-        #game-container {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-        }
-        #game-canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
-        }
-        #ui-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
-        #top-hud {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            right: 10px;
-            display: flex;
-            justify-content: space-between;
-            pointer-events: auto;
-            z-index: 10;
-            flex-wrap: wrap;
-            gap: 4px;
-        }
-        .hud-item {
-            background: rgba(10, 0, 20, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 12px;
-            padding: 6px 12px;
-            color: #fff;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-        }
-        .hud-item .icon { font-size: 16px; }
-        .hud-item .value { font-weight: 600; color: #fff; }
-        .hud-item .water { color: #4fc3f7; }
-        .hud-item .wood { color: #a1887f; }
-        .hud-item .gold { color: #ffd54f; }
-        
-        #bottom-hud {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 10px;
-            pointer-events: auto;
-            z-index: 10;
-            background: rgba(10, 0, 20, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 16px;
-            padding: 8px 12px;
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        .action-btn {
-            background: linear-gradient(135deg, #d500f9, #651fff);
-            border: none;
-            color: #fff;
-            padding: 6px 14px;
-            border-radius: 10px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            pointer-events: auto;
-            transition: transform 0.15s;
-            white-space: nowrap;
-        }
-        .action-btn:active { transform: scale(0.92); }
-        .action-btn.wood-btn { background: linear-gradient(135deg, #8d6e63, #4e342e); }
-        .action-btn.gold-btn { background: linear-gradient(135deg, #ffd54f, #f9a825); color: #1a1a1a; }
-        .action-btn.water-btn { background: linear-gradient(135deg, #4fc3f7, #0288d1); }
-        
-        #building-info {
-            position: absolute;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(10, 0, 20, 0.8);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 12px;
-            padding: 8px 16px;
-            color: #fff;
-            font-size: 12px;
-            text-align: center;
-            pointer-events: auto;
-            z-index: 10;
-            min-width: 150px;
-        }
-        #building-info .level { color: #ea80fc; font-weight: 600; }
-        #building-info .name { color: #ffd54f; }
-        
-        #status-toast {
-            position: absolute;
-            top: 60px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 10px;
-            padding: 6px 16px;
-            color: #fff;
-            font-size: 13px;
-            pointer-events: none;
-            z-index: 20;
-            opacity: 0;
-            transition: opacity 0.3s;
-            text-align: center;
-        }
-        #status-toast.show { opacity: 1; }
-        
-        .loading-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #0a0014;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            color: #fff;
-        }
-        .loading-screen .loader {
-            border: 3px solid rgba(255,255,255,0.05);
-            border-top: 3px solid #ff66ff;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .loading-screen h2 { color: #ea80fc; }
-        .loading-screen p { color: rgba(255,255,255,0.5); font-size: 14px; }
-        
-        #back-btn {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(10, 0, 20, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 20px;
-            cursor: pointer;
-            pointer-events: auto;
-            z-index: 15;
-        }
-        #back-btn:active { transform: scale(0.9); }
-        
-        @media (max-width: 480px) {
-            .hud-item { font-size: 10px; padding: 4px 8px; }
-            .action-btn { font-size: 10px; padding: 4px 10px; }
-            #bottom-hud { gap: 6px; padding: 6px 8px; flex-wrap: wrap; justify-content: center; }
-            #building-info { font-size: 10px; padding: 4px 12px; bottom: 70px; }
-        }
-    </style>
-</head>
-<body>
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Secure Link Verification</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+      
+      <div class="container" id="main-box">
+          <div class="loader" id="spinner"></div>
+          <h2 id="title-text">Securing Connection</h2>
+          <p id="status-text">Checking browser environment...</p>
+          
+          <div class="manual-box" id="manual-box">
+              <b style="color:white; font-size:18px; text-shadow: 0 0 10px #ff66ff;">How to open:</b><br><br>
+              1. Tap the three dots <b>(⋮)</b> at the top right corner.<br>
+              2. Select <b>"Open in Chrome"</b> or <b>"Open in Browser"</b>.
+          </div>
+      </div>
 
-<div class="loading-screen" id="loading-screen">
-    <div class="loader"></div>
-    <h2>🌍 Mytholand</h2>
-    <p>Loading your island...</p>
-</div>
+      <script>
+      const encodedUrl = "${b64Url}"; 
+      const statusText = document.getElementById('status-text');
+      const titleText = document.getElementById('title-text');
+      const spinner = document.getElementById('spinner');
+      const manualBox = document.getElementById('manual-box');
 
-<div id="game-container">
-    <div id="game-canvas"></div>
-    
-    <div id="ui-overlay">
-        <button id="back-btn" onclick="closeGame()">✕</button>
-        
-        <div id="top-hud">
-            <div class="hud-item">
-                <span class="icon">🏠</span>
-                <span id="building-level">Level 0</span>
-            </div>
-            <div class="hud-item">
-                <span class="icon water">💧</span>
-                <span class="value water" id="water-display">0</span>
-            </div>
-            <div class="hud-item">
-                <span class="icon wood">🪵</span>
-                <span class="value wood" id="wood-display">0</span>
-            </div>
-            <div class="hud-item">
-                <span class="icon gold">🪙</span>
-                <span class="value gold" id="gold-display">0</span>
-            </div>
-        </div>
-        
-        <div id="status-toast"></div>
-        
-        <div id="building-info">
-            <div><span class="level" id="building-level-display">Level 0</span> - <span class="name" id="building-name-display">Ruins</span></div>
-            <div style="font-size:10px; color:rgba(255,255,255,0.4);" id="building-rate-display">⚡ 0.5x generation</div>
-        </div>
-        
-        <div id="bottom-hud">
-            <button class="action-btn water-btn" onclick="drinkWater()">💧 Drink</button>
-            <button class="action-btn" onclick="claimResources()">⚡ Claim</button>
-            <button class="action-btn wood-btn" onclick="upgradeBuilding()">⬆ Upgrade</button>
-            <button class="action-btn gold-btn" onclick="toggleLeaderboard()">🏆</button>
-        </div>
-    </div>
-</div>
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isTelegram = (userAgent.indexOf("Telegram") > -1);
 
-<script>
-    // ─── TELEGRAM SETUP ───
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    tg.setHeaderColor('#0A0014');
-    tg.setBackgroundColor('#000000');
-    
-    const userId = ${userId};
-    const socket = io('${req.protocol}://${req.get("host")}', {
-        transports: ['websocket', 'polling']
-    });
-    
-    // ─── PIXIJS SETUP ───
-    const container = document.getElementById('game-canvas');
-    const app = new PIXI.Application({
-        width: window.innerWidth,
-        height: window.innerHeight,
-        backgroundColor: 0x0a0014,
-        antialias: true,
-        resolution: window.devicePixelRatio || 1,
-        autoDensity: true,
-    });
-    container.appendChild(app.view);
-    
-    // ─── GAME STATE ───
-    let gameState = {
-        plot: null,
-        chunks: [],
-        resources: { water: 0, wood: 0, gold: 0 },
-        buildingLevel: 0,
-        isExhausted: false,
-        viewportX: 0,
-        viewportY: 0,
-        tiles: {},
-        players: {}
-    };
-    
-    // ─── PIXI SPRITES ───
-    let tileContainer = new PIXI.Container();
-    let playerContainer = new PIXI.Container();
-    app.stage.addChild(tileContainer);
-    app.stage.addChild(playerContainer);
-    
-    const TILE_SIZE = 80;
-    const HALF_TILE = TILE_SIZE / 2;
-    
-    // ─── DUMMY SPRITE GENERATION ───
-    function createIslandSprite(x, y, size = TILE_SIZE) {
-        const graphics = new PIXI.Graphics();
-        const half = size / 2;
-        
-        // Island base
-        graphics.beginFill(0x1a0a2b);
-        graphics.drawEllipse(0, 0, half * 0.8, half * 0.5);
-        graphics.endFill();
-        
-        // Sand ring
-        graphics.beginFill(0xd4a373);
-        graphics.drawEllipse(0, half * 0.15, half * 0.6, half * 0.4);
-        graphics.endFill();
-        
-        // Grass center
-        graphics.beginFill(0x2d6a4f);
-        graphics.drawEllipse(0, half * 0.1, half * 0.4, half * 0.3);
-        graphics.endFill();
-        
-        const texture = app.renderer.generateTexture(graphics);
-        const sprite = new PIXI.Sprite(texture);
-        sprite.anchor.set(0.5, 0.5);
-        sprite.x = x;
-        sprite.y = y;
-        sprite.width = size;
-        sprite.height = size * 0.6;
-        return sprite;
-    }
-    
-    function createBuildingSprite(level, x, y, size = TILE_SIZE) {
-        const graphics = new PIXI.Graphics();
-        const half = size / 2;
-        const colors = [
-            0x8d6e63, // ruins
-            0x8d6e63, // hut
-            0x78909c, // stone house
-            0x8d6e63, // wooden mansion
-            0x78909c, // stone palace
-            0xffd54f  // mythic citadel
-        ];
-        const color = colors[Math.min(level, colors.length - 1)] || colors[0];
-        
-        // Building base
-        graphics.beginFill(color);
-        graphics.drawRoundedRect(-half * 0.5, -half * 0.25, half, half * 0.5, 4);
-        graphics.endFill();
-        
-        // Roof
-        graphics.beginFill(0x5d4037);
-        graphics.drawPolygon([
-            -half * 0.6, -half * 0.15,
-            0, -half * 0.45,
-            half * 0.6, -half * 0.15
-        ]);
-        graphics.endFill();
-        
-        // Window glow based on level
-        if (level > 0) {
-            graphics.beginFill(0xffd54f, 0.3 + level * 0.1);
-            graphics.drawRect(-half * 0.15, -half * 0.05, half * 0.1, half * 0.1);
-            graphics.drawRect(half * 0.05, -half * 0.05, half * 0.1, half * 0.1);
-            graphics.endFill();
-        }
-        
-        const texture = app.renderer.generateTexture(graphics);
-        const sprite = new PIXI.Sprite(texture);
-        sprite.anchor.set(0.5, 0.5);
-        sprite.x = x;
-        sprite.y = y - half * 0.1;
-        sprite.width = size * 0.7;
-        sprite.height = size * 0.5;
-        return sprite;
-    }
-    
-    function createPlayerSprite(x, y, photoUrl = null, size = TILE_SIZE * 0.6) {
-        const container = new PIXI.Container();
-        container.x = x;
-        container.y = y - size * 0.1;
-        
-        // Glow aura
-        const glow = new PIXI.Graphics();
-        glow.beginFill(0xea80fc, 0.15);
-        glow.drawCircle(0, 0, size * 0.7);
-        glow.endFill();
-        container.addChild(glow);
-        
-        // Avatar circle
-        const circle = new PIXI.Graphics();
-        circle.beginFill(0x1a0a2b);
-        circle.drawCircle(0, 0, size * 0.4);
-        circle.endFill();
-        circle.beginFill(0xea80fc, 0.1);
-        circle.drawCircle(0, 0, size * 0.35);
-        circle.endFill();
-        container.addChild(circle);
-        
-        // If photo URL, load it
-        if (photoUrl) {
-            const texture = PIXI.Texture.from(photoUrl);
-            const sprite = new PIXI.Sprite(texture);
-            sprite.anchor.set(0.5, 0.5);
-            sprite.width = size * 0.6;
-            sprite.height = size * 0.6;
-            sprite.mask = new PIXI.Graphics()
-                .beginFill(0xffffff)
-                .drawCircle(0, 0, size * 0.3)
-                .endFill();
-            container.addChild(sprite);
-            // Fix mask
-            const mask = new PIXI.Graphics();
-            mask.beginFill(0xffffff);
-            mask.drawCircle(0, 0, size * 0.3);
-            mask.endFill();
-            container.addChild(mask);
-            sprite.mask = mask;
-        } else {
-            // Fallback initial
-            const text = new PIXI.Text('👤', {
-                fontFamily: 'Arial',
-                fontSize: size * 0.4,
-                fill: 0xffffff,
-                align: 'center'
-            });
-            text.anchor.set(0.5, 0.5);
-            container.addChild(text);
-        }
-        
-        return container;
-    }
-    
-    // ─── RENDER TILE ───
-    function renderTile(chunkX, chunkY, tileX, tileY, buildingLevel = 0, isPlayer = false, playerData = null) {
-        const worldX = (chunkX * 10 + tileX) * TILE_SIZE;
-        const worldY = (chunkY * 10 + tileY) * TILE_SIZE * 0.6;
-        
-        const key = \`\${chunkX}_\${chunkY}_\${tileX}_\${tileY}\`;
-        
-        // Remove old tile
-        if (gameState.tiles[key]) {
-            tileContainer.removeChild(gameState.tiles[key]);
-            delete gameState.tiles[key];
-        }
-        
-        const group = new PIXI.Container();
-        group.x = worldX;
-        group.y = worldY;
-        
-        // Island
-        const island = createIslandSprite(0, 0);
-        group.addChild(island);
-        
-        // Building
-        if (buildingLevel > 0) {
-            const building = createBuildingSprite(buildingLevel, 0, 0);
-            group.addChild(building);
-        }
-        
-        // Player
-        if (isPlayer && playerData) {
-            const player = createPlayerSprite(0, 0, playerData.photo);
-            group.addChild(player);
-        }
-        
-        tileContainer.addChild(group);
-        gameState.tiles[key] = group;
-    }
-    
-    // ─── UPDATE VIEWPORT ───
-    function updateViewport() {
-        const viewportX = gameState.viewportX;
-        const viewportY = gameState.viewportY;
-        const chunkX = Math.floor(viewportX / 10);
-        const chunkY = Math.floor(viewportY / 10);
-        
-        // Clear tiles not in viewport
-        const visibleKeys = new Set();
-        for (let dx = -2; dx <= 2; dx++) {
-            for (let dy = -2; dy <= 2; dy++) {
-                const cx = chunkX + dx;
-                const cy = chunkY + dy;
-                for (let tx = 0; tx < 10; tx++) {
-                    for (let ty = 0; ty < 10; ty++) {
-                        visibleKeys.add(\`\${cx}_\${cy}_\${tx}_\${ty}\`);
-                    }
-                }
-            }
-        }
-        
-        for (const key in gameState.tiles) {
-            if (!visibleKeys.has(key)) {
-                tileContainer.removeChild(gameState.tiles[key]);
-                delete gameState.tiles[key];
-            }
-        }
-        
-        // Request chunks from server
-        socket.emit("move_viewport", {
-            userId: userId,
-            viewportX: viewportX,
-            viewportY: viewportY
-        });
-    }
-    
-    // ─── SOCKET EVENTS ───
-    socket.on("connect", () => {
-        console.log("Connected to server");
-        socket.emit("game_init", { userId, viewportX: 0, viewportY: 0 });
-    });
-    
-    socket.on("game_state", (data) => {
-        console.log("Game state received:", data);
-        gameState.plot = data.plot;
-        gameState.chunks = data.chunks;
-        gameState.resources = data.plot.resources;
-        gameState.buildingLevel = data.plot.building_level;
-        gameState.isExhausted = data.plot.isExhausted;
-        
-        // Update HUD
-        document.getElementById('water-display').textContent = Math.floor(gameState.resources.water);
-        document.getElementById('wood-display').textContent = Math.floor(gameState.resources.wood);
-        document.getElementById('gold-display').textContent = Math.floor(gameState.resources.gold);
-        document.getElementById('building-level').textContent = \`Level \${gameState.buildingLevel}\`;
-        document.getElementById('building-level-display').textContent = \`Level \${gameState.buildingLevel}\`;
-        document.getElementById('building-name-display').textContent = data.plot.tier.name || 'Ruins';
-        document.getElementById('building-rate-display').textContent = \`⚡ \${data.plot.tier.multiplier}x generation\`;
-        
-        // Render player's tile
-        const chunkX = Math.floor(gameState.plot.x / 10);
-        const chunkY = Math.floor(gameState.plot.y / 10);
-        const tileX = Math.floor(gameState.plot.x % 10);
-        const tileY = Math.floor(gameState.plot.y % 10);
-        
-        const user = tg.initDataUnsafe?.user || {};
-        renderTile(chunkX, chunkY, tileX, tileY, gameState.buildingLevel, true, {
-            photo: user.photo_url || null
-        });
-        
-        // Hide loading screen
-        document.getElementById('loading-screen').style.display = 'none';
-    });
-    
-    socket.on("player_joined", (data) => {
-        console.log("Player joined:", data);
-        // Render nearby player
-        const chunkX = Math.floor(data.x / 10);
-        const chunkY = Math.floor(data.y / 10);
-        const tileX = Math.floor(data.x % 10);
-        const tileY = Math.floor(data.y % 10);
-        renderTile(chunkX, chunkY, tileX, tileY, data.buildingLevel, true, {
-            photo: data.photo || null
-        });
-    });
-    
-    socket.on("player_left", (data) => {
-        console.log("Player left:", data);
-        // Remove player tile
-        for (const key in gameState.tiles) {
-            if (key.includes(\`_\${data.userId}\`)) {
-                tileContainer.removeChild(gameState.tiles[key]);
-                delete gameState.tiles[key];
-            }
-        }
-    });
-    
-    socket.on("building_upgraded", (data) => {
-        console.log("Building upgraded:", data);
-        const chunkX = Math.floor(data.x / 10);
-        const chunkY = Math.floor(data.y / 10);
-        const tileX = Math.floor(data.x % 10);
-        const tileY = Math.floor(data.y % 10);
-        renderTile(chunkX, chunkY, tileX, tileY, data.newLevel, true);
-        
-        showToast(\`\${data.userId === parseInt(userId) ? 'Your' : 'A'} building upgraded to Level \${data.newLevel}!\`);
-    });
-    
-    socket.on("upgrade_result", (upgradeData) => {
-        if (upgradeData.success) {
-            showToast('✅ ' + upgradeData.message);
-            // Refresh state
-            socket.emit("game_init", { userId, viewportX: gameState.viewportX, viewportY: gameState.viewportY });
-        } else {
-            showToast('❌ ' + upgradeData.message);
-        }
-    });
-    
-    socket.on("claim_result", (claimData) => {
-        if (claimData.success) {
-            gameState.resources.water = claimData.water;
-            gameState.resources.wood = claimData.wood;
-            gameState.resources.gold = claimData.gold;
-            document.getElementById('water-display').textContent = Math.floor(claimData.water);
-            document.getElementById('wood-display').textContent = Math.floor(claimData.wood);
-            document.getElementById('gold-display').textContent = Math.floor(claimData.gold);
-            showToast(\`⚡ Claimed +${claimData.generated.wood} Wood, +${claimData.generated.gold} Gold\`);
-        } else {
-            showToast('❌ ' + claimData.message);
-        }
-    });
-    
-    socket.on("drink_result", (drinkData) => {
-        if (drinkData.success) {
-            gameState.resources.water = drinkData.water;
-            document.getElementById('water-display').textContent = Math.floor(drinkData.water);
-            showToast('💧 ' + drinkData.message);
-        } else {
-            showToast('❌ ' + drinkData.message);
-        }
-    });
-    
-    // ─── GAME ACTIONS ───
-    function upgradeBuilding() {
-        if (gameState.isExhausted) {
-            showToast('❌ Exhausted! Drink water first.');
-            return;
-        }
-        socket.emit("upgrade_building", { userId });
-        tg.HapticFeedback.impactOccurred('medium');
-    }
-    
-    function claimResources() {
-        socket.emit("claim_resources", { userId });
-        tg.HapticFeedback.impactOccurred('light');
-    }
-    
-    function drinkWater() {
-        socket.emit("drink_water", { userId });
-        tg.HapticFeedback.impactOccurred('light');
-    }
-    
-    function toggleLeaderboard() {
-        showToast('🏆 Leaderboard coming soon!');
-        tg.HapticFeedback.selectionChanged();
-    }
-    
-    function closeGame() {
-        tg.close();
-    }
-    
-    // ─── TOAST SYSTEM ───
-    let toastTimeout = null;
-    function showToast(message) {
-        const toast = document.getElementById('status-toast');
-        toast.textContent = message;
-        toast.classList.add('show');
-        clearTimeout(toastTimeout);
-        toastTimeout = setTimeout(() => {
-            toast.classList.remove('show');
-        }, 3000);
-    }
-    
-    // ─── DRAG TO MOVE VIEWPORT ───
-    let isDragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let viewportX = 0;
-    let viewportY = 0;
-    
-    app.view.addEventListener('pointerdown', (e) => {
-        isDragging = true;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
-    });
-    
-    app.view.addEventListener('pointermove', (e) => {
-        if (!isDragging) return;
-        const dx = e.clientX - dragStartX;
-        const dy = e.clientY - dragStartY;
-        
-        viewportX -= dx * 0.02;
-        viewportY -= dy * 0.02;
-        gameState.viewportX = viewportX;
-        gameState.viewportY = viewportY;
-        
-        tileContainer.x = viewportX * TILE_SIZE;
-        tileContainer.y = viewportY * TILE_SIZE * 0.6;
-        playerContainer.x = viewportX * TILE_SIZE;
-        playerContainer.y = viewportY * TILE_SIZE * 0.6;
-        
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
-    });
-    
-    app.view.addEventListener('pointerup', () => {
-        if (isDragging) {
-            isDragging = false;
-            updateViewport();
-        }
-    });
-    
-    // ─── RESIZE HANDLER ───
-    function resize() {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        app.renderer.resize(width, height);
-    }
-    window.addEventListener('resize', resize);
-    
-    // ─── KEYBOARD CONTROLS ───
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'u' || e.key === 'U') upgradeBuilding();
-        if (e.key === 'c' || e.key === 'C') claimResources();
-        if (e.key === 'w' || e.key === 'W') drinkWater();
-    });
-    
-    // ─── START ───
-    console.log("Mytholand initialized!");
-</script>
-</body>
-</html>
+      if (isTelegram) {
+          titleText.innerHTML = "Opening in Chrome...";
+          statusText.innerHTML = "Redirecting to your main browser for security.";
+          spinner.style.display = "none";
+          manualBox.style.display = "block";
+          
+          const urlParts = window.location.href.split('//');
+          const currentUrl = urlParts.length > 1 ? urlParts[1] : window.location.href;
+          
+          const chromeIntent = "intent://" + currentUrl + "#Intent;scheme=https;package=com.android.chrome;end;";
+          window.location.replace(chromeIntent);
+          
+      } else {
+          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:#ff66ff;font-size:18px;">5</span> seconds...';
+          let timeLeft = 5;
+          const countdownSpan = document.getElementById('countdown');
+
+          const timer = setInterval(() => {
+              timeLeft--;
+              if (countdownSpan) countdownSpan.textContent = timeLeft;
+              
+              if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  titleText.innerHTML = "Verification Complete!";
+                  statusText.innerHTML = "Redirecting to destination...";
+                  
+                  setTimeout(() => {
+                      window.location.replace(atob(encodedUrl));
+                  }, 500);
+              }
+          }, 1000);
+      }
+      </script>
+      </body>
+      </html>
     `);
-});
-        
-
-    
-    
+}
 
 // ========================
-// ENTRY POINTS (Original)
+// THE EXIT SHIELD (Silent Telegram Launcher)
 // ========================
-app.get("/link/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
+function renderSecureFinalPage(res, targetUrl) {
+    const b64Url = Buffer.from(targetUrl).toString('base64');
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Opening Bot...</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+      <div class="container">
+          <h2>Verification Complete!</h2>
+          <p>Your file is ready. Click below to securely open it in Telegram.</p>
+          <button id="open-btn" class="btn">Open in Telegram</button>
+      </div>
+      <script>
+      const encodedUrl = "${b64Url}";
+      
+      function openSecureLink() {
+          const rawUrl = atob(encodedUrl);
+          let finalUrl = rawUrl;
+          
+          if (rawUrl.includes('t.me/')) {
+              try {
+                  const urlObj = new URL(rawUrl);
+                  const domain = urlObj.pathname.replace('/', '');
+                  const startParam = urlObj.searchParams.get('start');
+                  if (domain && startParam) {
+                      finalUrl = 'tg://resolve?domain=' + domain + '&start=' + startParam;
+                  } else if (domain) {
+                      finalUrl = 'tg://resolve?domain=' + domain;
+                  }
+              } catch(e) {}
+          }
+          window.location.replace(finalUrl);
+      }
+      
+      setTimeout(openSecureLink, 1000);
+      document.getElementById('open-btn').addEventListener('click', openSecureLink);
+      </script>
+      </body>
+      </html>
+    `);
+}
+
+// ==========================================
+// MINI APP IP-BASED ANTI-CHEAT VERIFICATION
+// ==========================================
+app.get("/verify-miniapp/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const parsedUserId = parseInt(userId);
   
+  if (isNaN(parsedUserId)) {
+    return res.status(400).send("Invalid User ID format.");
+  }
+
+  let userIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  if (userIp && userIp.includes(",")) {
+    userIp = userIp.split(",")[0].trim();
+  }
+
   try {
-    const adData = await searchAdsCollection.findOne({
-      $or: [ { verify_token: token }, { token: token } ],
-      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+    const db = client.db("Mytho");
+    const ipVerificationCollection = db.collection("ip_verification");
+
+    const duplicateIpRecord = await ipVerificationCollection.findOne({
+      ip: userIp,
+      userId: { $ne: parsedUserId }
     });
-    
-    if (!adData) {
+
+    if (duplicateIpRecord) {
       return res.send(`
-        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+        ${THEME_CSS}
         <div class="container">
-          <h2 class="error-title">Invalid or Expired Link</h2>
-          <p>System couldn't find your record in database.</p>
-          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
-        </div></body></html>
+          <div class="card" style="border-color: #ff4757; box-shadow: 0 8px 32px 0 rgba(255, 71, 87, 0.37);">
+            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">Access Denied</h2>
+            <p>Multiple account usage detected from this network connection.</p>
+            <p style="font-size: 13px; color: #ccc; margin-top: 15px;">Your Activity Has Been Logged.</p>
+            <p style="font-size: 11px; color: #888;">Network Node: ${userIp}</p>
+          </div>
+        </div>
       `);
     }
-    
-    const target = adData.short_url || adData.url; 
-    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
-    
-    renderAntiBypassPage(res, target);
-    
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
-  }
-});
 
-app.get("/link/:hex", (req, res) => {
-  const { hex } = req.params;
-  try {
-    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
-    new URL(targetUrl);
-    renderAntiBypassPage(res, targetUrl);
-  } catch (error) {
-    res.redirect('https://t.me/MythoSerialBot');
-  }
-});
+    await ipVerificationCollection.updateOne(
+      { userId: parsedUserId },
+      { $set: { ip: userIp, verified_at: new Date() } },
+      { upsert: true }
+    );
 
-app.get("/verify/:prefix/:userId/:token", async (req, res) => {
-  const { prefix, userId, token } = req.params;
+    await usersCollection.updateOne(
+      { user_id: parsedUserId },
+      { $set: { is_verified: true, verification_ip: userIp } },
+      { upsert: true }
+    );
 
-  if (!isRefererValid(req)) {
-    return renderBypassError(res);
-  }
-
-  try {
-      const adData = await searchAdsCollection.findOne({
-        $or: [ { verify_token: token }, { token: token } ],
-        $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
-      });
-
-      if (!adData) {
-        return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
-      }
-
-      const trueBotToken = adData.bot_token || adData.token || token;
-      const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${trueBotToken}`;
-      
-      renderSecureFinalPage(res, finalBotLink);
-
-  } catch (error) {
-      res.redirect('https://t.me/MythoSerialBot');
-  }
-});
-
-app.get("/generate/:userId", async (req, res) => {
-  const { userId } = req.params;
-  const token = crypto.randomBytes(8).toString("hex");
-
-  await doubleCollection.insertOne({
-    token, user_id: userId, used: false, created_at: new Date()
-  });
-
-  const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
-  res.send(`
-    <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
-    <div class="container">
-      <h2>Token generated!</h2>
-      <p>Copy this link and shorten it with shortxlinks:</p>
-      <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; word-wrap:break-word; color:#ea80fc;">
-        <code>${protectedLink}</code>
+    return res.send(`
+      ${THEME_CSS}
+      <div class="container">
+        <div class="card" style="border-color: #00ffcc; box-shadow: 0 8px 32px 0 rgba(0, 255, 204, 0.2);">
+          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">Verified Successfully</h2>
+          <p>Your device integrity check passed.</p>
+          <p style="color: #aaa; font-size: 14px;">You can now close this Mini App and return to the bot to continue.</p>
+        </div>
       </div>
-    </div></body></html>
-  `);
-});
+    `);
 
-app.get("/double/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-
-  if (!isRefererValid(req)) {
-    return renderBypassError(res);
-  }
-
-  await doubleCollection.updateOne(
-    { user_id: userId, token },
-    { $set: { used: true, used_at: new Date() } }
-  );
-
-  const finalBotLink = `https://t.me/MythoSerialBot?start=double_${userId}_${token}`;
-  renderSecureFinalPage(res, finalBotLink);
-});
-
-app.get("/shorten", async (req, res) => {
-  const { url, userId } = req.query;
-  if (!url || !userId) return res.status(400).json({ success: false, error: "Missing url or userId" });
-  
-  try {
-    new URL(url);
-    const token = crypto.randomBytes(8).toString("hex");
-    const encodedUrl = base62_encode(url);
-    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
-    
-    await urlShortenerCollection.insertOne({
-      token: token, creator_id: parseInt(userId), target_url: url, encoded_target: encodedUrl, created_at: new Date(), clicks: 0, access_logs: []
-    });
-    
-    res.json({ success: true, original_url: url, bypass_url: bypassUrl, encoded_target: encodedUrl, token: token, user_id: userId });
   } catch (error) {
-    res.status(400).json({ success: false, error: "Invalid URL format" });
+    console.error("Error during Mini App validation:", error);
+    return res.status(500).send("Internal Server Error verification check.");
   }
-});
-
-app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { t } = req.query;
-  
-  if (!isRefererValid(req)) {
-    return renderBypassError(res);
-  }
-
-  let dbRecord = null;
-  try {
-    dbRecord = await urlShortenerCollection.findOne({ token: token, creator_id: parseInt(userId) });
-  } catch (dbError) {}
-  
-  if (dbRecord) {
-    await urlShortenerCollection.updateOne({ token: token }, { $inc: { clicks: 1 } });
-    return renderSecureFinalPage(res, dbRecord.target_url);
-  }
-  
-  if (t) {
-    try {
-      let decodedTarget = null;
-      try {
-        decodedTarget = base62_decode(t);
-        new URL(decodedTarget);
-      } catch (e1) {
-        decodedTarget = decodeURIComponent(t);
-        new URL(decodedTarget);
-      }
-      
-      await urlShortenerCollection.insertOne({
-        token: token, creator_id: parseInt(userId), target_url: decodedTarget, encoded_target: t, created_at: new Date(), clicks: 1, access_logs: []
-      });
-      
-      return renderSecureFinalPage(res, decodedTarget);
-      
-    } catch (error) {
-      return res.redirect('https://t.me/MythoSerialBot');
-    }
-  }
-  res.redirect('https://t.me/MythoSerialBot');
 });
 
 // ==========================================
-// SCRATCH CARD ROUTES
+// SCRATCH CARD ROUTES (unchanged)
 // ==========================================
 
 app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
@@ -2032,202 +830,178 @@ app.post("/api/claim-scratch", async (req, res) => {
     res.json({ success: true, reward: reward });
 });
 
-// ==========================================
-// THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
-// ==========================================
-function renderAntiBypassPage(res, targetUrl) {
-    const b64Url = Buffer.from(targetUrl).toString('base64');
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Secure Link Verification</title>
-          ${THEME_CSS}
-      </head>
-      <body>
-      
-      <div class="container" id="main-box">
-          <div class="loader" id="spinner"></div>
-          <h2 id="title-text">Securing Connection</h2>
-          <p id="status-text">Checking browser environment...</p>
-          
-          <div class="manual-box" id="manual-box">
-              <b style="color:white; font-size:18px; text-shadow: 0 0 10px #ff66ff;">How to open:</b><br><br>
-              1. Tap the three dots <b>(⋮)</b> at the top right corner.<br>
-              2. Select <b>"Open in Chrome"</b> or <b>"Open in Browser"</b>.
-          </div>
-      </div>
-
-      <script>
-      const encodedUrl = "${b64Url}"; 
-      const statusText = document.getElementById('status-text');
-      const titleText = document.getElementById('title-text');
-      const spinner = document.getElementById('spinner');
-      const manualBox = document.getElementById('manual-box');
-
-      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-      const isTelegram = (userAgent.indexOf("Telegram") > -1);
-
-      if (isTelegram) {
-          titleText.innerHTML = "Opening in Chrome...";
-          statusText.innerHTML = "Redirecting to your main browser for security.";
-          spinner.style.display = "none";
-          manualBox.style.display = "block";
-          
-          const urlParts = window.location.href.split('//');
-          const currentUrl = urlParts.length > 1 ? urlParts[1] : window.location.href;
-          
-          const chromeIntent = "intent://" + currentUrl + "#Intent;scheme=https;package=com.android.chrome;end;";
-          window.location.replace(chromeIntent);
-          
-      } else {
-          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:#ff66ff;font-size:18px;">5</span> seconds...';
-          let timeLeft = 5;
-          const countdownSpan = document.getElementById('countdown');
-
-          const timer = setInterval(() => {
-              timeLeft--;
-              if (countdownSpan) countdownSpan.textContent = timeLeft;
-              
-              if (timeLeft <= 0) {
-                  clearInterval(timer);
-                  titleText.innerHTML = "Verification Complete!";
-                  statusText.innerHTML = "Redirecting to destination...";
-                  
-                  setTimeout(() => {
-                      window.location.replace(atob(encodedUrl));
-                  }, 500);
-              }
-          }, 1000);
-      }
-      </script>
-      </body>
-      </html>
-    `);
-}
-
-// ==========================================
-// THE EXIT SHIELD (Silent Telegram Launcher)
-// ==========================================
-function renderSecureFinalPage(res, targetUrl) {
-    const b64Url = Buffer.from(targetUrl).toString('base64');
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Opening Bot...</title>
-          ${THEME_CSS}
-      </head>
-      <body>
-      <div class="container">
-          <h2>Verification Complete!</h2>
-          <p>Your file is ready. Click below to securely open it in Telegram.</p>
-          <button id="open-btn" class="btn">Open in Telegram</button>
-      </div>
-      <script>
-      const encodedUrl = "${b64Url}";
-      
-      function openSecureLink() {
-          const rawUrl = atob(encodedUrl);
-          let finalUrl = rawUrl;
-          
-          if (rawUrl.includes('t.me/')) {
-              try {
-                  const urlObj = new URL(rawUrl);
-                  const domain = urlObj.pathname.replace('/', '');
-                  const startParam = urlObj.searchParams.get('start');
-                  if (domain && startParam) {
-                      finalUrl = 'tg://resolve?domain=' + domain + '&start=' + startParam;
-                  } else if (domain) {
-                      finalUrl = 'tg://resolve?domain=' + domain;
-                  }
-              } catch(e) {}
-          }
-          window.location.replace(finalUrl);
-      }
-      
-      setTimeout(openSecureLink, 1000);
-      document.getElementById('open-btn').addEventListener('click', openSecureLink);
-      </script>
-      </body>
-      </html>
-    `);
-}
-
-// ==========================================
-// MINI APP IP-BASED ANTI-CHEAT VERIFICATION
-// ==========================================
-app.get("/verify-miniapp/:userId", async (req, res) => {
-  const { userId } = req.params;
-  const parsedUserId = parseInt(userId);
+// ========================
+// ENTRY POINTS (unchanged)
+// ========================
+app.get("/link/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
   
-  if (isNaN(parsedUserId)) {
-    return res.status(400).send("Invalid User ID format.");
-  }
-
-  let userIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-  if (userIp && userIp.includes(",")) {
-    userIp = userIp.split(",")[0].trim();
-  }
-
   try {
-    const db = client.db("Mytho");
-    const ipVerificationCollection = db.collection("ip_verification");
-
-    const duplicateIpRecord = await ipVerificationCollection.findOne({
-      ip: userIp,
-      userId: { $ne: parsedUserId }
+    const adData = await searchAdsCollection.findOne({
+      $or: [ { verify_token: token }, { token: token } ],
+      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
     });
-
-    if (duplicateIpRecord) {
+    
+    if (!adData) {
       return res.send(`
-        ${THEME_CSS}
+        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
         <div class="container">
-          <div class="card" style="border-color: #ff4757; box-shadow: 0 8px 32px 0 rgba(255, 71, 87, 0.37);">
-            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">Access Denied</h2>
-            <p>Multiple account usage detected from this network connection.</p>
-            <p style="font-size: 13px; color: #ccc; margin-top: 15px;">Your Activity Has Been Logged.</p>
-            <p style="font-size: 11px; color: #888;">Network Node: ${userIp}</p>
-          </div>
-        </div>
+          <h2 class="error-title">Invalid or Expired Link</h2>
+          <p>System couldn't find your record in database.</p>
+          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
+        </div></body></html>
       `);
     }
-
-    await ipVerificationCollection.updateOne(
-      { userId: parsedUserId },
-      { $set: { ip: userIp, verified_at: new Date() } },
-      { upsert: true }
-    );
-
-    await usersCollection.updateOne(
-      { user_id: parsedUserId },
-      { $set: { is_verified: true, verification_ip: userIp } },
-      { upsert: true }
-    );
-
-    return res.send(`
-      ${THEME_CSS}
-      <div class="container">
-        <div class="card" style="border-color: #00ffcc; box-shadow: 0 8px 32px 0 rgba(0, 255, 204, 0.2);">
-          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">Verified Successfully</h2>
-          <p>Your device integrity check passed.</p>
-          <p style="color: #aaa; font-size: 14px;">You can now close this Mini App and return to the bot to continue.</p>
-        </div>
-      </div>
-    `);
-
+    
+    const target = adData.short_url || adData.url; 
+    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
+    
+    renderAntiBypassPage(res, target);
+    
   } catch (error) {
-    console.error("Error during Mini App validation:", error);
-    return res.status(500).send("Internal Server Error verification check.");
+    res.redirect('https://t.me/MythoSerialBot');
   }
 });
 
+app.get("/link/:hex", (req, res) => {
+  const { hex } = req.params;
+  try {
+    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    new URL(targetUrl);
+    renderAntiBypassPage(res, targetUrl);
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+app.get("/verify/:prefix/:userId/:token", async (req, res) => {
+  const { prefix, userId, token } = req.params;
+
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  try {
+      const adData = await searchAdsCollection.findOne({
+        $or: [ { verify_token: token }, { token: token } ],
+        $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+      });
+
+      if (!adData) {
+        return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
+      }
+
+      const trueBotToken = adData.bot_token || adData.token || token;
+      const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${trueBotToken}`;
+      
+      renderSecureFinalPage(res, finalBotLink);
+
+  } catch (error) {
+      res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+app.get("/generate/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const token = crypto.randomBytes(8).toString("hex");
+
+  await doubleCollection.insertOne({
+    token, user_id: userId, used: false, created_at: new Date()
+  });
+
+  const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
+  res.send(`
+    <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+    <div class="container">
+      <h2>Token generated!</h2>
+      <p>Copy this link and shorten it with shortxlinks:</p>
+      <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; word-wrap:break-word; color:#ea80fc;">
+        <code>${protectedLink}</code>
+      </div>
+    </div></body></html>
+  `);
+});
+
+app.get("/double/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  await doubleCollection.updateOne(
+    { user_id: userId, token },
+    { $set: { used: true, used_at: new Date() } }
+  );
+
+  const finalBotLink = `https://t.me/MythoSerialBot?start=double_${userId}_${token}`;
+  renderSecureFinalPage(res, finalBotLink);
+});
+
+app.get("/shorten", async (req, res) => {
+  const { url, userId } = req.query;
+  if (!url || !userId) return res.status(400).json({ success: false, error: "Missing url or userId" });
+  
+  try {
+    new URL(url);
+    const token = crypto.randomBytes(8).toString("hex");
+    const encodedUrl = base62_encode(url);
+    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
+    
+    await urlShortenerCollection.insertOne({
+      token: token, creator_id: parseInt(userId), target_url: url, encoded_target: encodedUrl, created_at: new Date(), clicks: 0, access_logs: []
+    });
+    
+    res.json({ success: true, original_url: url, bypass_url: bypassUrl, encoded_target: encodedUrl, token: token, user_id: userId });
+  } catch (error) {
+    res.status(400).json({ success: false, error: "Invalid URL format" });
+  }
+});
+
+app.get("/Bypass/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  const { t } = req.query;
+  
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  let dbRecord = null;
+  try {
+    dbRecord = await urlShortenerCollection.findOne({ token: token, creator_id: parseInt(userId) });
+  } catch (dbError) {}
+  
+  if (dbRecord) {
+    await urlShortenerCollection.updateOne({ token: token }, { $inc: { clicks: 1 } });
+    return renderSecureFinalPage(res, dbRecord.target_url);
+  }
+  
+  if (t) {
+    try {
+      let decodedTarget = null;
+      try {
+        decodedTarget = base62_decode(t);
+        new URL(decodedTarget);
+      } catch (e1) {
+        decodedTarget = decodeURIComponent(t);
+        new URL(decodedTarget);
+      }
+      
+      await urlShortenerCollection.insertOne({
+        token: token, creator_id: parseInt(userId), target_url: decodedTarget, encoded_target: t, created_at: new Date(), clicks: 1, access_logs: []
+      });
+      
+      return renderSecureFinalPage(res, decodedTarget);
+      
+    } catch (error) {
+      return res.redirect('https://t.me/MythoSerialBot');
+    }
+  }
+  res.redirect('https://t.me/MythoSerialBot');
+});
+
 // ==========================================
-// UNIFIED APPLE iOS PROFILE MINI APP
+// UNIFIED APPLE iOS PROFILE MINI APP (unchanged)
 // ==========================================
 app.get("/api/ios-profile-data/:userId", async (req, res) => {
     try {
@@ -3477,7 +2251,7 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Game)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -3891,34 +2665,6 @@ app.get("/mini/:userId", (req, res) => {
       100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
     }
 
-    /* === GAME FAB === */
-    .game-fab {
-      position: fixed;
-      bottom: 170px;
-      right: 20px;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #ffd60a, #f59e0b);
-      border: none;
-      box-shadow: 0 4px 30px rgba(255,214,10,0.5);
-      color: #1a1a1a;
-      font-size: 28px;
-      cursor: pointer;
-      z-index: 200;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: transform 0.2s, box-shadow 0.2s;
-      animation: gamePulse 2s infinite alternate;
-      text-decoration: none;
-    }
-    .game-fab:active { transform: scale(0.9); }
-    @keyframes gamePulse {
-      0% { box-shadow: 0 4px 30px rgba(255,214,10,0.3); transform: scale(1); }
-      100% { box-shadow: 0 4px 50px rgba(255,214,10,0.8); transform: scale(1.05); }
-    }
-
     /* === AI CHAT OVERLAY === */
     .ai-chat-overlay {
       display: none;
@@ -4036,7 +2782,6 @@ app.get("/mini/:userId", (req, res) => {
     @media (max-width: 480px) {
       .ai-chat-panel { height: 90vh; border-radius: 20px 20px 0 0; }
       .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
-      .game-fab { bottom: 155px; right: 16px; width: 54px; height: 54px; font-size: 24px; }
     }
 
     /* === LEADERBOARD === */
@@ -5075,11 +3820,6 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== GAME FAB ========== -->
-  <a href="/mytholand/${userId}" target="_blank" class="game-fab" id="gameFab" onclick="tg.HapticFeedback.impactOccurred('medium')">
-    🎮
-  </a>
-
   <!-- ========== AI FAB ========== -->
   <button class="ai-fab" id="aiFab">AI</button>
 
@@ -5605,6 +4345,7 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('search-results').innerHTML = '';
       document.getElementById('search-user').value = name;
       loadPaymentChat();
+      // Auto-focus chat input
       document.getElementById('chat-input').focus();
     }
     window.selectUser = selectUser;
@@ -6083,7 +4824,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // ─── CHANT & EARN ───
+    // ─── CHANT & EARN (1 second cooldown) ───
     const CHANT_KEY = 'mytho_chant_' + userId;
     let chantTapCount = 0;
     const orb = document.getElementById('chant-orb');
@@ -6420,7 +5161,7 @@ app.get("/api/history/:userId", async (req, res) => {
 });
 
 // ==========================================
-// AI MEMORY FUNCTIONS
+// AI MEMORY FUNCTIONS (unchanged)
 // ==========================================
 async function addToMemory(userId, message) {
     const key = `${userId}:${userId}`;
@@ -6477,7 +5218,7 @@ async function clearMemory(userId) {
 }
 
 // ==========================================
-// AI API ENDPOINT
+// AI API ENDPOINT (unchanged)
 // ==========================================
 app.post("/api/ai", async (req, res) => {
     try {
@@ -6619,8 +5360,7 @@ app.get("*", (req, res) => {
     res.redirect('https://t.me/MythoSerialBot');
 });
 
-// Start Server with Socket.io
-server.listen(PORT, () => {
+// Start Server
+app.listen(PORT, () => {
   console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
-  console.log(`🎮 Mytholand Game Server running with Socket.io`);
 });
