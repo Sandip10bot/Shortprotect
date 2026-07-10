@@ -623,9 +623,6 @@ function base62_decode(encoded) {
     }
 }
 
-// ==========================================
-// MYTHOLAND MINI APP ROUTE
-// ==========================================
 app.get("/mytholand/:userId", async (req, res) => {
     const userId = req.params.userId;
     
@@ -682,6 +679,8 @@ app.get("/mytholand/:userId", async (req, res) => {
             justify-content: space-between;
             pointer-events: auto;
             z-index: 10;
+            flex-wrap: wrap;
+            gap: 4px;
         }
         .hud-item {
             background: rgba(10, 0, 20, 0.7);
@@ -717,6 +716,8 @@ app.get("/mytholand/:userId", async (req, res) => {
             border-radius: 16px;
             padding: 8px 12px;
             box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
+            flex-wrap: wrap;
+            justify-content: center;
         }
         .action-btn {
             background: linear-gradient(135deg, #d500f9, #651fff);
@@ -915,19 +916,14 @@ app.get("/mytholand/:userId", async (req, res) => {
         viewportX: 0,
         viewportY: 0,
         tiles: {},
-        players: {},
-        isDragging: false,
-        dragStart: { x: 0, y: 0 },
-        dragOffset: { x: 0, y: 0 }
+        players: {}
     };
     
     // ─── PIXI SPRITES ───
     let tileContainer = new PIXI.Container();
     let playerContainer = new PIXI.Container();
-    let dragContainer = new PIXI.Container();
     app.stage.addChild(tileContainer);
     app.stage.addChild(playerContainer);
-    app.stage.addChild(dragContainer);
     
     const TILE_SIZE = 80;
     const HALF_TILE = TILE_SIZE / 2;
@@ -952,12 +948,6 @@ app.get("/mytholand/:userId", async (req, res) => {
         graphics.drawEllipse(0, half * 0.1, half * 0.4, half * 0.3);
         graphics.endFill();
         
-        // Water sparkle
-        graphics.beginFill(0x4fc3f7, 0.2);
-        graphics.drawEllipse(-half * 0.3, -half * 0.3, half * 0.15, half * 0.1);
-        graphics.endFill();
-        
-        // Create texture
         const texture = app.renderer.generateTexture(graphics);
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5, 0.5);
@@ -1214,37 +1204,37 @@ app.get("/mytholand/:userId", async (req, res) => {
         showToast(\`\${data.userId === parseInt(userId) ? 'Your' : 'A'} building upgraded to Level \${data.newLevel}!\`);
     });
     
-    socket.on("upgrade_result", (data) => {
-        if (data.success) {
-            showToast('✅ ' + data.message);
+    socket.on("upgrade_result", (upgradeData) => {
+        if (upgradeData.success) {
+            showToast('✅ ' + upgradeData.message);
             // Refresh state
             socket.emit("game_init", { userId, viewportX: gameState.viewportX, viewportY: gameState.viewportY });
         } else {
-            showToast('❌ ' + data.message);
+            showToast('❌ ' + upgradeData.message);
         }
     });
     
-    socket.on("claim_result", (data) => {
-        if (data.success) {
-            gameState.resources.water = data.water;
-            gameState.resources.wood = data.wood;
-            gameState.resources.gold = data.gold;
-            document.getElementById('water-display').textContent = Math.floor(data.water);
-            document.getElementById('wood-display').textContent = Math.floor(data.wood);
-            document.getElementById('gold-display').textContent = Math.floor(data.gold);
-            showToast(\`⚡ Claimed +${data.generated.wood} Wood, +${data.generated.gold} Gold\`);
+    socket.on("claim_result", (claimData) => {
+        if (claimData.success) {
+            gameState.resources.water = claimData.water;
+            gameState.resources.wood = claimData.wood;
+            gameState.resources.gold = claimData.gold;
+            document.getElementById('water-display').textContent = Math.floor(claimData.water);
+            document.getElementById('wood-display').textContent = Math.floor(claimData.wood);
+            document.getElementById('gold-display').textContent = Math.floor(claimData.gold);
+            showToast(\`⚡ Claimed +${claimData.generated.wood} Wood, +${claimData.generated.gold} Gold\`);
         } else {
-            showToast('❌ ' + data.message);
+            showToast('❌ ' + claimData.message);
         }
     });
     
-    socket.on("drink_result", (data) => {
-        if (data.success) {
-            gameState.resources.water = data.water;
-            document.getElementById('water-display').textContent = Math.floor(data.water);
-            showToast('💧 ' + data.message);
+    socket.on("drink_result", (drinkData) => {
+        if (drinkData.success) {
+            gameState.resources.water = drinkData.water;
+            document.getElementById('water-display').textContent = Math.floor(drinkData.water);
+            showToast('💧 ' + drinkData.message);
         } else {
-            showToast('❌ ' + data.message);
+            showToast('❌ ' + drinkData.message);
         }
     });
     
@@ -1269,7 +1259,6 @@ app.get("/mytholand/:userId", async (req, res) => {
     }
     
     function toggleLeaderboard() {
-        // Placeholder for leaderboard
         showToast('🏆 Leaderboard coming soon!');
         tg.HapticFeedback.selectionChanged();
     }
@@ -1301,9 +1290,6 @@ app.get("/mytholand/:userId", async (req, res) => {
         isDragging = true;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
-        gameState.dragStart.x = e.clientX;
-        gameState.dragStart.y = e.clientY;
-        gameState.isDragging = true;
     });
     
     app.view.addEventListener('pointermove', (e) => {
@@ -1311,13 +1297,11 @@ app.get("/mytholand/:userId", async (req, res) => {
         const dx = e.clientX - dragStartX;
         const dy = e.clientY - dragStartY;
         
-        // Update viewport
         viewportX -= dx * 0.02;
         viewportY -= dy * 0.02;
         gameState.viewportX = viewportX;
         gameState.viewportY = viewportY;
         
-        // Move tile container
         tileContainer.x = viewportX * TILE_SIZE;
         tileContainer.y = viewportY * TILE_SIZE * 0.6;
         playerContainer.x = viewportX * TILE_SIZE;
@@ -1330,7 +1314,6 @@ app.get("/mytholand/:userId", async (req, res) => {
     app.view.addEventListener('pointerup', () => {
         if (isDragging) {
             isDragging = false;
-            gameState.isDragging = false;
             updateViewport();
         }
     });
@@ -1357,6 +1340,10 @@ app.get("/mytholand/:userId", async (req, res) => {
 </html>
     `);
 });
+        
+
+    
+    
 
 // ========================
 // ENTRY POINTS (Original)
