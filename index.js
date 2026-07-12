@@ -3929,109 +3929,132 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 12px;
     }
 
-    /* === PAYMENT FULLSCREEN VIEW (New) === */
+    
+    /* === PAYMENT - CHAT STYLE (Enhanced PhonePe/WhatsApp Style) === */
+    .pay-search-area { display: block; }
+    .pay-search-area.hidden { display: none; }
+
     .pay-fullscreen {
       display: none;
       flex-direction: column;
-      height: 100%;
-      padding: 0 16px;
+      height: 100vh;
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      background: #0a0014;
+      z-index: 200; /* Covers the bottom tab-bar */
     }
-    .pay-fullscreen.open { display: flex; }
-    .pay-fullscreen .back-btn {
-      background: none;
-      border: none;
-      color: #ea80fc;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      padding: 8px 0;
-      align-self: flex-start;
-    }
-    .pay-fullscreen .user-profile {
+    .pay-fullscreen.open { display: flex; animation: fadeSlide 0.3s ease; }
+
+    .chat-header {
       display: flex;
       align-items: center;
-      gap: 16px;
-      padding: 12px 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.06);
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(10,0,20,0.95);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding-top: max(12px, env(safe-area-inset-top));
     }
-    .pay-fullscreen .user-profile .avatar {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      object-fit: cover;
-      background: #651fff;
+    .chat-header .back-btn {
+      background: none; border: none; padding: 4px; cursor: pointer; display: flex;
+      color: #ea80fc;
     }
-    .pay-fullscreen .user-profile .info h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
+    .chat-header .avatar {
+      width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #651fff;
     }
-    .pay-fullscreen .user-profile .info p {
-      margin: 4px 0 0;
-      font-size: 13px;
-      color: rgba(255,255,255,0.4);
-    }
-    .pay-fullscreen .chat-area {
+    .chat-header .info { flex: 1; }
+    .chat-header .info h3 { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
+    .chat-header .info p { margin: 2px 0 0; font-size: 12px; color: rgba(255,255,255,0.5); }
+
+    .chat-area {
       flex: 1;
       overflow-y: auto;
-      margin: 8px 0;
-      padding: 6px 0;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #0a0014;
+      background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.05) 0%, transparent 60%);
     }
-    .pay-fullscreen .payment-input-area {
-      padding: 12px 0;
-      border-top: 0.5px solid rgba(255,255,255,0.06);
+    .encryption-msg {
+      text-align: center; font-size: 11px; color: rgba(255,255,255,0.4);
+      margin: 10px 0 20px; display: flex; align-items: center; justify-content: center; gap: 6px;
     }
-    .pay-fullscreen .payment-input-area .amount-input {
-      width: 100%;
-      padding: 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 20px;
-      font-weight: 700;
-      text-align: center;
-      outline: none;
-      margin-bottom: 8px;
-    }
-    .pay-fullscreen .payment-input-area .amount-input:focus { border-color: #d500f9; }
-    .pay-fullscreen .payment-input-area .pay-btn {
-      width: 100%;
-      padding: 14px;
-      border-radius: 30px;
-      border: none;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      font-weight: 700;
-      font-size: 18px;
-      cursor: pointer;
-      transition: transform 0.15s;
-    }
-    .pay-fullscreen .payment-input-area .pay-btn:active { transform: scale(0.94); }
-    .pay-fullscreen .payment-input-area .pay-btn:disabled {
-      opacity: 0.5;
-      pointer-events: none;
-    }
-    .pay-fullscreen .chat-msg .bubble .payment-card {
-      background: rgba(0,230,118,0.1);
-      border: 1px solid rgba(0,230,118,0.2);
-      border-radius: 10px;
-      padding: 4px 10px;
-      margin-top: 2px;
-      font-size: 12px;
-    }
-    .pay-fullscreen .chat-msg .bubble .payment-card .amount {
-      font-weight: 700;
-      color: #30d158;
+    .chat-date {
+      text-align: center; font-size: 11px; color: rgba(255,255,255,0.5); margin: 16px 0 8px;
     }
 
-    .pay-search-area {
-      display: block;
+    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: 88%; }
+    .chat-msg.sent { align-self: flex-end; flex-direction: row-reverse; }
+    .chat-msg.received { align-self: flex-start; }
+    
+    .chat-msg .avatar {
+      width: 26px; height: 26px; border-radius: 50%; object-fit: cover; margin-bottom: 18px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
     }
-    .pay-search-area.hidden { display: none; }
-  </style>
-</head>
-<body>
+
+    .chat-msg .bubble-wrapper { display: flex; flex-direction: column; }
+    .chat-msg.sent .bubble-wrapper { align-items: flex-end; }
+
+    .chat-msg .bubble {
+      padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4; word-wrap: break-word;
+    }
+    
+    /* Text Message Bubbles */
+    .chat-msg.sent .bubble.text {
+      background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; border-bottom-right-radius: 4px;
+    }
+    .chat-msg.received .bubble.text {
+      background: rgba(255,255,255,0.08); color: #eee; border-bottom-left-radius: 4px;
+    }
+
+    /* Payment Card Bubble */
+    .chat-msg .bubble.payment {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 16px;
+      width: 220px;
+      backdrop-filter: blur(10px);
+      background-image: repeating-radial-gradient(circle at 0 0, transparent 0, rgba(255,255,255,0.01) 12px, transparent 13px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .chat-msg.sent .bubble.payment { border-bottom-right-radius: 4px; }
+    .chat-msg.received .bubble.payment { border-bottom-left-radius: 4px; }
+
+    .payment-amount { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 12px; }
+    .payment-status { 
+      display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; 
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .payment-status.success { color: #30d158; }
+    
+    .chat-msg .time { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; padding: 0 4px; }
+
+    .chat-footer {
+      padding: 10px 16px;
+      background: rgba(10,0,20,0.95);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+    .chat-input-wrapper {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 24px;
+      padding: 6px 6px 6px 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .chat-input {
+      flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none;
+    }
+    .chat-input::placeholder { color: rgba(255,255,255,0.3); }
+    .pay-send-btn {
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      border: none; border-radius: 50%; width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: transform 0.2s; flex-shrink: 0;
+    }
+    .pay-send-btn:active { transform: scale(0.9); }
+
 
   <!-- NAVBAR -->
   <div class="navbar" id="navTitle">Home</div>
