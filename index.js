@@ -25,8 +25,7 @@ let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollectio
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
-let paymentChatCollection;
-
+let paymentChatCollection, webSpinSessionsCollection; // new
 
 async function connectDB() {
   try {
@@ -49,7 +48,7 @@ async function connectDB() {
     ratingsCollection = db.collection("ratings");
     withdrawsCollection = db.collection("withdraws");
     paymentChatCollection = db.collection("payment_chats");
-    
+    webSpinSessionsCollection = db.collection("web_spin_sessions");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -866,6 +865,222 @@ app.post("/api/claim-scratch", async (req, res) => {
     }
 
     res.json({ success: true, reward: reward });
+});
+
+// ==========================================
+// SPIN & WIN (Web Version) – NEW
+// ==========================================
+
+// Helper to compute next spin time (midnight UTC after last_spin_date)
+function getNextSpinTime(lastSpinDate) {
+    if (!lastSpinDate) return new Date(); // now
+    const parts = lastSpinDate.split('-');
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]) - 1;
+    const day = parseInt(parts[2]);
+    const next = new Date(Date.UTC(year, month, day + 1, 0, 0, 0));
+    return next;
+}
+
+// Helper to format countdown
+function formatCountdown(ms) {
+    if (ms <= 0) return "Available now!";
+    const seconds = Math.floor(ms / 1000);
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+}
+
+// GET /api/spin/status/:userId
+app.get("/api/spin/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const user = await usersCollection.findOne({ user_id: uid }) || {};
+        const lastSpinDate = user.last_spin_date || null; // format "YYYY-MM-DD"
+        const streak = user.streak || 0;
+        const today = new Date().toISOString().split('T')[0];
+        const canSpin = lastSpinDate !== today;
+
+        const nextSpinTime = getNextSpinTime(lastSpinDate);
+        const now = new Date();
+        const msUntilNext = Math.max(0, nextSpinTime.getTime() - now.getTime());
+
+        // Also check if the user has an active web spin session (to allow double)
+        let session = null;
+        if (lastSpinDate === today) {
+            session = await webSpinSessionsCollection.findOne({ user_id: uid });
+        }
+
+        const roll = session ? session.roll : null;
+        const doubleUsed = session ? session.double_used : false;
+
+        res.json({
+            success: true,
+            canSpin,
+            streak,
+            lastSpinDate,
+            nextSpinTime: nextSpinTime.toISOString(),
+            countdown: formatCountdown(msUntilNext),
+            roll: roll,
+            doubleUsed: doubleUsed,
+            hasActiveSession: !!session
+        });
+    } catch (error) {
+        console.error("Spin status error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// POST /api/spin/do/:userId
+app.post("/api/spin/do/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const user = await usersCollection.findOne({ user_id: uid });
+        const today = new Date().toISOString().split('T')[0];
+        const lastSpinDate = user?.last_spin_date || null;
+
+        if (lastSpinDate === today) {
+            return res.status(400).json({ success: false, error: "Already spun today." });
+        }
+
+        // Generate random roll 1-6
+        const roll = Math.floor(Math.random() * 6) + 1;
+
+        // Streak logic
+        let streak = user?.streak || 0;
+        let bonus = 0;
+        if (lastSpinDate) {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            if (lastSpinDate === yesterdayStr) {
+                streak += 1;
+            } else {
+                streak = 1;
+            }
+        } else {
+            streak = 1;
+        }
+
+        if (streak >= 7) {
+            bonus = 100;
+            streak = 0; // reset streak after bonus
+        }
+
+        const pointsToAdd = roll + bonus;
+
+        // Update user
+        await usersCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { mythopoints: pointsToAdd },
+                $set: {
+                    last_spin_date: today,
+                    streak: streak
+                }
+            },
+            { upsert: true }
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: roll,
+            type: "EARNED",
+            reason: "Spin & Win (Web)",
+            date: new Date()
+        });
+        if (bonus > 0) {
+            await mpHistoryCollection.insertOne({
+                user_id: uid,
+                amount: bonus,
+                type: "EARNED",
+                reason: "7-Day Streak Bonus (Web)",
+                date: new Date()
+            });
+        }
+
+        // Create a spin session for double
+        await webSpinSessionsCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    user_id: uid,
+                    roll: roll,
+                    double_used: false,
+                    created_at: new Date()
+                }
+            },
+            { upsert: true }
+        );
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+        res.json({
+            success: true,
+            roll: roll,
+            bonus: bonus,
+            pointsAdded: pointsToAdd,
+            newBalance: updatedUser?.mythopoints || 0,
+            streak: streak,
+            canDouble: true
+        });
+    } catch (error) {
+        console.error("Spin error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// POST /api/spin/double/:userId
+app.post("/api/spin/double/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const session = await webSpinSessionsCollection.findOne({ user_id: uid });
+        if (!session) {
+            return res.status(400).json({ success: false, error: "No spin session found. Spin first." });
+        }
+        if (session.double_used) {
+            return res.status(400).json({ success: false, error: "Double already used for this spin." });
+        }
+
+        const roll = session.roll;
+        // Add the same amount again
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $inc: { mythopoints: roll } }
+        );
+
+        // Mark double as used
+        await webSpinSessionsCollection.updateOne(
+            { _id: session._id },
+            { $set: { double_used: true } }
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: roll,
+            type: "EARNED",
+            reason: "Spin Double (Web)",
+            date: new Date()
+        });
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+        res.json({
+            success: true,
+            pointsAdded: roll,
+            newBalance: updatedUser?.mythopoints || 0
+        });
+    } catch (error) {
+        console.error("Double error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
 });
 
 // ========================
@@ -2289,7 +2504,7 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Spin)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2302,6 +2517,7 @@ app.get("/mini/:userId", (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
   <style>
     /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -3500,7 +3716,7 @@ app.get("/mini/:userId", (req, res) => {
     }
     .selected-user-badge .remove-btn:active { transform: scale(0.9); }
 
-    /* === SCRATCH CARD BANNER (Modification 3) === */
+    /* === SCRATCH CARD BANNER === */
     .scratch-btn-banner {
       display: flex;
       align-items: center;
@@ -3550,6 +3766,165 @@ app.get("/mini/:userId", (req, res) => {
       font-size: 14px;
       font-weight: bold;
     }
+
+    /* === SPIN WHEEL STYLES === */
+    .spin-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 8px 0 12px;
+    }
+    .spin-wheel-wrapper {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      margin: 0 auto;
+    }
+    .spin-wheel-canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      box-shadow: 0 0 40px rgba(213,0,249,0.4), inset 0 0 20px rgba(255,255,255,0.05);
+      transition: transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .spin-pointer {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 12px solid transparent;
+      border-right: 12px solid transparent;
+      border-top: 20px solid #ffd60a;
+      filter: drop-shadow(0 0 8px rgba(255,214,10,0.8));
+      z-index: 10;
+    }
+    .spin-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #1a0a2b, #0a0014);
+      border: 2px solid rgba(255,255,255,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      color: #fff;
+      z-index: 10;
+      box-shadow: 0 0 20px rgba(0,0,0,0.6);
+    }
+    .spin-btn {
+      margin-top: 16px;
+      padding: 12px 40px;
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      border: none;
+      border-radius: 30px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 18px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      box-shadow: 0 8px 25px rgba(213,0,249,0.5);
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .spin-btn:active { transform: scale(0.94); }
+    .spin-btn:disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    .spin-result-box {
+      margin-top: 12px;
+      padding: 10px 16px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      width: 100%;
+      text-align: center;
+    }
+    .spin-result-box .result-roll {
+      font-size: 32px;
+      font-weight: 700;
+      color: #ffd60a;
+    }
+    .spin-result-box .result-points {
+      font-size: 18px;
+      color: #30d158;
+    }
+    .spin-double-btn {
+      margin-top: 8px;
+      padding: 8px 24px;
+      background: linear-gradient(135deg, #ff9f1c, #f59e0b);
+      border: none;
+      border-radius: 30px;
+      color: #000;
+      font-weight: 700;
+      font-size: 14px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: transform 0.2s;
+      box-shadow: 0 4px 15px rgba(255,159,28,0.4);
+    }
+    .spin-double-btn:active { transform: scale(0.94); }
+    .spin-countdown {
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+      margin: 4px 0;
+    }
+    .spin-streak {
+      font-size: 14px;
+      color: #ffd60a;
+      margin: 2px 0;
+    }
+    .spin-error {
+      color: #ff453a;
+      font-size: 14px;
+      margin: 4px 0;
+    }
+
+    /* Adsgram overlay for spin */
+    .spin-ad-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 700;
+      flex-direction: column;
+    }
+    .spin-ad-overlay.open { display: flex; }
+    .spin-ad-overlay .ad-btn {
+      background: linear-gradient(135deg, #00e676, #00b359);
+      border: none;
+      padding: 16px 32px;
+      color: white;
+      font-weight: 700;
+      font-size: 18px;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(0,230,118,0.4);
+      text-transform: uppercase;
+      transition: transform 0.2s;
+    }
+    .spin-ad-overlay .ad-btn:active { transform: scale(0.94); }
+    .spin-ad-overlay .ad-title {
+      font-size: 22px;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .spin-ad-overlay .ad-sub {
+      font-size: 14px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 12px;
+    }
   </style>
 </head>
 <body>
@@ -3571,7 +3946,7 @@ app.get("/mini/:userId", (req, res) => {
       </a>
     </div>
 
-    <!-- ========== SCRATCH CARD BANNER (Modification 3) ========== -->
+    <!-- ========== SCRATCH CARD BANNER ========== -->
     <a href="https://t.me/MythoSerialBot?start=scratchCard" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')">
       <div class="scratch-btn-content">
         <div class="scratch-icon-wrap">🎟️</div>
@@ -3582,6 +3957,33 @@ app.get("/mini/:userId", (req, res) => {
       </div>
       <div class="scratch-arrow">➔</div>
     </a>
+
+    <!-- ========== SPIN & WIN SECTION ========== -->
+    <div class="glass" style="margin: 12px 16px 8px;">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        Spin & Win
+      </div>
+      <div class="spin-streak" id="spin-streak">🔥 Streak: 0 days</div>
+      <div class="spin-countdown" id="spin-countdown">⏳ Next spin: Available now!</div>
+      
+      <div class="spin-container">
+        <div class="spin-wheel-wrapper">
+          <canvas id="spinWheel" class="spin-wheel-canvas" width="400" height="400"></canvas>
+          <div class="spin-pointer"></div>
+          <div class="spin-center" id="spinCenter">SPIN</div>
+        </div>
+        <button class="spin-btn" id="spinBtn">Spin</button>
+      </div>
+
+      <div id="spin-result" class="spin-result-box" style="display:none;">
+        <div class="result-roll" id="spin-roll">🎲 0</div>
+        <div class="result-points" id="spin-points">+0 MythoPoints</div>
+        <div id="spin-bonus" style="font-size:14px; color:#ffd60a;"></div>
+        <button class="spin-double-btn" id="spinDoubleBtn" style="display:none;">Double (Watch Ad)</button>
+      </div>
+      <div id="spin-error" class="spin-error"></div>
+    </div>
 
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget widget-full">
@@ -3942,6 +4344,13 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
+  <!-- ========== SPIN AD OVERLAY ========== -->
+  <div class="spin-ad-overlay" id="spinAdOverlay">
+    <div class="ad-title" id="spinAdTitle">🎰 Watch Ad to Spin</div>
+    <button class="ad-btn" id="spinAdBtn">▶ Watch Ad</button>
+    <div class="ad-sub">Ad completes in seconds</div>
+  </div>
+
   <script>
     // ─── TELEGRAM WEB APP ───
     const tg = window.Telegram.WebApp;
@@ -4042,7 +4451,8 @@ app.get("/mini/:userId", (req, res) => {
       stats: { earned: 0, spent: 0 },
       chant: { totalTaps: 0, level: 'Seeker', multiplier: 1 },
       verified: false,
-      payment: { used: 0, limit: 1 }
+      payment: { used: 0, limit: 1 },
+      spin: { canSpin: false, streak: 0, countdown: 'Available now!', roll: null, doubleUsed: false }
     }, {
       set(target, prop, value) {
         target[prop] = value;
@@ -4086,9 +4496,9 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('ui-bank-yield').innerText = '+' + state.bank.pendingYield.toLocaleString();
       document.getElementById('ui-bank-loan').innerText = state.bank.loan.toLocaleString();
       
+      // Chant
       document.getElementById('chant-level').innerText = state.chant.level;
       document.getElementById('chant-reward-multiplier').innerText = state.chant.multiplier;
-      
       const remainder = state.chant.totalTaps % 1000;
       document.getElementById('chant-tap-count').innerText = remainder;
       
@@ -4131,6 +4541,18 @@ app.get("/mini/:userId", (req, res) => {
       }
       
       document.getElementById('payment-status').innerHTML = \`Daily payments: \${state.payment.used}/\${state.payment.limit}\`;
+      
+      // Spin
+      document.getElementById('spin-streak').innerText = '🔥 Streak: ' + state.spin.streak + ' days';
+      document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
+      const spinBtn = document.getElementById('spinBtn');
+      if (state.spin.canSpin) {
+        spinBtn.disabled = false;
+        spinBtn.innerText = 'Spin';
+      } else {
+        spinBtn.disabled = true;
+        spinBtn.innerText = 'Wait...';
+      }
     }
 
     // ─── TAB SWITCHING ───
@@ -4193,10 +4615,331 @@ app.get("/mini/:userId", (req, res) => {
           used: data.payment?.usedToday || 0,
           limit: data.payment?.dailyLimit || 1
         };
+        updateUI();
+        loadSpinStatus();
       } catch (e) {
         console.error('Dashboard error:', e);
       }
     }
+
+    // ─── SPIN & WIN ───
+    const spinAdOverlay = document.getElementById('spinAdOverlay');
+    const spinAdBtn = document.getElementById('spinAdBtn');
+    const spinAdTitle = document.getElementById('spinAdTitle');
+    let spinAdResolve = null;
+    let spinAdType = 'spin'; // 'spin' or 'double'
+
+    // Initialize Adsgram for spin
+    let spinAdController = null;
+    try {
+      spinAdController = window.Adsgram.init({ blockId: "38104" });
+    } catch (e) {
+      console.warn('Adsgram init failed:', e);
+    }
+
+    function showSpinAd(type) {
+      return new Promise((resolve) => {
+        spinAdType = type;
+        spinAdTitle.innerText = type === 'spin' ? '🎰 Watch Ad to Spin' : '🎯 Watch Ad to Double';
+        spinAdOverlay.classList.add('open');
+        spinAdResolve = resolve;
+        tg.HapticFeedback.impactOccurred('medium');
+      });
+    }
+
+    spinAdBtn.addEventListener('click', async function() {
+      if (!spinAdController) {
+        alert('Ad service unavailable. Please try again.');
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(false);
+        return;
+      }
+      try {
+        await spinAdController.show();
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(true);
+        tg.HapticFeedback.notificationOccurred('success');
+      } catch (error) {
+        alert('Ad must be watched completely to proceed!');
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(false);
+      }
+    });
+
+    // Close overlay on outside click
+    spinAdOverlay.addEventListener('click', (e) => {
+      if (e.target === spinAdOverlay) {
+        // Do not close by clicking outside; force ad
+      }
+    });
+
+    // Draw spin wheel
+    const wheelCanvas = document.getElementById('spinWheel');
+    const ctx = wheelCanvas.getContext('2d');
+    const segments = [
+      { label: '1', color: '#ff4d4d' },
+      { label: '2', color: '#ff9f1c' },
+      { label: '3', color: '#ffd60a' },
+      { label: '4', color: '#30d158' },
+      { label: '5', color: '#0a84ff' },
+      { label: '6', color: '#d500f9' }
+    ];
+    const segmentAngle = (2 * Math.PI) / segments.length;
+
+    function drawWheel(rotation = 0) {
+      const w = wheelCanvas.width;
+      const h = wheelCanvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = Math.min(w, h) / 2 - 10;
+      
+      ctx.clearRect(0, 0, w, h);
+      
+      // Draw segments
+      for (let i = 0; i < segments.length; i++) {
+        const startAngle = rotation + i * segmentAngle;
+        const endAngle = startAngle + segmentAngle;
+        
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = segments[i].color;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Text
+        const midAngle = startAngle + segmentAngle / 2;
+        const textX = cx + Math.cos(midAngle) * radius * 0.65;
+        const textY = cy + Math.sin(midAngle) * radius * 0.65;
+        ctx.save();
+        ctx.translate(textX, textY);
+        ctx.rotate(midAngle + Math.PI / 2);
+        ctx.font = 'bold 28px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.shadowColor = 'rgba(0,0,0,0.7)';
+        ctx.shadowBlur = 6;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(segments[i].label, 0, 0);
+        ctx.restore();
+      }
+      
+      // Center circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, 30, 0, 2 * Math.PI);
+      ctx.fillStyle = '#1a0a2b';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    let currentRotation = 0;
+    drawWheel(currentRotation);
+
+    // Get segment index from rotation
+    function getSegmentIndex(rotation) {
+      // Normalize rotation
+      const norm = rotation % (2 * Math.PI);
+      // Segment 0 is at top (angle -PI/2)
+      const topAngle = -Math.PI / 2;
+      let angle = (norm + topAngle) % (2 * Math.PI);
+      if (angle < 0) angle += 2 * Math.PI;
+      const seg = Math.floor(angle / segmentAngle);
+      return seg % segments.length;
+    }
+
+    // Spin logic
+    const spinBtn = document.getElementById('spinBtn');
+    const spinResult = document.getElementById('spin-result');
+    const spinRoll = document.getElementById('spin-roll');
+    const spinPoints = document.getElementById('spin-points');
+    const spinBonus = document.getElementById('spin-bonus');
+    const spinDoubleBtn = document.getElementById('spinDoubleBtn');
+    const spinError = document.getElementById('spin-error');
+    const spinCenter = document.getElementById('spinCenter');
+
+    let isSpinning = false;
+
+    async function loadSpinStatus() {
+      try {
+        const res = await fetch('/api/spin/status/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          state.spin.canSpin = data.canSpin;
+          state.spin.streak = data.streak;
+          state.spin.countdown = data.countdown;
+          state.spin.roll = data.roll;
+          state.spin.doubleUsed = data.doubleUsed;
+          updateUI();
+          
+          if (data.roll !== null && !data.doubleUsed) {
+            // Show previous result (if any)
+            spinResult.style.display = 'block';
+            spinRoll.innerText = '🎲 ' + data.roll;
+            spinPoints.innerText = '+' + data.roll + ' MythoPoints';
+            spinDoubleBtn.style.display = 'block';
+            spinDoubleBtn.disabled = false;
+            spinBonus.innerText = '';
+          } else if (data.roll !== null && data.doubleUsed) {
+            spinResult.style.display = 'block';
+            spinRoll.innerText = '🎲 ' + data.roll;
+            spinPoints.innerText = '+' + data.roll + ' MythoPoints (doubled)';
+            spinDoubleBtn.style.display = 'none';
+            spinBonus.innerText = '';
+          } else {
+            spinResult.style.display = 'none';
+          }
+        }
+      } catch (e) {
+        console.error('Spin status error:', e);
+      }
+    }
+
+    spinBtn.addEventListener('click', async function() {
+      if (isSpinning) return;
+      if (!state.spin.canSpin) {
+        spinError.innerText = 'You already spun today. Come back tomorrow!';
+        return;
+      }
+      spinError.innerText = '';
+      
+      // Show ad overlay
+      const adCompleted = await showSpinAd('spin');
+      if (!adCompleted) {
+        spinError.innerText = 'Ad was not completed. Please try again.';
+        return;
+      }
+      
+      isSpinning = true;
+      spinBtn.disabled = true;
+      spinResult.style.display = 'none';
+      spinDoubleBtn.style.display = 'none';
+      spinCenter.innerText = '...';
+      
+      // Perform spin animation
+      const targetRotation = currentRotation + (Math.random() * 6 + 5) * 2 * Math.PI; // at least 5 full rotations
+      const duration = 3000;
+      const start = performance.now();
+      const startRot = currentRotation;
+      
+      function animateSpin(time) {
+        const progress = Math.min((time - start) / duration, 1);
+        // Ease out cubic
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const rot = startRot + (targetRotation - startRot) * eased;
+        drawWheel(rot);
+        if (progress < 1) {
+          requestAnimationFrame(animateSpin);
+        } else {
+          currentRotation = targetRotation;
+          const idx = getSegmentIndex(targetRotation);
+          const roll = idx + 1; // 1-6
+          // Call API to save spin
+          completeSpin(roll);
+        }
+      }
+      requestAnimationFrame(animateSpin);
+    });
+
+    async function completeSpin(roll) {
+      try {
+        const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          state.mythopoints = data.newBalance;
+          state.spin.canSpin = false;
+          state.spin.streak = data.streak;
+          state.spin.roll = data.roll;
+          state.spin.doubleUsed = false;
+          updateUI();
+          
+          // Show result
+          spinResult.style.display = 'block';
+          spinRoll.innerText = '🎲 ' + data.roll;
+          let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
+          if (data.bonus > 0) {
+            pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
+            spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
+          } else {
+            spinBonus.innerText = '';
+          }
+          spinPoints.innerText = pointsMsg;
+          
+          if (data.canDouble !== false) {
+            spinDoubleBtn.style.display = 'block';
+            spinDoubleBtn.disabled = false;
+          } else {
+            spinDoubleBtn.style.display = 'none';
+          }
+          
+          spinCenter.innerText = 'SPIN';
+          isSpinning = false;
+          spinBtn.disabled = true;
+          spinBtn.innerText = 'Wait...';
+          
+          // Update countdown
+          await loadSpinStatus();
+          tg.HapticFeedback.notificationOccurred('success');
+        } else {
+          spinError.innerText = data.error || 'Spin failed.';
+          spinCenter.innerText = 'SPIN';
+          isSpinning = false;
+          spinBtn.disabled = false;
+          spinBtn.innerText = 'Spin';
+        }
+      } catch (e) {
+        console.error('Spin API error:', e);
+        spinError.innerText = 'Network error. Please try again.';
+        spinCenter.innerText = 'SPIN';
+        isSpinning = false;
+        spinBtn.disabled = false;
+        spinBtn.innerText = 'Spin';
+      }
+    }
+
+    spinDoubleBtn.addEventListener('click', async function() {
+      if (this.disabled) return;
+      
+      const adCompleted = await showSpinAd('double');
+      if (!adCompleted) {
+        spinError.innerText = 'Ad not completed. Double failed.';
+        return;
+      }
+      
+      this.disabled = true;
+      this.innerText = 'Processing...';
+      
+      try {
+        const res = await fetch('/api/spin/double/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          state.mythopoints = data.newBalance;
+          state.spin.doubleUsed = true;
+          updateUI();
+          
+          spinPoints.innerText = '+' + data.pointsAdded + ' MythoPoints (doubled)';
+          spinDoubleBtn.style.display = 'none';
+          tg.HapticFeedback.notificationOccurred('success');
+          await showSuccess('You doubled your spin!', 'Double Success');
+        } else {
+          spinError.innerText = data.error || 'Double failed.';
+          this.disabled = false;
+          this.innerText = 'Double (Watch Ad)';
+        }
+      } catch (e) {
+        console.error('Double error:', e);
+        spinError.innerText = 'Network error.';
+        this.disabled = false;
+        this.innerText = 'Double (Watch Ad)';
+      }
+    });
+
+    // Countdown update every second
+    setInterval(loadSpinStatus, 1000);
 
     // ─── BANK DATA ───
     async function loadBankData() {
@@ -4446,7 +5189,6 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('search-results').innerHTML = '';
       document.getElementById('search-user').value = name;
       loadPaymentChat();
-      // Auto-focus chat input
       document.getElementById('chat-input').focus();
     }
     window.selectUser = selectUser;
@@ -4925,7 +5667,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // ─── CHANT & EARN (1 second cooldown) ───
+    // ─── CHANT & EARN (Tap to Earn) ───
     const CHANT_KEY = 'mytho_chant_' + userId;
     let chantTapCount = 0;
     const orb = document.getElementById('chant-orb');
@@ -5123,6 +5865,7 @@ app.get("/mini/:userId", (req, res) => {
       await loadDashboard();
       await fetchChantStats();
       await loadChantLeaderboard();
+      await loadSpinStatus();
       
       if (document.getElementById('tab-bank').classList.contains('active')) { 
         loadBankData(); 
