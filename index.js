@@ -4297,58 +4297,58 @@ app.get("/mini/:userId", (req, res) => {
 
   <!-- ========== TAB: PAY (Redesigned) ========== -->
   <div id="tab-pay" class="tab-content">
-    <!-- Search area (visible when no user selected) -->
+    
+    <!-- Search area (List View) -->
     <div class="pay-search-area" id="paySearchArea">
       <div class="glass" style="padding:12px 14px;">
         <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
           <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-          Search User
+          Payments & Chat
         </div>
-        <input type="text" id="search-user" class="search-user-input" placeholder="Search by name or ID..." />
+        <input type="text" id="search-user" class="search-user-input" placeholder="Search name or ID..." autocomplete="off" />
         <div id="search-results"></div>
       </div>
     </div>
 
-    <!-- Fullscreen user view (visible when user selected) -->
+    <!-- Fullscreen Chat view -->
     <div class="pay-fullscreen" id="payFullscreen">
-      <button class="back-btn" id="payBackBtn">← Back</button>
-      <div class="user-profile">
+      <div class="chat-header">
+        <button class="back-btn" id="payBackBtn">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
         <img id="payUserAvatar" class="avatar" src="https://via.placeholder.com/100" alt="User" />
         <div class="info">
           <h3 id="payUserName">User Name</h3>
           <p id="payUserId">ID: 0</p>
         </div>
       </div>
+
       <div class="chat-area" id="payChatArea">
-        <!-- chat messages will be loaded here -->
+        <!-- chat messages will dynamically load here -->
       </div>
-      <div class="payment-input-area">
-        <input type="number" id="payAmountInput" class="amount-input" placeholder="Enter amount (min 200)" min="200" step="1" inputmode="numeric" />
-        <button class="pay-btn" id="paySendBtn">Pay Now</button>
-        <div style="margin-top:6px; font-size:12px; color:rgba(255,255,255,0.3); text-align:center;">Min 200 MythoPoints • 15% tax</div>
+
+      <div class="chat-footer">
+        <div id="payStatus" style="width: 100%; text-align:center; font-size:11px; margin-bottom:6px;"></div>
+        <div class="chat-input-wrapper">
+          <input type="text" id="payAmountInput" class="chat-input" placeholder="Enter amount or chat" autocomplete="off" />
+          <button class="pay-send-btn" id="paySendBtn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.3); text-align:center; margin-top:6px;">Min 200 MythoPoints • 15% tax on transfers</div>
       </div>
-      <div id="payStatus" style="text-align:center; margin-top:4px; font-size:12px;"></div>
     </div>
 
     <!-- Payment processing overlay -->
-    <div class="payment-processing" id="payment-processing">
+    <div class="payment-processing" id="payment-processing" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:300; background:rgba(0,0,0,0.8); padding:20px; border-radius:20px;">
       <svg class="svg-loader" viewBox="0 0 100 100">
         <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
-        <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" 
-          stroke-dasharray="251.2" stroke-dashoffset="251.2"
-          style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
-        <text x="50" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Processing</text>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
       </svg>
-      <style>
-        @keyframes dash {
-          0% { stroke-dashoffset: 251.2; }
-          50% { stroke-dashoffset: 0; }
-          100% { stroke-dashoffset: -251.2; }
-        }
-      </style>
-      <p style="color:rgba(255,255,255,0.5); font-size:12px;">Verifying transaction...</p>
+      <p style="color:rgba(255,255,255,0.8); font-size:13px; margin-top:10px;">Verifying transaction...</p>
     </div>
   </div>
+
 
   <!-- ========== TAB: PROFILE ========== -->
   <div id="tab-profile" class="tab-content">
@@ -5288,11 +5288,12 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT (Redesigned) ───
+    
+            
+    // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
     let selectedReceiver = null;
     let payChatPollInterval = null;
 
-    // Search
     const searchInput = document.getElementById('search-user');
     const searchResults = document.getElementById('search-results');
 
@@ -5308,28 +5309,30 @@ app.get("/mini/:userId", (req, res) => {
         if (data.success && data.users.length) {
           let html = '';
           data.users.forEach(u => {
-            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
-                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
-            html += \`
-              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')">
-                \${avatar}
-                <div class="result-info">
-                  <div class="name">\${u.name} \${u.username ? '@' + u.username : ''}</div>
-                  <div class="sub">\${u.points} pts</div>
+            const avatar = u.photo_url ? `<img src="${u.photo_url}" class="result-avatar" />` :
+                          `<div class="result-avatar">${u.name.charAt(0).toUpperCase()}</div>`;
+            html += `
+              <div class="user-result" onclick="selectUserForPay(${u.id}, '${u.name}', '${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                ${avatar}
+                <div class="result-info" style="flex:1;">
+                  <div class="name" style="font-size:15px; font-weight:500;">${u.name} ${u.username ? '@'+u.username : ''}</div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">${u.points} pts</div>
+                </div>
+                <div style="font-size:12px; color:rgba(255,255,255,0.3);">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
                 </div>
               </div>
-            \`;
+            `;
           });
           searchResults.innerHTML = html;
         } else {
-          searchResults.innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No users found.</div>';
+          searchResults.innerHTML = '<div class="empty" style="font-size:12px; padding:12px;">No users found.</div>';
         }
       } catch (e) {}
     });
 
     function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
-      // Show fullscreen view
       document.getElementById('paySearchArea').classList.add('hidden');
       document.getElementById('payFullscreen').classList.add('open');
       
@@ -5337,11 +5340,8 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('payUserName').innerText = name;
       document.getElementById('payUserId').innerText = 'ID: ' + id;
       
-      // Load chat for this user
       loadPayChat(id);
-      // Focus on amount input
       document.getElementById('payAmountInput').focus();
-      // Clear status
       document.getElementById('payStatus').innerHTML = '';
     }
     window.selectUserForPay = selectUserForPay;
@@ -5368,94 +5368,136 @@ app.get("/mini/:userId", (req, res) => {
             (c.receiverId === userId && c.senderId === receiverId)
           );
           
+          let html = `
+            <div class="encryption-msg">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+              Your messages and payments are secured with 256-bit encryption
+            </div>
+          `;
+
           if (filtered.length === 0) {
-            container.innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">No messages yet.</div>';
+             // Empty state
           } else {
-            let html = '';
+            let lastDate = '';
             filtered.reverse().forEach(c => {
               const isSent = c.senderId === userId;
-              const time = new Date(c.timestamp).toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
-              const avatar = isSent ? 
-                (tgUser?.photo_url ? \`<img src="\${tgUser.photo_url}" class="avatar" />\` : \`<div class="avatar">\${(tgUser?.first_name || 'U').charAt(0)}</div>\`) :
-                (c.senderPhoto ? \`<img src="\${c.senderPhoto}" class="avatar" />\` : \`<div class="avatar">\${(c.senderName || 'U').charAt(0)}</div>\`);
+              const dateObj = new Date(c.timestamp);
+              const time = dateObj.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+              const dateStr = dateObj.toLocaleDateString(undefined, {month:'long', day:'numeric', year:'numeric'});
               
-              let content = '';
+              if (dateStr !== lastDate) {
+                html += `<div class="chat-date">${dateStr}</div>`;
+                lastDate = dateStr;
+              }
+
+              // Dynamic Avatar setup per user
+              const avatar = isSent ? 
+                (tgUser?.photo_url ? `<img src="${tgUser.photo_url}" class="avatar" />` : `<div class="avatar" style="background:#d500f9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${(tgUser?.first_name || 'U').charAt(0)}</div>`) :
+                (c.senderPhoto ? `<img src="${c.senderPhoto}" class="avatar" />` : `<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${(c.senderName || 'U').charAt(0)}</div>`);
+              
+              let bubbleHtml = '';
               if (c.type === 'payment') {
-                content = \`
-                  <div class="payment-card">
-                    💸 Payment of <span class="amount">\${c.amount}</span> Mythopoints sent!
-                    <div style="font-size:10px; color:rgba(255,255,255,0.4);">Tax: \${c.tax || 0} pts</div>
+                const statusText = isSent ? 'SENT' : 'RECEIVED';
+                bubbleHtml = `
+                  <div class="bubble payment">
+                    <div class="payment-amount">M ${c.amount}</div>
+                    <div class="payment-status success">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="background:#30d158; color:#0a0014; border-radius:50%; padding:2px;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                      ${statusText} SECURELY
+                    </div>
+                    ${isSent ? `<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ${c.tax || 0} pts</div>` : ''}
                   </div>
-                \`;
+                `;
               } else {
-                content = c.message || '';
+                bubbleHtml = `<div class="bubble text">${c.message}</div>`;
               }
               
-              html += \`
-                <div class="chat-msg \${isSent ? 'sent' : 'received'}">
-                  \${avatar}
-                  <div>
-                    <div class="bubble">\${content}</div>
-                    <div class="time">\${time}</div>
+              html += `
+                <div class="chat-msg ${isSent ? 'sent' : 'received'}">
+                  ${avatar}
+                  <div class="bubble-wrapper">
+                    ${bubbleHtml}
+                    <div class="time">${time}</div>
                   </div>
                 </div>
-              \`;
+              `;
             });
-            container.innerHTML = html;
-            container.scrollTop = container.scrollHeight;
           }
+          container.innerHTML = html;
+          container.scrollTop = container.scrollHeight;
         }
       } catch (e) {
         console.error('Pay chat load error:', e);
       }
     }
 
-    // Send payment from fullscreen
+    // Handles both Chatting and Sending Money in the same input box
     document.getElementById('paySendBtn').addEventListener('click', async function() {
-      const amount = parseInt(document.getElementById('payAmountInput').value);
-      if (!selectedReceiver) {
-        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Please select a user first.</span>';
-        return;
-      }
-      if (isNaN(amount) || amount < 200) {
-        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Minimum 200 Mythopoints.</span>';
-        return;
-      }
+      const inputVal = document.getElementById('payAmountInput').value.trim();
+      if (!inputVal || !selectedReceiver) return;
       
-      const processing = document.getElementById('payment-processing');
-      processing.classList.add('active');
-      this.disabled = true;
+      const isNumeric = /^\\d+$/.test(inputVal); // Check if the input is strictly numbers
       
-      try {
-        const res = await fetch('/api/payment/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            senderId: userId,
-            receiverId: selectedReceiver,
-            amount: amount
-          })
-        });
-        const data = await res.json();
-        processing.classList.remove('active');
-        this.disabled = false;
-        
-        if (data.success) {
-          tg.HapticFeedback.notificationOccurred('success');
-          await showSuccess(\`Payment of \${amount} Mythopoints sent successfully!\`, 'Payment Successful');
-          loadDashboard();
-          loadPayChat(selectedReceiver);
-          document.getElementById('payAmountInput').value = '';
-          document.getElementById('payStatus').innerHTML = '<span style="color:#30d158;">Payment successful!</span>';
-        } else {
-          document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">' + data.error + '</span>';
-          tg.HapticFeedback.notificationOccurred('error');
+      if (isNumeric) {
+          const amount = parseInt(inputVal);
+          if (amount < 200) {
+              document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Minimum 200 MythoPoints.</span>';
+              return;
+          }
+          // --- SEND PAYMENT ---
+          const processing = document.getElementById('payment-processing');
+          processing.classList.add('active');
+          this.disabled = true;
+          
+          try {
+            const res = await fetch('/api/payment/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ senderId: userId, receiverId: selectedReceiver, amount: amount })
+            });
+            const data = await res.json();
+            processing.classList.remove('active');
+            this.disabled = false;
+            
+            if (data.success) {
+              tg.HapticFeedback.notificationOccurred('success');
+              document.getElementById('payAmountInput').value = '';
+              document.getElementById('payStatus').innerHTML = '';
+              loadDashboard();
+              loadPayChat(selectedReceiver);
+            } else {
+              document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">' + data.error + '</span>';
+              tg.HapticFeedback.notificationOccurred('error');
+            }
+          } catch (e) {
+            processing.classList.remove('active');
+            this.disabled = false;
+            document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Network error.</span>';
+          }
+      } else {
+          // --- SEND CHAT MESSAGE ---
+          try {
+              const res = await fetch('/api/payment/chat/message', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ senderId: userId, receiverId: selectedReceiver, message: inputVal })
+              });
+              const data = await res.json();
+              if (data.success) {
+                  document.getElementById('payAmountInput').value = '';
+                  document.getElementById('payStatus').innerHTML = '';
+                  loadPayChat(selectedReceiver);
+              }
+          } catch(e) {
+              console.error(e);
+          }
+      }
+    });
+
+    document.getElementById('payAmountInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            document.getElementById('paySendBtn').click();
         }
-      } catch (e) {
-        processing.classList.remove('active');
-        this.disabled = false;
-        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Network error.</span>';
-      }
     });
 
     // ─── HISTORY with Infinite Scroll ───
