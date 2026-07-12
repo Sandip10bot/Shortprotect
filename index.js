@@ -3572,7 +3572,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
 
     <!-- ========== SCRATCH CARD BANNER (Modification 3) ========== -->
-    <a href="https://t.me/MythoSerialBot?start=scratch" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')">
+    <a href="https://t.me/MythoSerialBot?start=scratchCard" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')">
       <div class="scratch-btn-content">
         <div class="scratch-icon-wrap">🎟️</div>
         <div>
