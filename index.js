@@ -404,6 +404,7 @@ app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     renderSecureFinalPage(res, finalBotLink);
 });
 
+// UPDATED renderScratchAppHTML with Adsgram integration
 function renderScratchAppHTML(userId, token, currentPoints, reward) {
     return `
     <!DOCTYPE html>
@@ -414,6 +415,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
         <title>Premium Scratch Card</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+        <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -555,6 +557,22 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             .btn-close.show { display: block; animation: slideUpFade 0.6s forwards ease-out; }
             @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
             .btn-close:active { transform: scale(0.95); }
+
+            /* ---- ADSGRAM OVERLAY ---- */
+            .ad-overlay {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.9); z-index: 20; border-radius: 20px;
+                display: flex; flex-direction: column; justify-content: center; align-items: center;
+                backdrop-filter: blur(5px);
+            }
+            .ad-btn {
+                background: linear-gradient(135deg, #00e676, #00b359);
+                border: none; padding: 12px 24px; color: white; font-weight: 800;
+                border-radius: 30px; font-size: 15px; cursor: pointer;
+                box-shadow: 0 10px 25px rgba(0, 230, 118, 0.4);
+                text-transform: uppercase; transition: transform 0.2s;
+            }
+            .ad-btn:active { transform: scale(0.95); }
         </style>
     </head>
     <body>
@@ -576,6 +594,12 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
 
         <div class="scratch-wrapper">
             <div class="scratch-inner" id="scratch-container">
+                <!-- Adsgram overlay -->
+                <div class="ad-overlay" id="ad-overlay">
+                    <h3 style="margin-bottom:15px; font-size:20px; color:white;">Card is Locked 🔒</h3>
+                    <button class="ad-btn" onclick="unlockWithAd()">▶ Watch Ad to Unlock</button>
+                    <p style="margin-top:15px; font-size:12px; color:#aaa;">Complete the ad to scratch your card</p>
+                </div>
                 <div class="reward-layer" id="reward-layer">
                     <h1 id="reward-text">+${reward}</h1>
                     <p>Earned</p>
@@ -603,6 +627,20 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 if (user.photo_url) {
                     document.getElementById('user-dp').src = user.photo_url;
                 }
+            }
+
+            // ---- ADSGRAM INIT ----
+            const AdController = window.Adsgram.init({ blockId: "38104" });
+            let canScratch = false;
+
+            function unlockWithAd() {
+                AdController.show().then((result) => {
+                    document.getElementById('ad-overlay').style.display = 'none';
+                    canScratch = true;
+                    tg.HapticFeedback.notificationOccurred('success');
+                }).catch((error) => {
+                    alert("Ad must be watched completely to unlock!");
+                });
             }
 
             const canvas = document.getElementById('scratchCanvas');
@@ -661,7 +699,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             }
 
             function scratch(e) {
-                if (!isDrawing || isRevealed) return;
+                if (!isDrawing || isRevealed || !canScratch) return;
                 e.preventDefault();
                 const pos = getPosition(e);
                 
@@ -3461,6 +3499,57 @@ app.get("/mini/:userId", (req, res) => {
       padding: 0 4px;
     }
     .selected-user-badge .remove-btn:active { transform: scale(0.9); }
+
+    /* === SCRATCH CARD BANNER (Modification 3) === */
+    .scratch-btn-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(135deg, #ff9f1c, #d500f9);
+      border-radius: 20px;
+      padding: 12px 18px;
+      margin: 0 16px 16px 16px;
+      text-decoration: none;
+      box-shadow: 0 8px 25px rgba(213, 0, 249, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: transform 0.2s;
+    }
+    .scratch-btn-banner:active {
+      transform: scale(0.96);
+    }
+    .scratch-btn-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .scratch-icon-wrap {
+      background: rgba(255,255,255,0.2);
+      border-radius: 12px;
+      padding: 6px;
+      font-size: 20px;
+    }
+    .scratch-text-main {
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+      letter-spacing: 0.3px;
+    }
+    .scratch-text-sub {
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+    }
+    .scratch-arrow {
+      background: rgba(0,0,0,0.2);
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -3481,6 +3570,18 @@ app.get("/mini/:userId", (req, res) => {
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
       </a>
     </div>
+
+    <!-- ========== SCRATCH CARD BANNER (Modification 3) ========== -->
+    <a href="https://t.me/MythoSerialBot?start=scratch" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')">
+      <div class="scratch-btn-content">
+        <div class="scratch-icon-wrap">🎟️</div>
+        <div>
+          <div class="scratch-text-main">Daily Scratch Card</div>
+          <div class="scratch-text-sub">Win Mythopoints every day!</div>
+        </div>
+      </div>
+      <div class="scratch-arrow">➔</div>
+    </a>
 
     <div class="grid-2" style="padding:0 16px;">
       <div class="widget widget-full">
@@ -5351,6 +5452,15 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
     } catch (e) {
         res.status(500).json({ success: false, error: "Failed to clear memory" });
     }
+});
+
+// ==========================================
+// ADSGRAM S2S REWARD ENDPOINT (Modification 1)
+// ==========================================
+app.get("/api/adsgram-reward", (req, res) => {
+    const userId = req.query.userid;
+    console.log(`✅ [Adsgram] Ad successfully watched by Telegram ID: ${userId}`);
+    res.status(200).json({ success: true, status: "ok" });
 });
 
 // ========================
