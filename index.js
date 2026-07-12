@@ -3114,7 +3114,7 @@ app.get("/mini/:userId", (req, res) => {
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === PAYMENT - CHAT STYLE === */
+    /* === PAYMENT - CHAT STYLE (New) === */
     .payment-chat-container {
       max-height: 250px;
       overflow-y: auto;
@@ -3767,7 +3767,7 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: bold;
     }
 
-    /* === SPIN WHEEL STYLES === */
+    /* === SPIN WHEEL STYLES (Enhanced) === */
     .spin-container {
       display: flex;
       flex-direction: column;
@@ -3779,24 +3779,26 @@ app.get("/mini/:userId", (req, res) => {
       width: 200px;
       height: 200px;
       margin: 0 auto;
+      box-shadow: 0 0 40px rgba(213,0,249,0.3);
+      border-radius: 50%;
     }
     .spin-wheel-canvas {
       width: 100%;
       height: 100%;
       border-radius: 50%;
-      box-shadow: 0 0 40px rgba(213,0,249,0.4), inset 0 0 20px rgba(255,255,255,0.05);
+      box-shadow: 0 0 30px rgba(255,255,255,0.05), inset 0 0 30px rgba(0,0,0,0.5);
       transition: transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     .spin-pointer {
       position: absolute;
-      top: -12px;
+      top: -8px;
       left: 50%;
-      transform: translateX(-50%);
+      transform: translateX(-50%) rotate(180deg);
       width: 0;
       height: 0;
       border-left: 12px solid transparent;
       border-right: 12px solid transparent;
-      border-top: 20px solid #ffd60a;
+      border-bottom: 20px solid #ffd60a;
       filter: drop-shadow(0 0 8px rgba(255,214,10,0.8));
       z-index: 10;
     }
@@ -3818,6 +3820,7 @@ app.get("/mini/:userId", (req, res) => {
       color: #fff;
       z-index: 10;
       box-shadow: 0 0 20px rgba(0,0,0,0.6);
+      letter-spacing: 0.5px;
     }
     .spin-btn {
       margin-top: 16px;
@@ -3925,6 +3928,107 @@ app.get("/mini/:userId", (req, res) => {
       color: rgba(255,255,255,0.3);
       margin-top: 12px;
     }
+
+    /* === PAYMENT FULLSCREEN VIEW (New) === */
+    .pay-fullscreen {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      padding: 0 16px;
+    }
+    .pay-fullscreen.open { display: flex; }
+    .pay-fullscreen .back-btn {
+      background: none;
+      border: none;
+      color: #ea80fc;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 8px 0;
+      align-self: flex-start;
+    }
+    .pay-fullscreen .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.06);
+    }
+    .pay-fullscreen .user-profile .avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+    }
+    .pay-fullscreen .user-profile .info h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .pay-fullscreen .user-profile .info p {
+      margin: 4px 0 0;
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+    }
+    .pay-fullscreen .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      margin: 8px 0;
+      padding: 6px 0;
+    }
+    .pay-fullscreen .payment-input-area {
+      padding: 12px 0;
+      border-top: 0.5px solid rgba(255,255,255,0.06);
+    }
+    .pay-fullscreen .payment-input-area .amount-input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color: #fff;
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+      outline: none;
+      margin-bottom: 8px;
+    }
+    .pay-fullscreen .payment-input-area .amount-input:focus { border-color: #d500f9; }
+    .pay-fullscreen .payment-input-area .pay-btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 30px;
+      border: none;
+      background: linear-gradient(135deg, #d500f9, #651fff);
+      color: #fff;
+      font-weight: 700;
+      font-size: 18px;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .pay-fullscreen .payment-input-area .pay-btn:active { transform: scale(0.94); }
+    .pay-fullscreen .payment-input-area .pay-btn:disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    .pay-fullscreen .chat-msg .bubble .payment-card {
+      background: rgba(0,230,118,0.1);
+      border: 1px solid rgba(0,230,118,0.2);
+      border-radius: 10px;
+      padding: 4px 10px;
+      margin-top: 2px;
+      font-size: 12px;
+    }
+    .pay-fullscreen .chat-msg .bubble .payment-card .amount {
+      font-weight: 700;
+      color: #30d158;
+    }
+
+    .pay-search-area {
+      display: block;
+    }
+    .pay-search-area.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -3958,10 +4062,11 @@ app.get("/mini/:userId", (req, res) => {
       <div class="scratch-arrow">➔</div>
     </a>
 
-    <!-- ========== SPIN & WIN SECTION ========== -->
+    <!-- ========== SPIN & WIN SECTION (Enhanced) ========== -->
     <div class="glass" style="margin: 12px 16px 8px;">
       <div class="glass-title">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        <!-- Replaced info icon with a dice/wheel SVG -->
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg> <!-- Temporary, will replace -->
         Spin & Win
       </div>
       <div class="spin-streak" id="spin-streak">🔥 Streak: 0 days</div>
@@ -4053,7 +4158,8 @@ app.get("/mini/:userId", (req, res) => {
     <!-- ========== CHANT & EARN CARD ========== -->
     <div class="glass" style="margin: 12px 16px 8px;">
       <div class="glass-title">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        <!-- Replaced info icon with a hand/chant SVG -->
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg> <!-- Temporary -->
         Chant & Earn
       </div>
       <div class="chant-level" id="chant-level">Seeker</div>
@@ -4166,71 +4272,58 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: PAY (Chat & Pay) ========== -->
+  <!-- ========== TAB: PAY (Redesigned) ========== -->
   <div id="tab-pay" class="tab-content">
-    <div class="glass" style="padding:12px 14px;">
-      <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
-        Payment Chat
+    <!-- Search area (visible when no user selected) -->
+    <div class="pay-search-area" id="paySearchArea">
+      <div class="glass" style="padding:12px 14px;">
+        <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          Search User
+        </div>
+        <input type="text" id="search-user" class="search-user-input" placeholder="Search by name or ID..." />
+        <div id="search-results"></div>
       </div>
-      <p style="font-size:11px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Min 200 pts | 15% tax | 1 payment/day</p>
-      
-      <input type="text" id="search-user" class="search-user-input" placeholder="Search user by name or ID..." />
-      <div id="search-results"></div>
-      
-      <div id="selected-user" style="display:none;">
-        <div class="selected-user-badge">
-          <span>💬 Sending to: <strong id="selected-name"></strong></span>
-          <button class="remove-btn" onclick="clearSelectedUser()">✕</button>
+    </div>
+
+    <!-- Fullscreen user view (visible when user selected) -->
+    <div class="pay-fullscreen" id="payFullscreen">
+      <button class="back-btn" id="payBackBtn">← Back</button>
+      <div class="user-profile">
+        <img id="payUserAvatar" class="avatar" src="https://via.placeholder.com/100" alt="User" />
+        <div class="info">
+          <h3 id="payUserName">User Name</h3>
+          <p id="payUserId">ID: 0</p>
         </div>
       </div>
-      
-      <div class="payment-chat-container" id="payment-chat-container">
-        <div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>
+      <div class="chat-area" id="payChatArea">
+        <!-- chat messages will be loaded here -->
       </div>
-      
-      <div class="payment-chat-input-row">
-        <input type="text" id="chat-input" placeholder="Type a message..." />
-        <button id="chat-send-btn">Send</button>
+      <div class="payment-input-area">
+        <input type="number" id="payAmountInput" class="amount-input" placeholder="Enter amount (min 200)" min="200" step="1" inputmode="numeric" />
+        <button class="pay-btn" id="paySendBtn">Pay Now</button>
+        <div style="margin-top:6px; font-size:12px; color:rgba(255,255,255,0.3); text-align:center;">Min 200 MythoPoints • 15% tax</div>
       </div>
-      
-      <div style="margin-top:8px; border-top:0.5px solid rgba(255,255,255,0.06); padding-top:8px;">
-        <div class="upi-display" id="upi-display">₹0</div>
-        <div class="upi-numpad" id="upi-numpad">
-          <button data-value="1">1</button>
-          <button data-value="2">2</button>
-          <button data-value="3">3</button>
-          <button data-value="4">4</button>
-          <button data-value="5">5</button>
-          <button data-value="6">6</button>
-          <button data-value="7">7</button>
-          <button data-value="8">8</button>
-          <button data-value="9">9</button>
-          <button data-value="clear" class="clear-btn">⌫</button>
-          <button data-value="0">0</button>
-          <button data-value="send" style="background:linear-gradient(135deg,#d500f9,#651fff);">Pay</button>
-        </div>
-      </div>
-      
-      <div class="payment-processing" id="payment-processing">
-        <svg class="svg-loader" viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
-          <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" 
-            stroke-dasharray="251.2" stroke-dashoffset="251.2"
-            style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
-          <text x="50" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Processing</text>
-        </svg>
-        <style>
-          @keyframes dash {
-            0% { stroke-dashoffset: 251.2; }
-            50% { stroke-dashoffset: 0; }
-            100% { stroke-dashoffset: -251.2; }
-          }
-        </style>
-        <p style="color:rgba(255,255,255,0.5); font-size:12px;">Verifying transaction...</p>
-      </div>
-      
-      <div id="payment-status" style="margin-top:4px; text-align:center; font-size:12px;"></div>
+      <div id="payStatus" style="text-align:center; margin-top:4px; font-size:12px;"></div>
+    </div>
+
+    <!-- Payment processing overlay -->
+    <div class="payment-processing" id="payment-processing">
+      <svg class="svg-loader" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" 
+          stroke-dasharray="251.2" stroke-dashoffset="251.2"
+          style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
+        <text x="50" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Processing</text>
+      </svg>
+      <style>
+        @keyframes dash {
+          0% { stroke-dashoffset: 251.2; }
+          50% { stroke-dashoffset: 0; }
+          100% { stroke-dashoffset: -251.2; }
+        }
+      </style>
+      <p style="color:rgba(255,255,255,0.5); font-size:12px;">Verifying transaction...</p>
     </div>
   </div>
 
@@ -4540,8 +4633,6 @@ app.get("/mini/:userId", (req, res) => {
         profileVerified.style.color = '#ff453a';
       }
       
-      document.getElementById('payment-status').innerHTML = \`Daily payments: \${state.payment.used}/\${state.payment.limit}\`;
-      
       // Spin
       document.getElementById('spin-streak').innerText = '🔥 Streak: ' + state.spin.streak + ' days';
       document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
@@ -4576,7 +4667,7 @@ app.get("/mini/:userId", (req, res) => {
       tg.HapticFeedback.selectionChanged();
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
       if (tabId === 'profile') { loadHistory(1, true); loadLeaderboard(); loadRatingStatus(); }
-      if (tabId === 'pay') { loadPaymentChat(); loadPaymentStatus(); }
+      if (tabId === 'pay') { /* handled by show/hide */ }
     }
     window.switchTab = switchTab;
 
@@ -4622,14 +4713,13 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // ─── SPIN & WIN ───
+    // ─── SPIN & WIN (Enhanced) ───
     const spinAdOverlay = document.getElementById('spinAdOverlay');
     const spinAdBtn = document.getElementById('spinAdBtn');
     const spinAdTitle = document.getElementById('spinAdTitle');
     let spinAdResolve = null;
-    let spinAdType = 'spin'; // 'spin' or 'double'
+    let spinAdType = 'spin';
 
-    // Initialize Adsgram for spin
     let spinAdController = null;
     try {
       spinAdController = window.Adsgram.init({ blockId: "38104" });
@@ -4666,14 +4756,13 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // Close overlay on outside click
     spinAdOverlay.addEventListener('click', (e) => {
       if (e.target === spinAdOverlay) {
-        // Do not close by clicking outside; force ad
+        // Do not close by clicking outside
       }
     });
 
-    // Draw spin wheel
+    // Spin wheel drawing (Enhanced with gradient segments)
     const wheelCanvas = document.getElementById('spinWheel');
     const ctx = wheelCanvas.getContext('2d');
     const segments = [
@@ -4695,23 +4784,39 @@ app.get("/mini/:userId", (req, res) => {
       
       ctx.clearRect(0, 0, w, h);
       
-      // Draw segments
+      // Draw glow
+      const glow = ctx.createRadialGradient(cx, cy, radius*0.2, cx, cy, radius);
+      glow.addColorStop(0, 'rgba(255,255,255,0.05)');
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+      
+      // Draw segments with gradients
       for (let i = 0; i < segments.length; i++) {
         const startAngle = rotation + i * segmentAngle;
         const endAngle = startAngle + segmentAngle;
         
+        // Segment gradient
+        const midAngle = startAngle + segmentAngle / 2;
+        const x1 = cx + Math.cos(midAngle - 0.2) * radius * 0.8;
+        const y1 = cy + Math.sin(midAngle - 0.2) * radius * 0.8;
+        const x2 = cx + Math.cos(midAngle + 0.2) * radius * 0.8;
+        const y2 = cy + Math.sin(midAngle + 0.2) * radius * 0.8;
+        const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+        grad.addColorStop(0, segments[i].color);
+        grad.addColorStop(1, segments[i].color);
+        // Darken slightly
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.arc(cx, cy, radius, startAngle, endAngle);
         ctx.closePath();
-        ctx.fillStyle = segments[i].color;
+        ctx.fillStyle = grad;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Text
-        const midAngle = startAngle + segmentAngle / 2;
+        // Text with shadow
         const textX = cx + Math.cos(midAngle) * radius * 0.65;
         const textY = cy + Math.sin(midAngle) * radius * 0.65;
         ctx.save();
@@ -4720,7 +4825,7 @@ app.get("/mini/:userId", (req, res) => {
         ctx.font = 'bold 28px "Segoe UI", sans-serif';
         ctx.fillStyle = '#fff';
         ctx.shadowColor = 'rgba(0,0,0,0.7)';
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = 8;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(segments[i].label, 0, 0);
@@ -4730,21 +4835,31 @@ app.get("/mini/:userId", (req, res) => {
       // Center circle
       ctx.beginPath();
       ctx.arc(cx, cy, 30, 0, 2 * Math.PI);
-      ctx.fillStyle = '#1a0a2b';
+      const centerGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 30);
+      centerGrad.addColorStop(0, '#2a0a40');
+      centerGrad.addColorStop(1, '#0a0014');
+      ctx.fillStyle = centerGrad;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.lineWidth = 2;
       ctx.stroke();
+      
+      // Outer border glow
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+      ctx.shadowColor = 'rgba(213,0,249,0.2)';
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
     let currentRotation = 0;
     drawWheel(currentRotation);
 
-    // Get segment index from rotation
     function getSegmentIndex(rotation) {
-      // Normalize rotation
       const norm = rotation % (2 * Math.PI);
-      // Segment 0 is at top (angle -PI/2)
       const topAngle = -Math.PI / 2;
       let angle = (norm + topAngle) % (2 * Math.PI);
       if (angle < 0) angle += 2 * Math.PI;
@@ -4777,7 +4892,6 @@ app.get("/mini/:userId", (req, res) => {
           updateUI();
           
           if (data.roll !== null && !data.doubleUsed) {
-            // Show previous result (if any)
             spinResult.style.display = 'block';
             spinRoll.innerText = '🎲 ' + data.roll;
             spinPoints.innerText = '+' + data.roll + ' MythoPoints';
@@ -4807,7 +4921,6 @@ app.get("/mini/:userId", (req, res) => {
       }
       spinError.innerText = '';
       
-      // Show ad overlay
       const adCompleted = await showSpinAd('spin');
       if (!adCompleted) {
         spinError.innerText = 'Ad was not completed. Please try again.';
@@ -4820,15 +4933,13 @@ app.get("/mini/:userId", (req, res) => {
       spinDoubleBtn.style.display = 'none';
       spinCenter.innerText = '...';
       
-      // Perform spin animation
-      const targetRotation = currentRotation + (Math.random() * 6 + 5) * 2 * Math.PI; // at least 5 full rotations
+      const targetRotation = currentRotation + (Math.random() * 6 + 5) * 2 * Math.PI;
       const duration = 3000;
       const start = performance.now();
       const startRot = currentRotation;
       
       function animateSpin(time) {
         const progress = Math.min((time - start) / duration, 1);
-        // Ease out cubic
         const eased = 1 - Math.pow(1 - progress, 3);
         const rot = startRot + (targetRotation - startRot) * eased;
         drawWheel(rot);
@@ -4837,8 +4948,7 @@ app.get("/mini/:userId", (req, res) => {
         } else {
           currentRotation = targetRotation;
           const idx = getSegmentIndex(targetRotation);
-          const roll = idx + 1; // 1-6
-          // Call API to save spin
+          const roll = idx + 1;
           completeSpin(roll);
         }
       }
@@ -4857,7 +4967,6 @@ app.get("/mini/:userId", (req, res) => {
           state.spin.doubleUsed = false;
           updateUI();
           
-          // Show result
           spinResult.style.display = 'block';
           spinRoll.innerText = '🎲 ' + data.roll;
           let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
@@ -4881,9 +4990,10 @@ app.get("/mini/:userId", (req, res) => {
           spinBtn.disabled = true;
           spinBtn.innerText = 'Wait...';
           
-          // Update countdown
           await loadSpinStatus();
           tg.HapticFeedback.notificationOccurred('success');
+          // Trigger celebration
+          triggerSpinCelebration(data.roll);
         } else {
           spinError.innerText = data.error || 'Spin failed.';
           spinCenter.innerText = 'SPIN';
@@ -4899,6 +5009,16 @@ app.get("/mini/:userId", (req, res) => {
         spinBtn.disabled = false;
         spinBtn.innerText = 'Spin';
       }
+    }
+
+    function triggerSpinCelebration(roll) {
+      // Confetti celebration
+      const end = Date.now() + 1500;
+      (function frame() {
+        confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      }());
     }
 
     spinDoubleBtn.addEventListener('click', async function() {
@@ -4938,7 +5058,6 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // Countdown update every second
     setInterval(loadSpinStatus, 1000);
 
     // ─── BANK DATA ───
@@ -5146,15 +5265,18 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT CHAT ───
+    // ─── PAYMENT (Redesigned) ───
     let selectedReceiver = null;
-    let upiAmount = 0;
-    let chatPollInterval = null;
+    let payChatPollInterval = null;
 
-    document.getElementById('search-user').addEventListener('input', async function() {
+    // Search
+    const searchInput = document.getElementById('search-user');
+    const searchResults = document.getElementById('search-results');
+
+    searchInput.addEventListener('input', async function() {
       const query = this.value.trim();
       if (query.length < 2) {
-        document.getElementById('search-results').innerHTML = '';
+        searchResults.innerHTML = '';
         return;
       }
       try {
@@ -5166,7 +5288,7 @@ app.get("/mini/:userId", (req, res) => {
             const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
                           \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
             html += \`
-              <div class="user-result" onclick="selectUser(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')">
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')">
                 \${avatar}
                 <div class="result-info">
                   <div class="name">\${u.name} \${u.username ? '@' + u.username : ''}</div>
@@ -5175,54 +5297,56 @@ app.get("/mini/:userId", (req, res) => {
               </div>
             \`;
           });
-          document.getElementById('search-results').innerHTML = html;
+          searchResults.innerHTML = html;
         } else {
-          document.getElementById('search-results').innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No users found.</div>';
+          searchResults.innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No users found.</div>';
         }
       } catch (e) {}
     });
 
-    function selectUser(id, name, photo) {
+    function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
-      document.getElementById('selected-user').style.display = 'block';
-      document.getElementById('selected-name').innerText = name;
-      document.getElementById('search-results').innerHTML = '';
-      document.getElementById('search-user').value = name;
-      loadPaymentChat();
-      document.getElementById('chat-input').focus();
+      // Show fullscreen view
+      document.getElementById('paySearchArea').classList.add('hidden');
+      document.getElementById('payFullscreen').classList.add('open');
+      
+      document.getElementById('payUserAvatar').src = photo || 'https://via.placeholder.com/100';
+      document.getElementById('payUserName').innerText = name;
+      document.getElementById('payUserId').innerText = 'ID: ' + id;
+      
+      // Load chat for this user
+      loadPayChat(id);
+      // Focus on amount input
+      document.getElementById('payAmountInput').focus();
+      // Clear status
+      document.getElementById('payStatus').innerHTML = '';
     }
-    window.selectUser = selectUser;
+    window.selectUserForPay = selectUserForPay;
 
-    function clearSelectedUser() {
+    document.getElementById('payBackBtn').addEventListener('click', function() {
+      document.getElementById('payFullscreen').classList.remove('open');
+      document.getElementById('paySearchArea').classList.remove('hidden');
       selectedReceiver = null;
-      document.getElementById('selected-user').style.display = 'none';
-      document.getElementById('search-user').value = '';
-      document.getElementById('payment-chat-container').innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>';
-      if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
+      if (payChatPollInterval) {
+        clearInterval(payChatPollInterval);
+        payChatPollInterval = null;
       }
-    }
-    window.clearSelectedUser = clearSelectedUser;
+    });
 
-    async function loadPaymentChat() {
-      if (!selectedReceiver) {
-        document.getElementById('payment-chat-container').innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">Select a user to start chatting</div>';
-        return;
-      }
+    async function loadPayChat(receiverId) {
       try {
         const res = await fetch('/api/payment/chat/' + userId);
         const data = await res.json();
         if (data.success) {
-          const container = document.getElementById('payment-chat-container');
+          const container = document.getElementById('payChatArea');
           const filtered = data.chats.filter(c => 
-            (c.senderId === selectedReceiver || c.receiverId === selectedReceiver) ||
-            (c.senderId === userId && c.receiverId === selectedReceiver) ||
-            (c.receiverId === userId && c.senderId === selectedReceiver)
+            (c.senderId === receiverId || c.receiverId === receiverId) ||
+            (c.senderId === userId && c.receiverId === receiverId) ||
+            (c.receiverId === userId && c.senderId === receiverId)
           );
           
           if (filtered.length === 0) {
-            container.innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">No messages yet. Start a conversation!</div>';
+            container.innerHTML = '<div class="empty" style="padding:8px; font-size:12px;">No messages yet.</div>';
           } else {
             let html = '';
             filtered.reverse().forEach(c => {
@@ -5259,68 +5383,25 @@ app.get("/mini/:userId", (req, res) => {
           }
         }
       } catch (e) {
-        console.error('Chat load error:', e);
+        console.error('Pay chat load error:', e);
       }
     }
 
-    async function sendChatMessage() {
-      const input = document.getElementById('chat-input');
-      const msg = input.value.trim();
-      if (!msg || !selectedReceiver) return;
-      
-      try {
-        await fetch('/api/payment/chat/message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            senderId: userId,
-            receiverId: selectedReceiver,
-            message: msg
-          })
-        });
-        input.value = '';
-        tg.HapticFeedback.impactOccurred('light');
-        loadPaymentChat();
-      } catch (e) {
-        alert('Failed to send message.');
-      }
-    }
-
-    document.getElementById('chat-send-btn').addEventListener('click', sendChatMessage);
-    document.getElementById('chat-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendChatMessage();
-    });
-
-    // UPI Numpad
-    document.querySelectorAll('.upi-numpad button').forEach(btn => {
-      btn.addEventListener('click', function() {
-        const value = this.dataset.value;
-        if (value === 'clear') {
-          upiAmount = Math.floor(upiAmount / 10);
-        } else if (value === 'send') {
-          sendPayment();
-          return;
-        } else {
-          const num = parseInt(value);
-          upiAmount = upiAmount * 10 + num;
-        }
-        document.getElementById('upi-display').innerText = '₹' + upiAmount;
-        tg.HapticFeedback.impactOccurred('light');
-      });
-    });
-
-    async function sendPayment() {
+    // Send payment from fullscreen
+    document.getElementById('paySendBtn').addEventListener('click', async function() {
+      const amount = parseInt(document.getElementById('payAmountInput').value);
       if (!selectedReceiver) {
-        alert('Please select a receiver first.');
+        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Please select a user first.</span>';
         return;
       }
-      if (upiAmount < 200) {
-        alert('Minimum 200 Mythopoints.');
+      if (isNaN(amount) || amount < 200) {
+        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Minimum 200 Mythopoints.</span>';
         return;
       }
       
       const processing = document.getElementById('payment-processing');
       processing.classList.add('active');
+      this.disabled = true;
       
       try {
         const res = await fetch('/api/payment/send', {
@@ -5329,41 +5410,30 @@ app.get("/mini/:userId", (req, res) => {
           body: JSON.stringify({
             senderId: userId,
             receiverId: selectedReceiver,
-            amount: upiAmount
+            amount: amount
           })
         });
         const data = await res.json();
         processing.classList.remove('active');
+        this.disabled = false;
         
         if (data.success) {
           tg.HapticFeedback.notificationOccurred('success');
-          await showSuccess(\`Payment of \${upiAmount} Mythopoints sent successfully!\`, 'Payment Successful');
+          await showSuccess(\`Payment of \${amount} Mythopoints sent successfully!\`, 'Payment Successful');
           loadDashboard();
-          loadPaymentStatus();
-          loadPaymentChat();
-          upiAmount = 0;
-          document.getElementById('upi-display').innerText = '₹0';
+          loadPayChat(selectedReceiver);
+          document.getElementById('payAmountInput').value = '';
+          document.getElementById('payStatus').innerHTML = '<span style="color:#30d158;">Payment successful!</span>';
         } else {
-          alert(data.error);
+          document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">' + data.error + '</span>';
           tg.HapticFeedback.notificationOccurred('error');
         }
       } catch (e) {
         processing.classList.remove('active');
-        alert('Network error. Please try again.');
+        this.disabled = false;
+        document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Network error.</span>';
       }
-    }
-
-    async function loadPaymentStatus() {
-      try {
-        const res = await fetch('/api/ios-dashboard-data/' + userId);
-        const data = await res.json();
-        if (data.success && data.payment) {
-          state.payment.used = data.payment.usedToday || 0;
-          state.payment.limit = data.payment.dailyLimit || 1;
-          updateUI();
-        }
-      } catch (e) {}
-    }
+    });
 
     // ─── HISTORY with Infinite Scroll ───
     let historyPage = 1;
@@ -5875,10 +5945,6 @@ app.get("/mini/:userId", (req, res) => {
         loadHistory(1, true); 
         loadLeaderboard(); 
         loadRatingStatus(); 
-      }
-      if (document.getElementById('tab-pay').classList.contains('active')) { 
-        loadPaymentChat(); 
-        loadPaymentStatus(); 
       }
     }
     
