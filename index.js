@@ -4472,7 +4472,7 @@ app.get("/mini/:userId", (req, res) => {
       
       const badge = document.getElementById('ui-verified');
       if (state.verified) {
-        badge.innerText = '✓ Secured Node';
+        badge.innerText = 'Online';
         badge.style.background = 'rgba(48,209,88,0.12)';
         badge.style.color = '#30d158';
       } else {
