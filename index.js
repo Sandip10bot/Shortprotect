@@ -5290,6 +5290,10 @@ app.get("/mini/:userId", (req, res) => {
 
     
             
+
+    
+                    
+            
     // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
     let selectedReceiver = null;
     let payChatPollInterval = null;
@@ -5309,20 +5313,20 @@ app.get("/mini/:userId", (req, res) => {
         if (data.success && data.users.length) {
           let html = '';
           data.users.forEach(u => {
-            const avatar = u.photo_url ? `<img src="${u.photo_url}" class="result-avatar" />` :
-                          `<div class="result-avatar">${u.name.charAt(0).toUpperCase()}</div>`;
-            html += `
-              <div class="user-result" onclick="selectUserForPay(${u.id}, '${u.name}', '${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
-                ${avatar}
+            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
+                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+            html += \`
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                \${avatar}
                 <div class="result-info" style="flex:1;">
-                  <div class="name" style="font-size:15px; font-weight:500;">${u.name} ${u.username ? '@'+u.username : ''}</div>
-                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">${u.points} pts</div>
+                  <div class="name" style="font-size:15px; font-weight:500;">\${u.name} \${u.username ? '@'+u.username : ''}</div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">\${u.points} pts</div>
                 </div>
                 <div style="font-size:12px; color:rgba(255,255,255,0.3);">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
                 </div>
               </div>
-            `;
+            \`;
           });
           searchResults.innerHTML = html;
         } else {
@@ -5368,12 +5372,12 @@ app.get("/mini/:userId", (req, res) => {
             (c.receiverId === userId && c.senderId === receiverId)
           );
           
-          let html = `
+          let html = \`
             <div class="encryption-msg">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
               Your messages and payments are secured with 256-bit encryption
             </div>
-          `;
+          \`;
 
           if (filtered.length === 0) {
              // Empty state
@@ -5386,41 +5390,40 @@ app.get("/mini/:userId", (req, res) => {
               const dateStr = dateObj.toLocaleDateString(undefined, {month:'long', day:'numeric', year:'numeric'});
               
               if (dateStr !== lastDate) {
-                html += `<div class="chat-date">${dateStr}</div>`;
+                html += \`<div class="chat-date">\${dateStr}</div>\`;
                 lastDate = dateStr;
               }
 
-              // Dynamic Avatar setup per user
               const avatar = isSent ? 
-                (tgUser?.photo_url ? `<img src="${tgUser.photo_url}" class="avatar" />` : `<div class="avatar" style="background:#d500f9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${(tgUser?.first_name || 'U').charAt(0)}</div>`) :
-                (c.senderPhoto ? `<img src="${c.senderPhoto}" class="avatar" />` : `<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${(c.senderName || 'U').charAt(0)}</div>`);
+                (tgUser?.photo_url ? \`<img src="\${tgUser.photo_url}" class="avatar" />\` : \`<div class="avatar" style="background:#d500f9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${(tgUser?.first_name || 'U').charAt(0)}</div>\`) :
+                (c.senderPhoto ? \`<img src="\${c.senderPhoto}" class="avatar" />\` : \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${(c.senderName || 'U').charAt(0)}</div>\`);
               
               let bubbleHtml = '';
               if (c.type === 'payment') {
                 const statusText = isSent ? 'SENT' : 'RECEIVED';
-                bubbleHtml = `
+                bubbleHtml = \`
                   <div class="bubble payment">
-                    <div class="payment-amount">M ${c.amount}</div>
+                    <div class="payment-amount">M \${c.amount}</div>
                     <div class="payment-status success">
                       <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="background:#30d158; color:#0a0014; border-radius:50%; padding:2px;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                      ${statusText} SECURELY
+                      \${statusText} SECURELY
                     </div>
-                    ${isSent ? `<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ${c.tax || 0} pts</div>` : ''}
+                    \${isSent ? '<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ' + (c.tax || 0) + ' pts</div>' : ''}
                   </div>
-                `;
+                \`;
               } else {
-                bubbleHtml = `<div class="bubble text">${c.message}</div>`;
+                bubbleHtml = \`<div class="bubble text">\${c.message}</div>\`;
               }
               
-              html += `
-                <div class="chat-msg ${isSent ? 'sent' : 'received'}">
-                  ${avatar}
+              html += \`
+                <div class="chat-msg \${isSent ? 'sent' : 'received'}">
+                  \${avatar}
                   <div class="bubble-wrapper">
-                    ${bubbleHtml}
-                    <div class="time">${time}</div>
+                    \${bubbleHtml}
+                    <div class="time">\${time}</div>
                   </div>
                 </div>
-              `;
+              \`;
             });
           }
           container.innerHTML = html;
@@ -5499,7 +5502,8 @@ app.get("/mini/:userId", (req, res) => {
             document.getElementById('paySendBtn').click();
         }
     });
-
+       
+    
     // ─── HISTORY with Infinite Scroll ───
     let historyPage = 1;
     let historyLoading = false;
