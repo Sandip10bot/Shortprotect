@@ -25,7 +25,7 @@ let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollectio
 let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
-let paymentChatCollection, webSpinSessionsCollection; // new
+let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
 
 async function connectDB() {
   try {
@@ -49,13 +49,14 @@ async function connectDB() {
     withdrawsCollection = db.collection("withdraws");
     paymentChatCollection = db.collection("payment_chats");
     webSpinSessionsCollection = db.collection("web_spin_sessions");
+    premiumUsersCollection = db.collection("premium_users");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
+    process.exit(1);
   }
 }
-connectDB();
 
 // ========================
 // GLOBAL THEME (used by other pages)
@@ -1091,8 +1092,10 @@ app.get("/link/:userId/:token", async (req, res) => {
   
   try {
     const adData = await searchAdsCollection.findOne({
-      $or: [ { verify_token: token }, { token: token } ],
-      $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+      $and: [
+        { $or: [ { verify_token: token }, { token: token } ] },
+        { $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ] }
+      ]
     });
     
     if (!adData) {
@@ -1136,8 +1139,10 @@ app.get("/verify/:prefix/:userId/:token", async (req, res) => {
 
   try {
       const adData = await searchAdsCollection.findOne({
-        $or: [ { verify_token: token }, { token: token } ],
-        $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ]
+        $and: [
+          { $or: [ { verify_token: token }, { token: token } ] },
+          { $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ] }
+        ]
       });
 
       if (!adData) {
@@ -1530,13 +1535,13 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         const now = Math.floor(Date.now() / 1000);
 
         const [user, bank, search, premium, stats, history, rating] = await Promise.all([
-            db.collection("users").findOne({ user_id: uid }),
-            db.collection("bank").findOne({ user_id: uid }),
-            db.collection("search_limits").findOne({ user_id: uid }),
-            db.collection("premium_users").findOne({ user_id: uid }),
-            db.collection("user_stats").findOne({ user_id: uid }),
-            db.collection("mphistory").find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray(),
-            db.collection("ratings").findOne({ _id: uid })
+            usersCollection.findOne({ user_id: uid }),
+            bankCollection.findOne({ user_id: uid }),
+            searchLimitCollection.findOne({ user_id: uid }),
+            premiumUsersCollection.findOne({ user_id: uid }),
+            userStatsCollection.findOne({ user_id: uid }),
+            mpHistoryCollection.find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray(),
+            ratingsCollection.findOne({ _id: uid })
         ]);
 
         let pendingInterest = 0;
@@ -1565,12 +1570,12 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
         }
 
         const today = new Date().toISOString().split('T')[0];
-        const paymentCount = await db.collection("payment_limits").countDocuments({
+        const paymentCount = await paymentLimitCollection.countDocuments({
             user_id: uid,
             date: today
         });
 
-        const allRatings = await db.collection("ratings").find({ rating: { $exists: true } }).toArray();
+        const allRatings = await ratingsCollection.find({ rating: { $exists: true } }).toArray();
         const totalRatings = allRatings.length;
         const avgRating = totalRatings > 0 ? (allRatings.reduce((sum, r) => sum + r.rating, 0) / totalRatings) : 0;
 
@@ -2518,6 +2523,7 @@ app.get("/mini/:userId", (req, res) => {
   <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <style>
     /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -4054,7 +4060,9 @@ app.get("/mini/:userId", (req, res) => {
       cursor: pointer; transition: transform 0.2s; flex-shrink: 0;
     }
     .pay-send-btn:active { transform: scale(0.9); }
-
+  </style>
+</head>
+<body>
 
   <!-- NAVBAR -->
   <div class="navbar" id="navTitle">Home</div>
@@ -5288,12 +5296,6 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    
-            
-
-    
-                    
-            
     // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
     let selectedReceiver = null;
     let payChatPollInterval = null;
@@ -5503,7 +5505,6 @@ app.get("/mini/:userId", (req, res) => {
         }
     });
        
-    
     // ─── HISTORY with Infinite Scroll ───
     let historyPage = 1;
     let historyLoading = false;
@@ -6348,7 +6349,11 @@ app.get("*", (req, res) => {
     res.redirect('https://t.me/MythoSerialBot');
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
-});
+// Start Server – Wait for DB connection first
+async function startServer() {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
+  });
+}
+startServer();
