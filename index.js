@@ -3773,81 +3773,61 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: bold;
     }
 
-    /* === SPIN WHEEL STYLES (Enhanced) === */
+    /* === SPIN WHEEL STYLES (Premium Enhanced) === */
     .spin-container {
       display: flex;
       flex-direction: column;
       align-items: center;
-      margin: 8px 0 12px;
+      margin: 12px 0 20px;
     }
     .spin-wheel-wrapper {
       position: relative;
-      width: 200px;
-      height: 200px;
+      width: 250px;
+      height: 250px;
       margin: 0 auto;
-      box-shadow: 0 0 40px rgba(213,0,249,0.3);
       border-radius: 50%;
+      box-shadow: 0 0 60px rgba(255, 215, 0, 0.25), 0 0 30px rgba(213,0,249,0.3);
+      background: #000;
     }
     .spin-wheel-canvas {
       width: 100%;
       height: 100%;
       border-radius: 50%;
-      box-shadow: 0 0 30px rgba(255,255,255,0.05), inset 0 0 30px rgba(0,0,0,0.5);
-      transition: transform 2s cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     .spin-pointer {
       position: absolute;
-      top: -8px;
+      top: -18px;
       left: 50%;
       transform: translateX(-50%) rotate(180deg);
       width: 0;
       height: 0;
-      border-left: 12px solid transparent;
-      border-right: 12px solid transparent;
-      border-bottom: 20px solid #ffd60a;
-      filter: drop-shadow(0 0 8px rgba(255,214,10,0.8));
-      z-index: 10;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-bottom: 25px solid #FFD700;
+      filter: drop-shadow(0 -5px 12px rgba(255, 214, 10, 0.9));
+      z-index: 20;
     }
     .spin-center {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: radial-gradient(circle, #1a0a2b, #0a0014);
-      border: 2px solid rgba(255,255,255,0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 14px;
-      color: #fff;
-      z-index: 10;
-      box-shadow: 0 0 20px rgba(0,0,0,0.6);
-      letter-spacing: 0.5px;
+      display: none; 
     }
     .spin-btn {
-      margin-top: 16px;
-      padding: 12px 40px;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      border: none;
+      margin-top: 24px;
+      padding: 14px 45px;
+      background: linear-gradient(135deg, #FFD700, #F59E0B);
+      border: 2px solid #FFF8DC;
       border-radius: 30px;
-      color: #fff;
-      font-weight: 700;
+      color: #000;
+      font-weight: 800;
       font-size: 18px;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      box-shadow: 0 8px 25px rgba(213,0,249,0.5);
+      letter-spacing: 2px;
+      box-shadow: 0 8px 30px rgba(255, 215, 0, 0.5);
       cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
+      transition: all 0.2s;
     }
-    .spin-btn:active { transform: scale(0.94); }
-    .spin-btn:disabled {
-      opacity: 0.5;
-      pointer-events: none;
-    }
+    .spin-btn:active { transform: scale(0.92); box-shadow: 0 4px 15px rgba(255, 215, 0, 0.5); }
+    .spin-btn:disabled { background: #444; border-color: #666; color: #888; box-shadow: none; pointer-events: none; }
+    
     .spin-result-box {
       margin-top: 12px;
       padding: 10px 16px;
@@ -4793,112 +4773,121 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // Spin wheel drawing (Enhanced with gradient segments)
+    // === SPIN WHEEL LOGIC (Enhanced Premium & Perfect Sync) ===
     const wheelCanvas = document.getElementById('spinWheel');
     const ctx = wheelCanvas.getContext('2d');
+    
+    // Premium Segment Colors
     const segments = [
-      { label: '1', color: '#ff4d4d' },
-      { label: '2', color: '#ff9f1c' },
-      { label: '3', color: '#ffd60a' },
-      { label: '4', color: '#30d158' },
-      { label: '5', color: '#0a84ff' },
-      { label: '6', color: '#d500f9' }
+      { label: '1', color: '#ff0055', glow: '#ff4d4d' },
+      { label: '2', color: '#6600ff', glow: '#9933ff' },
+      { label: '3', color: '#ffaa00', glow: '#ffcc00' },
+      { label: '4', color: '#00aa00', glow: '#00ff55' },
+      { label: '5', color: '#0055ff', glow: '#00aaff' },
+      { label: '6', color: '#aa00ff', glow: '#ff00aa' }
     ];
     const segmentAngle = (2 * Math.PI) / segments.length;
 
     function drawWheel(rotation = 0) {
-      const w = wheelCanvas.width;
-      const h = wheelCanvas.height;
+      const w = wheelCanvas.width = 400; 
+      const h = wheelCanvas.height = 400;
       const cx = w / 2;
       const cy = h / 2;
-      const radius = Math.min(w, h) / 2 - 10;
+      const radius = Math.min(w, h) / 2 - 20; 
       
       ctx.clearRect(0, 0, w, h);
       
-      // Draw glow
-      const glow = ctx.createRadialGradient(cx, cy, radius*0.2, cx, cy, radius);
-      glow.addColorStop(0, 'rgba(255,255,255,0.05)');
-      glow.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-      
-      // Draw segments with gradients
+      // Draw Inner Segments
       for (let i = 0; i < segments.length; i++) {
         const startAngle = rotation + i * segmentAngle;
         const endAngle = startAngle + segmentAngle;
-        
-        // Segment gradient
         const midAngle = startAngle + segmentAngle / 2;
-        const x1 = cx + Math.cos(midAngle - 0.2) * radius * 0.8;
-        const y1 = cy + Math.sin(midAngle - 0.2) * radius * 0.8;
-        const x2 = cx + Math.cos(midAngle + 0.2) * radius * 0.8;
-        const y2 = cy + Math.sin(midAngle + 0.2) * radius * 0.8;
-        const grad = ctx.createLinearGradient(x1, y1, x2, y2);
-        grad.addColorStop(0, segments[i].color);
-        grad.addColorStop(1, segments[i].color);
-        // Darken slightly
+        
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        grad.addColorStop(0, '#1a001a'); 
+        grad.addColorStop(0.5, segments[i].color);
+        grad.addColorStop(1, segments[i].glow);
+        
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.arc(cx, cy, radius, startAngle, endAngle);
         ctx.closePath();
         ctx.fillStyle = grad;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = 2;
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 3;
         ctx.stroke();
         
-        // Text with shadow
-        const textX = cx + Math.cos(midAngle) * radius * 0.65;
-        const textY = cy + Math.sin(midAngle) * radius * 0.65;
+        const textX = cx + Math.cos(midAngle) * radius * 0.7;
+        const textY = cy + Math.sin(midAngle) * radius * 0.7;
+        
         ctx.save();
         ctx.translate(textX, textY);
         ctx.rotate(midAngle + Math.PI / 2);
-        ctx.font = 'bold 28px "Segoe UI", sans-serif';
-        ctx.fillStyle = '#fff';
-        ctx.shadowColor = 'rgba(0,0,0,0.7)';
-        ctx.shadowBlur = 8;
+        ctx.font = '900 36px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 3;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(segments[i].label, 0, 0);
         ctx.restore();
       }
       
-      // Center circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, 30, 0, 2 * Math.PI);
-      const centerGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 30);
-      centerGrad.addColorStop(0, '#2a0a40');
-      centerGrad.addColorStop(1, '#0a0014');
-      ctx.fillStyle = centerGrad;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      
-      // Outer border glow
+      // Outer Metallic Gold Rim
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
-      ctx.shadowColor = 'rgba(213,0,249,0.2)';
-      ctx.shadowBlur = 20;
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-      ctx.lineWidth = 2;
+      const rimGrad = ctx.createLinearGradient(0, 0, w, h);
+      rimGrad.addColorStop(0, '#FFDF00');
+      rimGrad.addColorStop(0.5, '#FFF8DC');
+      rimGrad.addColorStop(1, '#B8860B');
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = rimGrad;
       ctx.stroke();
-      ctx.shadowBlur = 0;
+      
+      // Glowing LED Bulbs on the Rim
+      const numDots = 24;
+      for (let j = 0; j < numDots; j++) {
+        const dotAngle = rotation + (j * 2 * Math.PI / numDots);
+        const dotX = cx + Math.cos(dotAngle) * radius;
+        const dotY = cy + Math.sin(dotAngle) * radius;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = (j % 2 === 0) ? '#FFFFFF' : '#FFD700'; 
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+      
+      // Center Metallic Button
+      ctx.beginPath();
+      ctx.arc(cx, cy, 45, 0, 2 * Math.PI);
+      const centerGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 45);
+      centerGrad.addColorStop(0, '#444');
+      centerGrad.addColorStop(1, '#050011');
+      ctx.fillStyle = centerGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      
+      ctx.font = '800 20px "Segoe UI", sans-serif';
+      ctx.fillStyle = '#FFD700';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.5)';
+      ctx.shadowBlur = 8;
+      ctx.fillText("SPIN", cx, cy);
+      ctx.shadowBlur = 0; 
     }
 
     let currentRotation = 0;
     drawWheel(currentRotation);
 
-    function getSegmentIndex(rotation) {
-      const norm = rotation % (2 * Math.PI);
-      const topAngle = -Math.PI / 2;
-      let angle = (norm + topAngle) % (2 * Math.PI);
-      if (angle < 0) angle += 2 * Math.PI;
-      const seg = Math.floor(angle / segmentAngle);
-      return seg % segments.length;
-    }
-
-    // Spin logic
     const spinBtn = document.getElementById('spinBtn');
     const spinResult = document.getElementById('spin-result');
     const spinRoll = document.getElementById('spin-roll');
@@ -4906,7 +4895,6 @@ app.get("/mini/:userId", (req, res) => {
     const spinBonus = document.getElementById('spin-bonus');
     const spinDoubleBtn = document.getElementById('spinDoubleBtn');
     const spinError = document.getElementById('spin-error');
-    const spinCenter = document.getElementById('spinCenter');
 
     let isSpinning = false;
 
@@ -4962,88 +4950,93 @@ app.get("/mini/:userId", (req, res) => {
       spinBtn.disabled = true;
       spinResult.style.display = 'none';
       spinDoubleBtn.style.display = 'none';
-      spinCenter.innerText = '...';
       
-      const targetRotation = currentRotation + (Math.random() * 6 + 5) * 2 * Math.PI;
-      const duration = 3000;
-      const start = performance.now();
-      const startRot = currentRotation;
-      
-      function animateSpin(time) {
-        const progress = Math.min((time - start) / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-        const rot = startRot + (targetRotation - startRot) * eased;
-        drawWheel(rot);
-        if (progress < 1) {
-          requestAnimationFrame(animateSpin);
-        } else {
-          currentRotation = targetRotation;
-          const idx = getSegmentIndex(targetRotation);
-          const roll = idx + 1;
-          completeSpin(roll);
-        }
-      }
-      requestAnimationFrame(animateSpin);
-    });
-
-    async function completeSpin(roll) {
       try {
+        // STEP 1: Fetch result BEFORE spinning
         const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
         const data = await res.json();
+        
         if (data.success) {
-          state.mythopoints = data.newBalance;
-          state.spin.canSpin = false;
-          state.spin.streak = data.streak;
-          state.spin.roll = data.roll;
-          state.spin.doubleUsed = false;
-          updateUI();
-          
-          spinResult.style.display = 'block';
-          spinRoll.innerText = '🎲 ' + data.roll;
-          let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
-          if (data.bonus > 0) {
-            pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
-            spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
-          } else {
-            spinBonus.innerText = '';
-          }
-          spinPoints.innerText = pointsMsg;
-          
-          if (data.canDouble !== false) {
-            spinDoubleBtn.style.display = 'block';
-            spinDoubleBtn.disabled = false;
-          } else {
-            spinDoubleBtn.style.display = 'none';
-          }
-          
-          spinCenter.innerText = 'SPIN';
-          isSpinning = false;
-          spinBtn.disabled = true;
-          spinBtn.innerText = 'Wait...';
-          
-          await loadSpinStatus();
-          tg.HapticFeedback.notificationOccurred('success');
-          // Trigger celebration
-          triggerSpinCelebration(data.roll);
+            // STEP 2: Calculate perfect rotation
+            const targetSegmentIndex = data.roll - 1; 
+            const currentRotMod = currentRotation % (2 * Math.PI);
+            
+            const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
+            
+            let rotationNeeded = offsetAngle - currentRotMod;
+            while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
+            
+            const extraSpins = 10 * 2 * Math.PI; 
+            const targetRotation = currentRotation + rotationNeeded + extraSpins;
+            
+            const duration = 5000; // 5 Seconds Fast-to-Slow
+            const start = performance.now();
+            const startRot = currentRotation;
+            
+            function animateSpin(time) {
+                const progress = Math.min((time - start) / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 4); 
+                const rot = startRot + (targetRotation - startRot) * eased;
+                
+                drawWheel(rot);
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animateSpin);
+                } else {
+                    currentRotation = targetRotation;
+                    showSpinResult(data);
+                }
+            }
+            requestAnimationFrame(animateSpin);
         } else {
-          spinError.innerText = data.error || 'Spin failed.';
-          spinCenter.innerText = 'SPIN';
+            spinError.innerText = data.error || 'Spin failed.';
+            isSpinning = false;
+            spinBtn.disabled = false;
+            spinBtn.innerText = 'Spin';
+        }
+      } catch (e) {
+          spinError.innerText = 'Network error. Please try again.';
           isSpinning = false;
           spinBtn.disabled = false;
           spinBtn.innerText = 'Spin';
-        }
-      } catch (e) {
-        console.error('Spin API error:', e);
-        spinError.innerText = 'Network error. Please try again.';
-        spinCenter.innerText = 'SPIN';
-        isSpinning = false;
-        spinBtn.disabled = false;
-        spinBtn.innerText = 'Spin';
       }
+    });
+
+    function showSpinResult(data) {
+        state.mythopoints = data.newBalance;
+        state.spin.canSpin = false;
+        state.spin.streak = data.streak;
+        state.spin.roll = data.roll;
+        state.spin.doubleUsed = false;
+        updateUI();
+        
+        spinResult.style.display = 'block';
+        spinRoll.innerText = '🎲 ' + data.roll;
+        
+        let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
+        if (data.bonus > 0) {
+          pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
+          spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
+        } else {
+          spinBonus.innerText = '';
+        }
+        spinPoints.innerText = pointsMsg;
+        
+        if (data.canDouble !== false) {
+          spinDoubleBtn.style.display = 'block';
+          spinDoubleBtn.disabled = false;
+        }
+        
+        isSpinning = false;
+        spinBtn.disabled = true;
+        spinBtn.innerText = 'Wait...';
+        
+        loadSpinStatus();
+        tg.HapticFeedback.notificationOccurred('success');
+        triggerSpinCelebration(data.roll);
     }
 
     function triggerSpinCelebration(roll) {
-      // Confetti celebration
       const end = Date.now() + 1500;
       (function frame() {
         confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
