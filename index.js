@@ -5604,6 +5604,12 @@ app.get("/mini/:userId", (req, res) => {
           data.recent.forEach(u => {
             const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
                           \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+            
+            // Unread Count Badge HTML
+            const unreadBadge = u.unreadCount > 0 
+                ? \`<div style="background:#00e676; color:#000; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px;">\${u.unreadCount}</div>\` 
+                : '';
+
             html += \`
               <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
                 \${avatar}
@@ -5611,8 +5617,11 @@ app.get("/mini/:userId", (req, res) => {
                   <div class="name" style="font-size:15px; font-weight:500;">\${u.name}</div>
                   <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">\${u.lastMessage}</div>
                 </div>
-                <div style="font-size:12px; color:rgba(255,255,255,0.3);">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                  \${unreadBadge}
+                  <div style="font-size:12px; color:rgba(255,255,255,0.3);">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+                  </div>
                 </div>
               </div>
             \`;
@@ -5638,7 +5647,15 @@ app.get("/mini/:userId", (req, res) => {
       loadPayChat(id);
       document.getElementById('payAmountInput').focus();
       document.getElementById('payStatus').innerHTML = '';
+
+      // Hit API to mark messages as read
+      fetch('/api/payment/chat/mark-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, otherId: id })
+      }).catch(e => console.log(e));
     }
+
     window.selectUserForPay = selectUserForPay;
 
     document.getElementById('payBackBtn').addEventListener('click', function() {
