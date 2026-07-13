@@ -4511,8 +4511,17 @@ app.get("/mini/:userId", (req, res) => {
         </div>
         <input type="text" id="search-user" class="search-user-input" placeholder="Search name or ID..." autocomplete="off" />
         <div id="search-results"></div>
+        
+        <!-- NEW: Recent Interactions Container -->
+        <div id="recent-chats-container">
+          <div style="font-size:12px; color:rgba(255,255,255,0.4); margin: 16px 4px 8px; text-transform:uppercase; font-weight:600;">Recent Chats</div>
+          <div id="recent-chats-list">
+            <div class="empty" style="font-size:12px; padding:12px;">Loading recents...</div>
+          </div>
+        </div>
       </div>
     </div>
+
 
     <!-- Fullscreen Chat view -->
     <div class="pay-fullscreen" id="payFullscreen">
