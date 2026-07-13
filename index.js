@@ -4140,8 +4140,9 @@ app.get("/mini/:userId", (req, res) => {
         <div class="badge" id="ui-verified">Checking...</div>
       </div>
       <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
       </a>
+
     </div>
 
     <!-- ========== SCRATCH CARD BANNER ========== -->
@@ -4159,10 +4160,10 @@ app.get("/mini/:userId", (req, res) => {
     <!-- ========== SPIN & WIN SECTION (Enhanced) ========== -->
     <div class="glass" style="margin: 12px 16px 8px;">
       <div class="glass-title">
-        <!-- Replaced info icon with a dice/wheel SVG -->
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg> <!-- Temporary, will replace -->
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 2.07c3.61.45 6.48 3.33 6.93 6.93h-6.93zM11 4.07v6.93H4.07c.45-3.6 3.32-6.48 6.93-6.93zm-6.93 8.93H11v6.93c-3.61-.45-6.48-3.32-6.93-6.93zm8.93 6.93V13h6.93c-.45 3.61-3.32 6.48-6.93 6.93z"/></svg>
         Spin & Win
       </div>
+
       <div class="spin-streak" id="spin-streak">🔥 Streak: 0 days</div>
       <div class="spin-countdown" id="spin-countdown">⏳ Next spin: Available now!</div>
       
@@ -4252,10 +4253,10 @@ app.get("/mini/:userId", (req, res) => {
     <!-- ========== CHANT & EARN CARD ========== -->
     <div class="glass" style="margin: 12px 16px 8px;">
       <div class="glass-title">
-        <!-- Replaced info icon with a hand/chant SVG -->
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg> <!-- Temporary -->
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c4.97 0 9-4.03 9-9-4.97 0-9-9-9-9s-4.03 9-9 9c0 4.97 4.03 9 9 9zm0-15.53c1.78 3.52 4.14 5.92 6.32 7.15-1.57 2.12-4.08 3.53-6.32 3.53s-4.75-1.41-6.32-3.53c2.18-1.23 4.54-3.63 6.32-7.15z"/></svg>
         Chant & Earn
       </div>
+
       <div class="chant-level" id="chant-level">Seeker</div>
       <div class="chant-progress-container">
         <div class="chant-progress-bar" id="chant-progress" style="width:0%;"></div>
