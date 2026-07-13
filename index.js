@@ -2524,6 +2524,15 @@ app.get("/mini/:userId", (req, res) => {
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Telegram Ads Controller -->
+  <script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
+  <script>
+    window.TelegramAdsController = new TelegramAdsController();
+    window.TelegramAdsController.initialize({
+      pubId: "1017243",
+      appId: "8067",
+    });
+  </script>
   <style>
     /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
