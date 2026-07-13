@@ -2190,6 +2190,50 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
     }
 });
 
+
+app.get("/api/payment/recent/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        const chats = await paymentChatCollection.find({
+            $or: [{ senderId: uid }, { receiverId: uid }]
+        }).sort({ timestamp: -1 }).toArray();
+
+        const recentUsersMap = new Map();
+        const userIds = new Set();
+
+        chats.forEach(c => {
+            const otherId = c.senderId === uid ? c.receiverId : c.senderId;
+            if (!recentUsersMap.has(otherId)) {
+                recentUsersMap.set(otherId, {
+                    lastMessage: c.message || 'Payment transaction',
+                    timestamp: c.timestamp
+                });
+                userIds.add(otherId);
+            }
+        });
+
+        const users = await usersCollection
+            .find({ user_id: { $in: Array.from(userIds) } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+
+        const formatted = users.map(u => ({
+            id: u.user_id,
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            username: u.username || null,
+            photo_url: u.photo_url || null,
+            lastMessage: recentUsersMap.get(u.user_id).lastMessage,
+            timestamp: recentUsersMap.get(u.user_id).timestamp
+        })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); 
+
+        res.json({ success: true, recent: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+
 app.post("/api/payment/chat/message", async (req, res) => {
     try {
         const { senderId, receiverId, message } = req.body;
