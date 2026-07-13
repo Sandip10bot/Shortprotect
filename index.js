@@ -5514,39 +5514,44 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
+        // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
     let selectedReceiver = null;
     let payChatPollInterval = null;
 
     const searchInput = document.getElementById('search-user');
     const searchResults = document.getElementById('search-results');
+    const recentChatsContainer = document.getElementById('recent-chats-container');
 
     searchInput.addEventListener('input', async function() {
       const query = this.value.trim();
       if (query.length < 2) {
         searchResults.innerHTML = '';
+        recentChatsContainer.style.display = 'block'; 
         return;
       }
+      
+      recentChatsContainer.style.display = 'none'; 
+      
       try {
         const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
         const data = await res.json();
         if (data.success && data.users.length) {
           let html = '';
           data.users.forEach(u => {
-            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
-                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
-            html += \`
-              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
-                \${avatar}
+            const avatar = u.photo_url ? `<img src="${u.photo_url}" class="result-avatar" />` :
+                          `<div class="result-avatar">${u.name.charAt(0).toUpperCase()}</div>`;
+            html += `
+              <div class="user-result" onclick="selectUserForPay(${u.id}, '${u.name}', '${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                ${avatar}
                 <div class="result-info" style="flex:1;">
-                  <div class="name" style="font-size:15px; font-weight:500;">\${u.name} \${u.username ? '@'+u.username : ''}</div>
-                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">\${u.points} pts</div>
+                  <div class="name" style="font-size:15px; font-weight:500;">${u.name} ${u.username ? '@'+u.username : ''}</div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">${u.points} pts</div>
                 </div>
                 <div style="font-size:12px; color:rgba(255,255,255,0.3);">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
                 </div>
               </div>
-            \`;
+            `;
           });
           searchResults.innerHTML = html;
         } else {
@@ -5554,6 +5559,39 @@ app.get("/mini/:userId", (req, res) => {
         }
       } catch (e) {}
     });
+
+    async function loadRecentChats() {
+      try {
+        const res = await fetch('/api/payment/recent/' + userId);
+        const data = await res.json();
+        const listContainer = document.getElementById('recent-chats-list');
+        
+        if (data.success && data.recent.length > 0) {
+          let html = '';
+          data.recent.forEach(u => {
+            const avatar = u.photo_url ? `<img src="${u.photo_url}" class="result-avatar" />` :
+                          `<div class="result-avatar">${u.name.charAt(0).toUpperCase()}</div>`;
+            html += `
+              <div class="user-result" onclick="selectUserForPay(${u.id}, '${u.name}', '${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                ${avatar}
+                <div class="result-info" style="flex:1; overflow:hidden;">
+                  <div class="name" style="font-size:15px; font-weight:500;">${u.name}</div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${u.lastMessage}</div>
+                </div>
+                <div style="font-size:12px; color:rgba(255,255,255,0.3);">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+                </div>
+              </div>
+            `;
+          });
+          listContainer.innerHTML = html;
+        } else {
+          listContainer.innerHTML = '<div class="empty" style="font-size:12px; padding:12px;">No recent chats yet. Send a payment to start!</div>';
+        }
+      } catch (e) {
+        console.error("Error loading recent chats:", e);
+      }
+    }
 
     function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
@@ -5578,7 +5616,10 @@ app.get("/mini/:userId", (req, res) => {
         clearInterval(payChatPollInterval);
         payChatPollInterval = null;
       }
+      loadRecentChats(); 
     });
+
+    
 
     async function loadPayChat(receiverId) {
       try {
@@ -6224,6 +6265,7 @@ app.get("/mini/:userId", (req, res) => {
       await fetchChantStats();
       await loadChantLeaderboard();
       await loadSpinStatus();
+      loadRecentChats(); //
       
       if (document.getElementById('tab-bank').classList.contains('active')) { 
         loadBankData(); 
