@@ -3289,27 +3289,101 @@ app.get("/mini/:userId", (req, res) => {
     .quick-action.store { border-color: rgba(255,214,10,0.15); }
     .quick-action.pay { border-color: rgba(10,132,255,0.15); }
 
-    /* === STORE === */
-    .store-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.04);
+    /* === STORE (Professional Redesign) === */
+    .store-section-title {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin: 20px 16px 10px;
+      font-weight: 700;
     }
-    .store-item:last-child { border-bottom: none; }
-    .store-item button {
+    
+    /* Boosts List Cards */
+    .store-card {
+      background: rgba(45,10,80,0.3);
+      backdrop-filter: blur(12px);
+      border: 0.5px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 14px;
+      margin: 0 16px 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .store-card:active {
+      transform: scale(0.96);
+      background: rgba(213,0,249,0.1);
+    }
+    .store-icon-wrap {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: inset 0 0 10px rgba(255,255,255,0.05);
+    }
+    .store-icon-wrap svg { width: 24px; height: 24px; fill: currentColor; }
+    
+    .store-info { flex: 1; }
+    .store-info h4 { margin: 0; font-size: 15px; font-weight: 600; color: #fff; letter-spacing: -0.2px; }
+    .store-info p { margin: 4px 0 0; font-size: 11px; color: rgba(255,255,255,0.5); }
+    
+    .store-buy-btn {
       background: linear-gradient(135deg, #d500f9, #651fff);
       border: none;
-      padding: 4px 14px;
+      padding: 8px 16px;
       border-radius: 20px;
-      color: white;
-      font-weight: 600;
+      color: #fff;
+      font-weight: 700;
       font-size: 12px;
+      box-shadow: 0 6px 15px rgba(213,0,249,0.3);
       cursor: pointer;
       transition: transform 0.15s;
     }
-    .store-item button:active { transform: scale(0.92); }
+    .store-buy-btn:active { transform: scale(0.92); box-shadow: 0 2px 8px rgba(213,0,249,0.4); }
+
+    /* Coupon Grid */
+    .coupon-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 0 16px 20px;
+    }
+    .coupon-card {
+      background: linear-gradient(135deg, rgba(255,214,10,0.03), rgba(255,214,10,0.08));
+      border: 1.5px dashed rgba(255,214,10,0.3);
+      border-radius: 16px;
+      padding: 16px 12px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: transform 0.2s;
+    }
+    .coupon-card:active { transform: scale(0.95); background: rgba(255,214,10,0.1); }
+    .coupon-icon { color: #ffd60a; margin-bottom: 8px; filter: drop-shadow(0 2px 8px rgba(255,214,10,0.4)); }
+    .coupon-icon svg { width: 32px; height: 32px; fill: currentColor; }
+    .coupon-card h4 { margin: 0; font-size: 16px; font-weight: 800; color: #ffd60a; }
+    .coupon-card p { margin: 4px 0 12px; font-size: 10px; color: rgba(255,255,255,0.6); }
+    
+    .coupon-buy-btn {
+      width: 100%;
+      background: rgba(255,214,10,0.15);
+      color: #ffd60a;
+      border: 1px solid rgba(255,214,10,0.3);
+      padding: 8px 0;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .coupon-buy-btn:active { background: rgba(255,214,10,0.3); }
+
 
     /* === RATING STARS === */
     .star-rating {
@@ -4275,22 +4349,110 @@ app.get("/mini/:userId", (req, res) => {
 
   <!-- ========== TAB: STORE ========== -->
   <div id="tab-store" class="tab-content">
+    
+    <!-- Header -->
     <div class="glass">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
         MythoStore
       </div>
-      <div id="store-items">
-        <div class="store-item"><span>🔑 5 Search Credits</span><button onclick="purchase('credits')">50 pts</button></div>
-        <div class="store-item"><span>⏱️ Skip Cooldown</span><button onclick="purchase('skip_cooldown')">50 pts</button></div>
-        <div class="store-item"><span>🎁 Mystery Box</span><button onclick="purchase('mystery')">100 pts</button></div>
-        <div class="store-item"><span>🎟️ 10% OFF Coupon</span><button onclick="purchase('coupon_10')">200 pts</button></div>
-        <div class="store-item"><span>🎟️ 20% OFF Coupon</span><button onclick="purchase('coupon_20')">500 pts</button></div>
-        <div class="store-item"><span>🎟️ 30% OFF Coupon</span><button onclick="purchase('coupon_30')">800 pts</button></div>
-        <div class="store-item"><span>🎟️ 50% OFF Coupon</span><button onclick="purchase('coupon_50')">1500 pts</button></div>
+      <p style="font-size: 13px; color: rgba(255,255,255,0.5); margin:0;">Spend Mythopoints to enhance your experience.</p>
+    </div>
+
+    <!-- Category 1: Premium Boosts -->
+    <div class="store-section-title">Premium Boosts</div>
+    
+    <!-- Credits -->
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(10,132,255,0.15); color: #0a84ff;">
+        <svg viewBox="0 0 24 24"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4h2.35v4h4v-4h2v-4h-8.35zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
       </div>
+      <div class="store-info">
+        <h4>5 Search Credits</h4>
+        <p>Instantly refill your search limit</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('credits')">50 pts</button>
+    </div>
+
+    <!-- Skip Cooldown -->
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(48,209,88,0.15); color: #30d158;">
+        <svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+      </div>
+      <div class="store-info">
+        <h4>Skip Cooldown</h4>
+        <p>Bypass the waiting timer immediately</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('skip_cooldown')">50 pts</button>
+    </div>
+
+    <!-- Mystery Box -->
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(213,0,249,0.15); color: #ea80fc;">
+        <svg viewBox="0 0 24 24"><path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1h-4v-1c0-.55.45-1 1-1 1.14 0 2.12.58 2.66 1.44l.34.46.34-.46C15.88 4.58 16.86 4 18 4zM9 4c.55 0 1 .45 1 1v1H6c0-.55.45-1 1-1s1-.45 1-1zm11 16H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v7z"/></svg>
+      </div>
+      <div class="store-info">
+        <h4>Mystery Box</h4>
+        <p>Win credits, coupons, or a jackpot!</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('mystery')">100 pts</button>
+    </div>
+
+    <!-- Category 2: Coupons Grid -->
+    <div class="store-section-title">Discount Coupons</div>
+    <div class="coupon-grid">
+      
+      <!-- 10% Coupon -->
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>10% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_10')">200 pts</button>
+      </div>
+
+      <!-- 20% Coupon -->
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>20% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_20')">500 pts</button>
+      </div>
+
+      <!-- 30% Coupon -->
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>30% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_30')">800 pts</button>
+      </div>
+
+      <!-- 50% Coupon -->
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>50% OFF</h4>
+          <p>Ultimate discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_50')">1500 pts</button>
+      </div>
+      
     </div>
   </div>
+
 
   <!-- ========== TAB: PAY (Redesigned) ========== -->
   <div id="tab-pay" class="tab-content">
