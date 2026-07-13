@@ -2191,25 +2191,41 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
 });
 
 
+
+
+
+
 app.get("/api/payment/recent/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
         
         const chats = await paymentChatCollection.find({
-            $or: [{ senderId: uid }, { receiverId: uid }]
+            $or: [{ senderId: uid }, { receiverId: uid }, { senderId: String(uid) }, { receiverId: String(uid) }]
         }).sort({ timestamp: -1 }).toArray();
 
         const recentUsersMap = new Map();
         const userIds = new Set();
 
         chats.forEach(c => {
-            const otherId = c.senderId === uid ? c.receiverId : c.senderId;
+            const sId = Number(c.senderId);
+            const rId = Number(c.receiverId);
+            const currentUid = Number(uid);
+            
+            let otherId = (sId === currentUid) ? rId : sId;
+            if (otherId === currentUid) return; // Skip self
+
             if (!recentUsersMap.has(otherId)) {
                 recentUsersMap.set(otherId, {
                     lastMessage: c.message || 'Payment transaction',
-                    timestamp: c.timestamp
+                    timestamp: c.timestamp,
+                    unreadCount: 0 // Count initialize kiya
                 });
                 userIds.add(otherId);
+            }
+            
+            // Agar message samne wale (otherId) ne bheja hai, aur wo 'read' nahi hai
+            if (sId === otherId && !c.read) {
+                recentUsersMap.get(otherId).unreadCount += 1;
             }
         });
 
@@ -2224,11 +2240,27 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
             username: u.username || null,
             photo_url: u.photo_url || null,
             lastMessage: recentUsersMap.get(u.user_id).lastMessage,
-            timestamp: recentUsersMap.get(u.user_id).timestamp
+            timestamp: recentUsersMap.get(u.user_id).timestamp,
+            unreadCount: recentUsersMap.get(u.user_id).unreadCount // Frontend ko count bheja
         })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); 
 
         res.json({ success: true, recent: formatted });
     } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+
+app.post("/api/payment/chat/mark-read", async (req, res) => {
+    try {
+        const { userId, otherId } = req.body;
+        // Samne wale (otherId) ke bheje gaye sabhi messages ko read: true set kar do
+        await paymentChatCollection.updateMany(
+            { senderId: parseInt(otherId), receiverId: parseInt(userId), read: { $ne: true } },
+            { $set: { read: true } }
+        );
+        res.json({ success: true });
+    } catch(e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
