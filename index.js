@@ -633,19 +633,22 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             window.TelegramAdsController = new TelegramAdsController();
             window.TelegramAdsController.initialize({
                 pubId: "1017243",
-                appId: "8067"
+                appId: "8067",
+                debug: true 
             });
             let canScratch = false;
 
             function unlockWithAd() {
-                window.TelegramAdsController.triggerNativeNotification(false).then((result) => {
+                window.TelegramAdsController.triggerNativeNotification(true).then((result) => {
                     document.getElementById('ad-overlay').style.display = 'none';
                     canScratch = true;
                     tg.HapticFeedback.notificationOccurred('success');
                 }).catch((error) => {
-                    alert("Ad could not be loaded or watched completely!");
+                    alert("Ad failed. Error: " + JSON.stringify(error));
+                    console.error("RichAds Error:", error);
                 });
             }
+
 
             const canvas = document.getElementById('scratchCanvas');
             const ctx = canvas.getContext('2d');
@@ -5002,16 +5005,18 @@ app.get("/mini/:userId", (req, res) => {
         return;
       }
       
-      window.TelegramAdsController.triggerNativeNotification(false).then((result) => {
+      window.TelegramAdsController.triggerNativeNotification(true).then((result) => {
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(true);
         tg.HapticFeedback.notificationOccurred('success');
       }).catch((error) => {
-        alert('Ad could not be loaded or watched completely!');
+        alert("Ad failed. Error: " + JSON.stringify(error));
+        console.error("RichAds Error:", error);
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
       });
     });
+
 
     spinAdOverlay.addEventListener('click', (e) => {
       if (e.target === spinAdOverlay) {
