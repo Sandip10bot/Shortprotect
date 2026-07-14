@@ -634,12 +634,13 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             window.TelegramAdsController.initialize({
                 pubId: "1017243",
                 appId: "8067",
-                debug: true 
+                debug: false // Jab ad properly chalne lage toh isko hata dena
             });
             let canScratch = false;
 
             function unlockWithAd() {
-                window.TelegramAdsController.triggerNativeNotification(true).then((result) => {
+                // Interstitial Banner (Video Ad) trigger karega
+                window.TelegramAdsController.triggerInterstitialBanner(false).then((result) => {
                     document.getElementById('ad-overlay').style.display = 'none';
                     canScratch = true;
                     tg.HapticFeedback.notificationOccurred('success');
@@ -648,6 +649,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                     console.error("RichAds Error:", error);
                 });
             }
+
 
 
             const canvas = document.getElementById('scratchCanvas');
