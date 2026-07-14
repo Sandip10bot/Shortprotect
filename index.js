@@ -6622,6 +6622,7 @@ app.get("/api/ai/memory/:userId", async (req, res) => {
     }
 });
 
+
 app.post("/api/ai/clear/:userId", async (req, res) => {
     try {
         const userId = req.params.userId;
@@ -6631,6 +6632,28 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
         res.status(500).json({ success: false, error: "Failed to clear memory" });
     }
 });
+
+// ==========================================
+// RICHADS S2S WEBHOOK ENDPOINT
+// ==========================================
+app.get("/api/richads-reward", (req, res) => {
+    const userId = req.query.userid;
+    const rewardAmt = req.query.reward || 0;
+    const eventType = req.query.event || "unknown";
+
+    if (!userId) {
+        return res.status(400).json({ error: "Missing userid" });
+    }
+
+    // Yeh aapke server console me print karega ki kisne ad dekha aur kitna paisa bana
+    console.log(`✅ [RichAds] Event: ${eventType} | User: ${userId} | Revenue: $${rewardAmt}`);
+
+    // (Optional) Agar aap chahein toh yahan database me user ko extra points de sakte hain
+    // await usersCollection.updateOne({ user_id: parseInt(userId) }, { $inc: { mythopoints: 10 } });
+
+    res.status(200).json({ success: true, status: "ok" });
+});
+
 
 // ========================
 // FALLBACK HOME ROUTE
