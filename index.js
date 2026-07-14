@@ -2606,8 +2606,10 @@ app.get("/mini/:userId", (req, res) => {
     window.TelegramAdsController.initialize({
       pubId: "1017243",
       appId: "8067",
+      debug: true
     });
   </script>
+
   <style>
     /* === RESET & GLOBAL === */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
