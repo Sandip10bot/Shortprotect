@@ -404,7 +404,7 @@ app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     renderSecureFinalPage(res, finalBotLink);
 });
 
-// UPDATED renderScratchAppHTML with Adsgram integration
+// UPDATED renderScratchAppHTML with RichAds integration
 function renderScratchAppHTML(userId, token, currentPoints, reward) {
     return `
     <!DOCTYPE html>
@@ -415,7 +415,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
         <title>Premium Scratch Card</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-        <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+        <script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -558,7 +558,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
             .btn-close:active { transform: scale(0.95); }
 
-            /* ---- ADSGRAM OVERLAY ---- */
+            /* ---- RICHADS OVERLAY ---- */
             .ad-overlay {
                 position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 background: rgba(0,0,0,0.9); z-index: 20; border-radius: 20px;
@@ -629,17 +629,21 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 }
             }
 
-            // ---- ADSGRAM INIT ----
-            const AdController = window.Adsgram.init({ blockId: "38104" });
+            // ---- RICHADS INIT ----
+            window.TelegramAdsController = new TelegramAdsController();
+            window.TelegramAdsController.initialize({
+                pubId: "1017243",
+                appId: "8067"
+            });
             let canScratch = false;
 
             function unlockWithAd() {
-                AdController.show().then((result) => {
+                window.TelegramAdsController.triggerNativeNotification(false).then((result) => {
                     document.getElementById('ad-overlay').style.display = 'none';
                     canScratch = true;
                     tg.HapticFeedback.notificationOccurred('success');
                 }).catch((error) => {
-                    alert("Ad must be watched completely to unlock!");
+                    alert("Ad could not be loaded or watched completely!");
                 });
             }
 
@@ -2190,11 +2194,6 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
     }
 });
 
-
-
-
-
-
 app.get("/api/payment/recent/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -2250,7 +2249,6 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
     }
 });
 
-
 app.post("/api/payment/chat/mark-read", async (req, res) => {
     try {
         const { userId, otherId } = req.body;
@@ -2264,7 +2262,6 @@ app.post("/api/payment/chat/mark-read", async (req, res) => {
         res.status(500).json({ success: false, error: e.message });
     }
 });
-
 
 app.post("/api/payment/chat/message", async (req, res) => {
     try {
@@ -2598,7 +2595,6 @@ app.get("/mini/:userId", (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <!-- Telegram Ads Controller -->
   <script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
@@ -4988,13 +4984,6 @@ app.get("/mini/:userId", (req, res) => {
     let spinAdResolve = null;
     let spinAdType = 'spin';
 
-    let spinAdController = null;
-    try {
-      spinAdController = window.Adsgram.init({ blockId: "38104" });
-    } catch (e) {
-      console.warn('Adsgram init failed:', e);
-    }
-
     function showSpinAd(type) {
       return new Promise((resolve) => {
         spinAdType = type;
@@ -5005,23 +4994,23 @@ app.get("/mini/:userId", (req, res) => {
       });
     }
 
-    spinAdBtn.addEventListener('click', async function() {
-      if (!spinAdController) {
+    spinAdBtn.addEventListener('click', function() {
+      if (!window.TelegramAdsController) {
         alert('Ad service unavailable. Please try again.');
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
         return;
       }
-      try {
-        await spinAdController.show();
+      
+      window.TelegramAdsController.triggerNativeNotification(false).then((result) => {
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(true);
         tg.HapticFeedback.notificationOccurred('success');
-      } catch (error) {
-        alert('Ad must be watched completely to proceed!');
+      }).catch((error) => {
+        alert('Ad could not be loaded or watched completely!');
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
-      }
+      });
     });
 
     spinAdOverlay.addEventListener('click', (e) => {
@@ -6641,15 +6630,6 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
     } catch (e) {
         res.status(500).json({ success: false, error: "Failed to clear memory" });
     }
-});
-
-// ==========================================
-// ADSGRAM S2S REWARD ENDPOINT (Modification 1)
-// ==========================================
-app.get("/api/adsgram-reward", (req, res) => {
-    const userId = req.query.userid;
-    console.log(`✅ [Adsgram] Ad successfully watched by Telegram ID: ${userId}`);
-    res.status(200).json({ success: true, status: "ok" });
 });
 
 // ========================
