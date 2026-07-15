@@ -3936,7 +3936,7 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: bold;
     }
 
-    /* === SPIN WHEEL STYLES (Premium Enhanced) === */
+    /* === SPIN WHEEL STYLES (Enhanced) === */
     .spin-container {
       display: flex;
       flex-direction: column;
@@ -3970,27 +3970,44 @@ app.get("/mini/:userId", (req, res) => {
       filter: drop-shadow(0 -5px 12px rgba(255, 214, 10, 0.9));
       z-index: 20;
     }
+
+    /* Enhanced Spin Center Button */
     .spin-center {
-      display: none; 
-    }
-    .spin-btn {
-      margin-top: 24px;
-      padding: 14px 45px;
-      background: linear-gradient(135deg, #FFD700, #F59E0B);
-      border: 2px solid #FFF8DC;
-      border-radius: 30px;
-      color: #000;
-      font-weight: 800;
-      font-size: 18px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      box-shadow: 0 8px 30px rgba(255, 215, 0, 0.5);
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90px;
+      height: 90px;
+      background: radial-gradient(circle, #2a0033 0%, #050011 100%);
+      border: 4px solid #FFD700;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFD700;
+      font-weight: 900;
+      font-size: 20px;
       cursor: pointer;
-      transition: all 0.2s;
+      z-index: 30;
+      box-shadow: 0 0 25px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.3);
+      transition: transform 0.1s, font-size 0.2s;
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
+      letter-spacing: 1px;
     }
-    .spin-btn:active { transform: scale(0.92); box-shadow: 0 4px 15px rgba(255, 215, 0, 0.5); }
-    .spin-btn:disabled { background: #444; border-color: #666; color: #888; box-shadow: none; pointer-events: none; }
-    
+    .spin-center:active { transform: translate(-50%, -50%) scale(0.92); }
+    .spin-center.disabled { 
+      opacity: 0.8; 
+      pointer-events: none; 
+      border-color: #666; 
+      color: #888; 
+      box-shadow: none; 
+      text-shadow: none;
+    }
+    .spin-btn, .spin-double-btn {
+      display: none !important;
+    }
+
     .spin-result-box {
       margin-top: 12px;
       padding: 10px 16px;
@@ -4009,21 +4026,6 @@ app.get("/mini/:userId", (req, res) => {
       font-size: 18px;
       color: #30d158;
     }
-    .spin-double-btn {
-      margin-top: 8px;
-      padding: 8px 24px;
-      background: linear-gradient(135deg, #ff9f1c, #f59e0b);
-      border: none;
-      border-radius: 30px;
-      color: #000;
-      font-weight: 700;
-      font-size: 14px;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: transform 0.2s;
-      box-shadow: 0 4px 15px rgba(255,159,28,0.4);
-    }
-    .spin-double-btn:active { transform: scale(0.94); }
     .spin-countdown {
       font-size: 14px;
       color: rgba(255,255,255,0.5);
@@ -4251,16 +4253,14 @@ app.get("/mini/:userId", (req, res) => {
         <div class="spin-wheel-wrapper">
           <canvas id="spinWheel" class="spin-wheel-canvas" width="400" height="400"></canvas>
           <div class="spin-pointer"></div>
-          <div class="spin-center" id="spinCenter">SPIN</div>
+          <div class="spin-center" id="spinCenterBtn">SPIN</div>
         </div>
-        <button class="spin-btn" id="spinBtn">Spin</button>
       </div>
 
       <div id="spin-result" class="spin-result-box" style="display:none;">
         <div class="result-roll" id="spin-roll">🎲 0</div>
         <div class="result-points" id="spin-points">+0 MythoPoints</div>
         <div id="spin-bonus" style="font-size:14px; color:#ffd60a;"></div>
-        <button class="spin-double-btn" id="spinDoubleBtn" style="display:none;">Double (Watch Ad)</button>
       </div>
       <div id="spin-error" class="spin-error"></div>
     </div>
@@ -4908,14 +4908,6 @@ app.get("/mini/:userId", (req, res) => {
       // Spin
       document.getElementById('spin-streak').innerText = '🔥 Streak: ' + state.spin.streak + ' days';
       document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
-      const spinBtn = document.getElementById('spinBtn');
-      if (state.spin.canSpin) {
-        spinBtn.disabled = false;
-        spinBtn.innerText = 'Spin';
-      } else {
-        spinBtn.disabled = true;
-        spinBtn.innerText = 'Wait...';
-      }
     }
 
     // ─── TAB SWITCHING ───
@@ -5030,6 +5022,16 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     // === SPIN WHEEL LOGIC (Enhanced Premium & Perfect Sync) ===
+    const spinCenterBtn = document.getElementById('spinCenterBtn');
+    const spinResult = document.getElementById('spin-result');
+    const spinRoll = document.getElementById('spin-roll');
+    const spinPoints = document.getElementById('spin-points');
+    const spinBonus = document.getElementById('spin-bonus');
+    const spinError = document.getElementById('spin-error');
+
+    let isSpinning = false;
+    let lastSegment = -1; // Used for haptic ticking
+
     const wheelCanvas = document.getElementById('spinWheel');
     const ctx = wheelCanvas.getContext('2d');
     
@@ -5119,40 +5121,179 @@ app.get("/mini/:userId", (req, res) => {
         ctx.shadowBlur = 0;
       }
       
-      // Center Metallic Button
-      ctx.beginPath();
-      ctx.arc(cx, cy, 45, 0, 2 * Math.PI);
-      const centerGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 45);
-      centerGrad.addColorStop(0, '#444');
-      centerGrad.addColorStop(1, '#050011');
-      ctx.fillStyle = centerGrad;
-      ctx.fill();
-      ctx.strokeStyle = '#FFD700';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      
-      ctx.font = '800 20px "Segoe UI", sans-serif';
-      ctx.fillStyle = '#FFD700';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(255, 215, 0, 0.5)';
-      ctx.shadowBlur = 8;
-      ctx.fillText("SPIN", cx, cy);
-      ctx.shadowBlur = 0; 
+      // (Center button is now drawn via HTML, so we skip it here)
     }
 
     let currentRotation = 0;
     drawWheel(currentRotation);
 
-    const spinBtn = document.getElementById('spinBtn');
-    const spinResult = document.getElementById('spin-result');
-    const spinRoll = document.getElementById('spin-roll');
-    const spinPoints = document.getElementById('spin-points');
-    const spinBonus = document.getElementById('spin-bonus');
-    const spinDoubleBtn = document.getElementById('spinDoubleBtn');
-    const spinError = document.getElementById('spin-error');
+    spinCenterBtn.addEventListener('click', async function() {
+        if (isSpinning) return;
+        
+        // If it's in DOUBLE mode, route to double function
+        if (this.innerText === 'DOUBLE') {
+            handleDouble();
+            return;
+        }
 
-    let isSpinning = false;
+        if (!state.spin.canSpin) {
+            spinError.innerText = 'You already spun today. Come back tomorrow!';
+            return;
+        }
+        spinError.innerText = '';
+        
+        // 1. Show Ads when they tap the middle name "SPIN"
+        const adCompleted = await showSpinAd('spin');
+        if (!adCompleted) {
+            spinError.innerText = 'Ad was not completed. Please try again.';
+            return;
+        }
+        
+        isSpinning = true;
+        this.classList.add('disabled');
+        spinResult.style.display = 'none'; // Keep result completely hidden
+        
+        try {
+            const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.success) {
+                const targetSegmentIndex = data.roll - 1; 
+                const currentRotMod = currentRotation % (2 * Math.PI);
+                
+                // Align target segment under the top pointer (-PI/2)
+                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
+                
+                let rotationNeeded = offsetAngle - currentRotMod;
+                while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
+                
+                // Add 25 extra rotations for a heavy 15-second spin
+                const extraSpins = 25 * 2 * Math.PI; 
+                const targetRotation = currentRotation + rotationNeeded + extraSpins;
+                
+                const duration = 15000; // EXACTLY 15 SECONDS
+                const start = performance.now();
+                const startRot = currentRotation;
+                
+                function animateSpin(time) {
+                    const progress = Math.min((time - start) / duration, 1);
+                    
+                    // Quintic easing out: super fast start, incredibly suspenseful long slow down
+                    const eased = 1 - Math.pow(1 - progress, 5); 
+                    const rot = startRot + (targetRotation - startRot) * eased;
+                    
+                    drawWheel(rot);
+                    
+                    // Physical Simulation: Calculate if a new segment is passing the top pointer
+                    let topAngle = (3 * Math.PI / 2 - rot) % (2 * Math.PI);
+                    if (topAngle < 0) topAngle += 2 * Math.PI;
+                    const currentSegment = Math.floor(topAngle / segmentAngle);
+                    
+                    // Trigger haptic feedback "Tick" every time a line crosses the pointer
+                    if (currentSegment !== lastSegment && progress < 0.99) {
+                        tg.HapticFeedback.impactOccurred('light');
+                        lastSegment = currentSegment;
+                    }
+                    
+                    if (progress < 1) {
+                        requestAnimationFrame(animateSpin);
+                    } else {
+                        currentRotation = targetRotation;
+                        tg.HapticFeedback.impactOccurred('heavy'); // Final thud
+                        showSpinResult(data); // ONLY show result after 15s ends
+                    }
+                }
+                requestAnimationFrame(animateSpin);
+            } else {
+                spinError.innerText = data.error || 'Spin failed.';
+                isSpinning = false;
+                spinCenterBtn.classList.remove('disabled');
+            }
+        } catch (e) {
+            spinError.innerText = 'Network error. Please try again.';
+            isSpinning = false;
+            spinCenterBtn.classList.remove('disabled');
+        }
+    });
+
+    async function handleDouble() {
+        const adCompleted = await showSpinAd('double');
+        if (!adCompleted) {
+            spinError.innerText = 'Ad not completed. Double failed.';
+            return;
+        }
+        
+        spinCenterBtn.classList.add('disabled');
+        spinCenterBtn.innerText = 'WAIT...';
+        
+        try {
+            const res = await fetch('/api/spin/double/' + userId, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                state.mythopoints = data.newBalance;
+                state.spin.doubleUsed = true;
+                updateUI();
+                
+                spinPoints.innerText = '+' + data.pointsAdded + ' MythoPoints (doubled)';
+                spinCenterBtn.innerText = 'DONE';
+                tg.HapticFeedback.notificationOccurred('success');
+                await showSuccess('You doubled your spin!', 'Double Success');
+            } else {
+                spinError.innerText = data.error || 'Double failed.';
+                spinCenterBtn.classList.remove('disabled');
+                spinCenterBtn.innerText = 'DOUBLE';
+            }
+        } catch (e) {
+            spinError.innerText = 'Network error.';
+            spinCenterBtn.classList.remove('disabled');
+            spinCenterBtn.innerText = 'DOUBLE';
+        }
+    }
+
+    function showSpinResult(data) {
+        state.mythopoints = data.newBalance;
+        state.spin.canSpin = false;
+        state.spin.streak = data.streak;
+        state.spin.roll = data.roll;
+        state.spin.doubleUsed = false;
+        updateUI();
+        
+        // Reveal results only after animation ends
+        spinResult.style.display = 'block';
+        spinRoll.innerText = '🎲 ' + data.roll;
+        
+        let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
+        if (data.bonus > 0) {
+          pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
+          spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
+        } else {
+          spinBonus.innerText = '';
+        }
+        spinPoints.innerText = pointsMsg;
+        
+        // Replace center with DOUBLE text
+        if (data.canDouble !== false) {
+          spinCenterBtn.classList.remove('disabled');
+          spinCenterBtn.innerText = 'DOUBLE';
+          spinCenterBtn.style.fontSize = '16px';
+        } else {
+          spinCenterBtn.classList.add('disabled');
+          spinCenterBtn.innerText = 'DONE';
+        }
+        
+        isSpinning = false;
+        loadSpinStatus();
+        triggerSpinCelebration(data.roll);
+    }
+
+    function triggerSpinCelebration(roll) {
+      const end = Date.now() + 1500;
+      (function frame() {
+        confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      }());
+    }
 
     async function loadSpinStatus() {
       try {
@@ -5166,177 +5307,36 @@ app.get("/mini/:userId", (req, res) => {
           state.spin.doubleUsed = data.doubleUsed;
           updateUI();
           
-          if (data.roll !== null && !data.doubleUsed) {
+          // Only show results directly if the user has ALREADY spun before arriving on the page
+          if (data.roll !== null && !data.doubleUsed && !isSpinning) {
             spinResult.style.display = 'block';
             spinRoll.innerText = '🎲 ' + data.roll;
             spinPoints.innerText = '+' + data.roll + ' MythoPoints';
-            spinDoubleBtn.style.display = 'block';
-            spinDoubleBtn.disabled = false;
-            spinBonus.innerText = '';
-          } else if (data.roll !== null && data.doubleUsed) {
+            spinCenterBtn.innerText = 'DOUBLE';
+            spinCenterBtn.style.fontSize = '16px';
+            spinCenterBtn.classList.remove('disabled');
+          } else if (data.roll !== null && data.doubleUsed && !isSpinning) {
             spinResult.style.display = 'block';
             spinRoll.innerText = '🎲 ' + data.roll;
             spinPoints.innerText = '+' + data.roll + ' MythoPoints (doubled)';
-            spinDoubleBtn.style.display = 'none';
-            spinBonus.innerText = '';
-          } else {
+            spinCenterBtn.innerText = 'DONE';
+            spinCenterBtn.classList.add('disabled');
+          } else if (!isSpinning) {
             spinResult.style.display = 'none';
+            if (data.canSpin) {
+              spinCenterBtn.innerText = 'SPIN';
+              spinCenterBtn.style.fontSize = '20px';
+              spinCenterBtn.classList.remove('disabled');
+            } else {
+              spinCenterBtn.innerText = 'WAIT';
+              spinCenterBtn.classList.add('disabled');
+            }
           }
         }
       } catch (e) {
         console.error('Spin status error:', e);
       }
     }
-
-    spinBtn.addEventListener('click', async function() {
-      if (isSpinning) return;
-      if (!state.spin.canSpin) {
-        spinError.innerText = 'You already spun today. Come back tomorrow!';
-        return;
-      }
-      spinError.innerText = '';
-      
-      const adCompleted = await showSpinAd('spin');
-      if (!adCompleted) {
-        spinError.innerText = 'Ad was not completed. Please try again.';
-        return;
-      }
-      
-      isSpinning = true;
-      spinBtn.disabled = true;
-      spinResult.style.display = 'none';
-      spinDoubleBtn.style.display = 'none';
-      
-      try {
-        // STEP 1: Fetch result BEFORE spinning
-        const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
-        const data = await res.json();
-        
-        if (data.success) {
-            // STEP 2: Calculate perfect rotation
-            const targetSegmentIndex = data.roll - 1; 
-            const currentRotMod = currentRotation % (2 * Math.PI);
-            
-            const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
-            
-            let rotationNeeded = offsetAngle - currentRotMod;
-            while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
-            
-            const extraSpins = 10 * 2 * Math.PI; 
-            const targetRotation = currentRotation + rotationNeeded + extraSpins;
-            
-            const duration = 5000; // 5 Seconds Fast-to-Slow
-            const start = performance.now();
-            const startRot = currentRotation;
-            
-            function animateSpin(time) {
-                const progress = Math.min((time - start) / duration, 1);
-                const eased = 1 - Math.pow(1 - progress, 4); 
-                const rot = startRot + (targetRotation - startRot) * eased;
-                
-                drawWheel(rot);
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animateSpin);
-                } else {
-                    currentRotation = targetRotation;
-                    showSpinResult(data);
-                }
-            }
-            requestAnimationFrame(animateSpin);
-        } else {
-            spinError.innerText = data.error || 'Spin failed.';
-            isSpinning = false;
-            spinBtn.disabled = false;
-            spinBtn.innerText = 'Spin';
-        }
-      } catch (e) {
-          spinError.innerText = 'Network error. Please try again.';
-          isSpinning = false;
-          spinBtn.disabled = false;
-          spinBtn.innerText = 'Spin';
-      }
-    });
-
-    function showSpinResult(data) {
-        state.mythopoints = data.newBalance;
-        state.spin.canSpin = false;
-        state.spin.streak = data.streak;
-        state.spin.roll = data.roll;
-        state.spin.doubleUsed = false;
-        updateUI();
-        
-        spinResult.style.display = 'block';
-        spinRoll.innerText = '🎲 ' + data.roll;
-        
-        let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
-        if (data.bonus > 0) {
-          pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
-          spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
-        } else {
-          spinBonus.innerText = '';
-        }
-        spinPoints.innerText = pointsMsg;
-        
-        if (data.canDouble !== false) {
-          spinDoubleBtn.style.display = 'block';
-          spinDoubleBtn.disabled = false;
-        }
-        
-        isSpinning = false;
-        spinBtn.disabled = true;
-        spinBtn.innerText = 'Wait...';
-        
-        loadSpinStatus();
-        tg.HapticFeedback.notificationOccurred('success');
-        triggerSpinCelebration(data.roll);
-    }
-
-    function triggerSpinCelebration(roll) {
-      const end = Date.now() + 1500;
-      (function frame() {
-        confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
-        confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
-        if (Date.now() < end) requestAnimationFrame(frame);
-      }());
-    }
-
-    spinDoubleBtn.addEventListener('click', async function() {
-      if (this.disabled) return;
-      
-      const adCompleted = await showSpinAd('double');
-      if (!adCompleted) {
-        spinError.innerText = 'Ad not completed. Double failed.';
-        return;
-      }
-      
-      this.disabled = true;
-      this.innerText = 'Processing...';
-      
-      try {
-        const res = await fetch('/api/spin/double/' + userId, { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-          state.mythopoints = data.newBalance;
-          state.spin.doubleUsed = true;
-          updateUI();
-          
-          spinPoints.innerText = '+' + data.pointsAdded + ' MythoPoints (doubled)';
-          spinDoubleBtn.style.display = 'none';
-          tg.HapticFeedback.notificationOccurred('success');
-          await showSuccess('You doubled your spin!', 'Double Success');
-        } else {
-          spinError.innerText = data.error || 'Double failed.';
-          this.disabled = false;
-          this.innerText = 'Double (Watch Ad)';
-        }
-      } catch (e) {
-        console.error('Double error:', e);
-        spinError.innerText = 'Network error.';
-        this.disabled = false;
-        this.innerText = 'Double (Watch Ad)';
-      }
-    });
 
     setInterval(loadSpinStatus, 1000);
 
