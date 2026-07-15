@@ -6306,9 +6306,25 @@ app.get("/mini/:userId", (req, res) => {
         loadLeaderboard(); 
         loadRatingStatus(); 
       }
+
+      // --- MONETAG AUTO IN-APP INTERSTITIAL ---
+      // This will trigger automatically 5 seconds after the app loads
+      if (typeof show_9055307 === 'function') {
+          show_9055307({
+            type: 'inApp',
+            inAppSettings: {
+              frequency: 2,
+              capping: 0.1,
+              interval: 30,
+              timeout: 5,
+              everyPage: false
+            }
+          }).catch(e => console.log("Auto-ad skipped or not ready:", e));
+      }
     }
     
     init();
+
   </script>
 </body>
 </html>
