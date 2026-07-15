@@ -634,13 +634,13 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             window.TelegramAdsController.initialize({
                 pubId: "1017243",
                 appId: "8067",
-                debug: false // Jab ad properly chalne lage toh isko hata dena
+                debug: true // Returns test ads as per Step 5[span_2](start_span)[span_2](end_span)
             });
             let canScratch = false;
 
             function unlockWithAd() {
-                // Interstitial Banner (Video Ad) trigger karega
-                window.TelegramAdsController.triggerInterstitialBanner(false).then((result) => {
+                // Passing 'true' to display the offer immediately without showing a creative in between[span_3](start_span)[span_3](end_span)
+                window.TelegramAdsController.triggerInterstitialBanner(true).then((result) => {
                     document.getElementById('ad-overlay').style.display = 'none';
                     canScratch = true;
                     tg.HapticFeedback.notificationOccurred('success');
@@ -649,6 +649,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                     console.error("RichAds Error:", error);
                 });
             }
+
 
 
 
