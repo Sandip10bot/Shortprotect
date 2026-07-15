@@ -404,7 +404,7 @@ app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
     renderSecureFinalPage(res, finalBotLink);
 });
 
-// UPDATED renderScratchAppHTML with RichAds integration
+// UPDATED renderScratchAppHTML with Monetag integration
 function renderScratchAppHTML(userId, token, currentPoints, reward) {
     return `
     <!DOCTYPE html>
@@ -415,7 +415,8 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
         <title>Premium Scratch Card</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-        <script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -558,7 +559,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
             .btn-close:active { transform: scale(0.95); }
 
-            /* ---- RICHADS OVERLAY ---- */
+            /* ---- MONETAG OVERLAY ---- */
             .ad-overlay {
                 position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 background: rgba(0,0,0,0.9); z-index: 20; border-radius: 20px;
@@ -594,7 +595,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
 
         <div class="scratch-wrapper">
             <div class="scratch-inner" id="scratch-container">
-                <!-- Adsgram overlay -->
+                <!-- Monetag overlay -->
                 <div class="ad-overlay" id="ad-overlay">
                     <h3 style="margin-bottom:15px; font-size:20px; color:white;">Card is Locked 🔒</h3>
                     <button class="ad-btn" onclick="unlockWithAd()">▶ Watch Ad to Unlock</button>
@@ -629,29 +630,18 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
                 }
             }
 
-            // ---- RICHADS INIT ----
-            window.TelegramAdsController = new TelegramAdsController();
-            window.TelegramAdsController.initialize({
-                pubId: "1017243",
-                appId: "8067",
-                debug: false // Returns test ads as per Step 5[span_2](start_span)[span_2](end_span)
-            });
             let canScratch = false;
 
             function unlockWithAd() {
-                // Passing 'true' to display the offer immediately without showing a creative in between[span_3](start_span)[span_3](end_span)
-                window.TelegramAdsController.triggerInterstitialBanner(true).then((result) => {
+                show_9055307().then(() => {
                     document.getElementById('ad-overlay').style.display = 'none';
                     canScratch = true;
                     tg.HapticFeedback.notificationOccurred('success');
                 }).catch((error) => {
-                    alert("Ad failed. Error: " + JSON.stringify(error));
-                    console.error("RichAds Error:", error);
+                    alert("Ad failed or closed early. Please try again.");
+                    console.error("Monetag Error:", error);
                 });
             }
-
-
-
 
             const canvas = document.getElementById('scratchCanvas');
             const ctx = canvas.getContext('2d');
@@ -2588,7 +2578,7 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Spin)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Spin & Monetag)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2602,16 +2592,8 @@ app.get("/mini/:userId", (req, res) => {
   <title>MythoSerial</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-  <!-- Telegram Ads Controller -->
-  <script src="https://richinfo.co/richpartners/telegram/js/tg-ob.js"></script>
-  <script>
-    window.TelegramAdsController = new TelegramAdsController();
-    window.TelegramAdsController.initialize({
-      pubId: "1017243",
-      appId: "8067",
-      debug: false
-    });
-  </script>
+  <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+  <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
 
   <style>
     /* === RESET & GLOBAL === */
@@ -4042,7 +4024,7 @@ app.get("/mini/:userId", (req, res) => {
       margin: 4px 0;
     }
 
-    /* Adsgram overlay for spin */
+    /* Monetag overlay for spin */
     .spin-ad-overlay {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -4995,25 +4977,24 @@ app.get("/mini/:userId", (req, res) => {
     }
 
     spinAdBtn.addEventListener('click', function() {
-      if (!window.TelegramAdsController) {
-        alert('Ad service unavailable. Please try again.');
+      if (typeof show_9055307 !== 'function') {
+        alert('Ad service is loading or unavailable. Please try again.');
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
         return;
       }
       
-      window.TelegramAdsController.triggerNativeNotification(true).then((result) => {
+      show_9055307().then(() => {
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(true);
         tg.HapticFeedback.notificationOccurred('success');
       }).catch((error) => {
-        alert("Ad failed. Error: " + JSON.stringify(error));
-        console.error("RichAds Error:", error);
+        alert("Ad failed or was closed early. Please try again.");
+        console.error("Monetag Error:", error);
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
       });
     });
-
 
     spinAdOverlay.addEventListener('click', (e) => {
       if (e.target === spinAdOverlay) {
@@ -6644,30 +6625,22 @@ app.post("/api/ai/clear/:userId", async (req, res) => {
 });
 
 // ==========================================
-// RICHADS S2S WEBHOOK ENDPOINT
+// MONETAG S2S POSTBACK ENDPOINT
 // ==========================================
-app.get("/api/richads-reward", (req, res) => {
+app.get("/api/monetag-postback", async (req, res) => {
     const userId = req.query.userid;
     const rewardAmt = req.query.reward || 0;
-    const eventType = req.query.event || "unknown";
+    const transactionId = req.query.tid || "unknown";
 
     if (!userId) {
         return res.status(400).json({ error: "Missing userid" });
     }
 
-    // Yeh aapke server console me print karega ki kisne ad dekha aur kitna paisa bana
-    console.log(`✅ [RichAds] Event: ${eventType} | User: ${userId} | Revenue: $${rewardAmt}`);
-
-    // (Optional) Agar aap chahein toh yahan database me user ko extra points de sakte hain
-    // await usersCollection.updateOne({ user_id: parseInt(userId) }, { $inc: { mythopoints: 10 } });
+    console.log(`✅ [Monetag] User: ${userId} | Reward: ${rewardAmt} | TID: ${transactionId}`);
 
     res.status(200).json({ success: true, status: "ok" });
 });
 
-
-// ========================
-// FALLBACK HOME ROUTE
-// ========================
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
@@ -6678,31 +6651,21 @@ app.get("*", (req, res) => {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          
-          <!-- Monetag Verification Meta Tag -->
           <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
-          
           <title>Welcome to MythoSerial</title>
           ${THEME_CSS}
       </head>
       <body>
           <div class="container">
               <div style="font-size:60px; margin-bottom:10px;">🤖</div>
-              <h2>Welcome to MythoserialBot</h2>
-              <p>To use our premium services, play games, and earn Mythopoints, please join our official Telegram bot!</p>
-              
-              <!-- Telegram Bot Redirect Link -->
+              <h2>Welcome to MythoSerial</h2>
+              <p>To use our premium services, play games, and earn rewards, please join our official Telegram bot!</p>
               <a href="https://t.me/MythoSerialBot" class="btn" style="display:inline-block; box-sizing:border-box;">Launch Telegram Bot</a>
-              
-              <div class="manual-box" style="display:block; text-align:center; margin-top:20px;">
-                  <p style="color:white; margin:0; font-size: 13px;">Make sure you have Telegram installed.</p>
-              </div>
           </div>
       </body>
       </html>
     `);
 });
-
 
 // Start Server – Wait for DB connection first
 async function startServer() {
