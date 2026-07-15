@@ -6668,9 +6668,41 @@ app.get("/api/richads-reward", (req, res) => {
 // ========================
 // FALLBACK HOME ROUTE
 // ========================
+// ========================
+// HOME & FALLBACK ROUTE
+// ========================
 app.get("*", (req, res) => {
-    res.redirect('https://t.me/MythoSerialBot');
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          
+          <!-- Monetag Verification Meta Tag -->
+          <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+          
+          <title>Welcome to MythoSerial</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+          <div class="container">
+              <div style="font-size:60px; margin-bottom:10px;">🤖</div>
+              <h2>Welcome to MythoserialBot</h2>
+              <p>To use our premium services, play games, and earn Mythopoints, please join our official Telegram bot!</p>
+              
+              <!-- Telegram Bot Redirect Link -->
+              <a href="https://t.me/MythoSerialBot" class="btn" style="display:inline-block; box-sizing:border-box;">Launch Telegram Bot</a>
+              
+              <div class="manual-box" style="display:block; text-align:center; margin-top:20px;">
+                  <p style="color:white; margin:0; font-size: 13px;">Make sure you have Telegram installed.</p>
+              </div>
+          </div>
+      </body>
+      </html>
+    `);
 });
+
 
 // Start Server – Wait for DB connection first
 async function startServer() {
