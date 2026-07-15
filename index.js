@@ -634,7 +634,7 @@ function renderScratchAppHTML(userId, token, currentPoints, reward) {
             window.TelegramAdsController.initialize({
                 pubId: "1017243",
                 appId: "8067",
-                debug: true // Returns test ads as per Step 5[span_2](start_span)[span_2](end_span)
+                debug: false // Returns test ads as per Step 5[span_2](start_span)[span_2](end_span)
             });
             let canScratch = false;
 
@@ -2609,7 +2609,7 @@ app.get("/mini/:userId", (req, res) => {
     window.TelegramAdsController.initialize({
       pubId: "1017243",
       appId: "8067",
-      debug: true
+      debug: false
     });
   </script>
 
