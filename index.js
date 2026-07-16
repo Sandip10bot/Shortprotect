@@ -6657,6 +6657,147 @@ app.get("/api/monetag-postback", async (req, res) => {
     res.status(200).json({ success: true, status: "ok" });
 });
 
+// ==========================================
+// WATCH AD TO SKIP SEARCH COOLDOWN (WEBAPP)
+// ==========================================
+
+// 1. The WebApp Page Endpoint
+app.get("/cooldown-app/:userId", async (req, res) => {
+    const uid = parseInt(req.params.userId);
+    
+    // Fetch user's search limit data
+    const searchDoc = await searchLimitCollection.findOne({ user_id: uid });
+    
+    const now = Math.floor(Date.now() / 1000);
+    let inCooldown = false;
+    let timeRemaining = 0;
+    
+    // Check if user has searched within the last 5 minutes (300 seconds)
+    if (searchDoc && searchDoc.last_search) {
+        const timePassed = now - searchDoc.last_search;
+        if (timePassed < 300) { 
+            inCooldown = true;
+            timeRemaining = 300 - timePassed; // Seconds left
+        }
+    }
+
+    const minutes = Math.floor(timeRemaining / 60);
+    const seconds = timeRemaining % 60;
+    const timeStr = \`\${minutes}m \${seconds}s\`;
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <title>Skip Cooldown</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        
+        <!-- MONETAG SDK -->
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <h2 style="font-size: 22px;">Skip Cooldown</h2>
+            
+            <div id="ui-cooldown-active" style="display: ${inCooldown ? 'block' : 'none'};">
+                <div style="font-size:40px; margin-bottom:10px;">⏳</div>
+                <p>You have a cooldown period of <b>${timeStr}</b> remaining.</p>
+                <p style="font-size: 13px; color: #aaa;">Watch a quick ad to skip the timer instantly!</p>
+                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad to Skip</button>
+            </div>
+
+            <div id="ui-cooldown-passed" style="display: ${inCooldown ? 'none' : 'block'};">
+                <div style="font-size:40px; margin-bottom:10px;">✅</div>
+                <p>Your cooldown period has already passed.</p>
+                <h3 style="color: #00e676;">You can search now!</h3>
+                <button class="btn" onclick="Telegram.WebApp.close()" style="margin-top: 15px;">Return to Bot</button>
+            </div>
+            
+            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
+                Unlocking... Please wait ⚙️
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            const watchBtn = document.getElementById('watch-ad-btn');
+            
+            if (watchBtn) {
+                watchBtn.addEventListener('click', function() {
+                    if (typeof show_9055307 !== 'function') {
+                        alert('Ad service is still loading. Please try again in a few seconds.');
+                        return;
+                    }
+                    
+                    // Call Monetag Ad
+                    show_9055307().then(() => {
+                        // User watched the ad successfully!
+                        tg.HapticFeedback.notificationOccurred('success');
+                        document.getElementById('ui-cooldown-active').style.display = 'none';
+                        document.getElementById('loading-msg').style.display = 'block';
+                        
+                        // Hit backend to clear the cooldown
+                        fetch('/api/skip-cooldown/claim/${uid}', { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                document.getElementById('loading-msg').style.display = 'none';
+                                if(data.success) {
+                                    document.getElementById('ui-cooldown-passed').style.display = 'block';
+                                    document.getElementById('ui-cooldown-passed').querySelector('h3').innerText = "Cooldown Skipped Successfully!";
+                                } else {
+                                    alert("Error skipping cooldown.");
+                                }
+                            }).catch(err => {
+                                alert("Network error while claiming reward.");
+                            });
+
+                    }).catch((error) => {
+                        alert("Ad failed to load or was closed early.");
+                        console.error("Monetag Error:", error);
+                    });
+                });
+            }
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// 2. API Endpoint to Reset Cooldown after ad is watched
+app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        // Set last_search to 0 (same logic used in the Store API to skip cooldown)
+        await searchLimitCollection.updateOne(
+            { user_id: uid },
+            { $set: { last_search: 0 } },
+            { upsert: true }
+        );
+
+        // Optionally, log it in history
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: 0,
+            type: "EARNED",
+            reason: "Watched Ad to Skip Cooldown",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: "Cooldown skipped!" });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
