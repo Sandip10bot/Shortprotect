@@ -6237,10 +6237,10 @@ app.get("/mini/:userId", (req, res) => {
     // ─── REFERRAL FUNCTIONS ───
     function shareReferral() {
         const botUsername = "MythoSerialBot"; 
-        const link = `https://t.me/${botUsername}?start=${userId}`;
-        const text = `Join me on MythoSerial and earn free Mythopoints! 🚀\n\n${link}`;
+        const link = \`https://t.me/\${botUsername}?start=${userId}\`;
+        const text = \`Join me on MythoserialBot and Watch Mythology Serials Free & earn free Mythopoints! 🚀\\n\\n\${link}\`;
         
-        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`);
+        tg.openTelegramLink(\`https://t.me/share/url?url=\${encodeURIComponent(link)}&text=\${encodeURIComponent(text)}\`);
     }
 
     function showRefRewards() {
@@ -6264,17 +6264,17 @@ app.get("/mini/:userId", (req, res) => {
                     const rank = i + 1;
                     const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🔹';
                     const avatar = u.photo 
-                        ? `<img src="${u.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" />` 
-                        : `<div style="width:32px;height:32px;border-radius:50%;background:#651fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">${u.name.charAt(0).toUpperCase()}</div>`;
+                        ? \`<img src="\${u.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" />\` 
+                        : \`<div style="width:32px;height:32px;border-radius:50%;background:#651fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">\${u.name.charAt(0).toUpperCase()}</div>\`;
                     
-                    html += `
+                    html += \`
                         <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid rgba(255,255,255,0.06);">
-                            <div style="width:24px; text-align:center; font-size:16px;">${medal}</div>
-                            ${avatar}
-                            <div style="flex:1; font-weight:500; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">${u.name}</div>
-                            <div style="font-weight:700; color:#00e676; font-size:14px; background:rgba(0,230,118,0.1); padding:4px 8px; border-radius:12px;">${u.refs}</div>
+                            <div style="width:24px; text-align:center; font-size:16px;">\${medal}</div>
+                            \${avatar}
+                            <div style="flex:1; font-weight:500; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">\${u.name}</div>
+                            <div style="font-weight:700; color:#00e676; font-size:14px; background:rgba(0,230,118,0.1); padding:4px 8px; border-radius:12px;">\${u.refs}</div>
                         </div>
-                    `;
+                    \`;
                 });
                 content.innerHTML = html;
             } else {
