@@ -1584,7 +1584,8 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
             profile: {
                 mythopoints: user?.mythopoints || 0,
                 streak: user?.streak || 0,
-                is_verified: user?.is_verified || false
+                is_verified: user?.is_verified || false,
+                referrals: user?.referral_count || 0 // <-- ADDED
             },
             bank: {
                 invested: bank?.invested || 0,
@@ -2803,62 +2804,56 @@ app.get("/mini/:userId", (req, res) => {
     }
     
     .upgrade-btn {
-      display: inline-block;
+      display: block;
+      width: 100%;
+      text-align: center;
+      margin-top: 14px;
       background: linear-gradient(135deg, #ffd60a, #f59e0b);
       color: #000;
       border: none;
-      padding: 6px 16px;
+      padding: 10px 16px;
       border-radius: 30px;
-      font-size: 11px;
-      font-weight: 700;
+      font-size: 13px;
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       cursor: pointer;
-      transition: all 0.3s;
       text-decoration: none;
-      box-shadow: 0 4px 15px rgba(255,214,10,0.4);
-    }
-    .upgrade-btn:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 25px rgba(255,214,10,0.6);
+      box-shadow: 0 4px 15px rgba(255,214,10,0.3);
+      transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s;
     }
     .upgrade-btn:active {
-      transform: scale(0.95);
+      transform: scale(0.92) !important;
+      box-shadow: 0 2px 8px rgba(255,214,10,0.6) !important;
     }
 
-    /* Search Credits Widget Enhanced */
-    .w-search {
-      border: 0.5px solid rgba(10,132,255,0.2);
-      background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05));
-      position: relative;
-      overflow: hidden;
-    }
-    .w-search .widget-value { color: #0a84ff; }
-    .w-search .widget-title { color: rgba(10,132,255,0.7); }
-    
     .refill-btn {
-      display: inline-block;
+      display: block;
+      width: 100%;
+      text-align: center;
+      margin-top: 14px;
       background: linear-gradient(135deg, #0a84ff, #5e5ce6);
       color: #fff;
       border: none;
-      padding: 6px 16px;
+      padding: 10px 16px;
       border-radius: 30px;
-      font-size: 11px;
-      font-weight: 700;
+      font-size: 13px;
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       cursor: pointer;
-      transition: all 0.3s;
       text-decoration: none;
-      box-shadow: 0 4px 15px rgba(10,132,255,0.4);
-    }
-    .refill-btn:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 25px rgba(10,132,255,0.6);
+      box-shadow: 0 4px 15px rgba(10,132,255,0.3);
+      transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s;
     }
     .refill-btn:active {
-      transform: scale(0.95);
+      transform: scale(0.92) !important;
+      box-shadow: 0 2px 8px rgba(10,132,255,0.6) !important;
     }
+
+    .w-search { border: 0.5px solid rgba(10,132,255,0.2); background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05)); }
+    .w-search .widget-value { color: #0a84ff; }
+    .w-search .widget-title { color: rgba(10,132,255,0.7); }
 
     .w-bank { border: 0.5px solid rgba(48,209,88,0.2); background: rgba(48,209,88,0.04); }
     .w-bank .widget-value { color: #30d158; }
@@ -2968,11 +2963,6 @@ app.get("/mini/:userId", (req, res) => {
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
 
-    
-
-    
-
-
     /* === WATCH & EARN FAB (AI STYLE) === */
     .earn-fab {
       position: fixed;
@@ -3024,12 +3014,10 @@ app.get("/mini/:userId", (req, res) => {
       transform: scale(0.45); /* Visually shrinks the long text perfectly */
     }
 
-
     @keyframes pulseGlow {
       0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
       100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
     }
-
 
     /* === LEADERBOARD === */
     .lb-item {
@@ -3361,7 +3349,6 @@ app.get("/mini/:userId", (req, res) => {
       transition: all 0.2s;
     }
     .coupon-buy-btn:active { background: rgba(255,214,10,0.3); }
-
 
     /* === RATING STARS === */
     .star-rating {
@@ -4184,7 +4171,6 @@ app.get("/mini/:userId", (req, res) => {
             <svg viewBox="0 0 24 24" width="20" height="20" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
             <span class="widget-title" style="font-size:10px; margin:0;">Premium</span>
           </div>
-          <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium')">Upgrade</a>
         </div>
         <div class="widget-value" style="font-size:20px; margin-top:4px;">
           <span id="ui-prem-status">Free</span>
@@ -4193,6 +4179,8 @@ app.get("/mini/:userId", (req, res) => {
         <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
           <span id="ui-prem-plan">No active plan</span>
         </div>
+        <!-- Button moved to Bottom (Closes WebApp on click so command runs in background) -->
+        <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium'); tg.close();">Upgrade</a>
       </div>
       <!-- Search Credits Widget - Enhanced -->
       <div class="widget w-search">
@@ -4201,7 +4189,6 @@ app.get("/mini/:userId", (req, res) => {
             <svg viewBox="0 0 24 24" width="18" height="18" fill="#0a84ff"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
             <span class="widget-title" style="font-size:10px; margin:0;">Search Credits</span>
           </div>
-          <a href="https://t.me/MythoSerialBot?start=get" target="_blank" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium')">Refill</a>
         </div>
         <div class="widget-value" style="font-size:22px; margin-top:4px;">
           <span id="ui-credits">0</span>
@@ -4210,6 +4197,8 @@ app.get("/mini/:userId", (req, res) => {
         <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
           Refill With /get
         </div>
+        <!-- Button moved to Bottom -->
+        <a href="https://t.me/MythoSerialBot?start=get" target="_blank" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium'); tg.close();">Refill</a>
       </div>
     </div>
 
@@ -4270,6 +4259,37 @@ app.get("/mini/:userId", (req, res) => {
           <span class="mytho-label" style="font-size:7px;">Mythopoints</span>
         </div>
       </div>
+    </div>
+
+    <!-- ========== NEW: REFERRAL CONTROL PANEL ========== -->
+    <h3 style="font-size:16px; margin: 16px 16px 4px; font-weight:600;">🚀 Refer & Earn</h3>
+    <div class="glass" style="margin: 0 16px 20px;">
+        <div class="grid-2" style="margin-bottom: 12px; gap:8px;">
+            <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; text-align:center;">
+                <div style="font-size:11px; color:rgba(255,255,255,0.4); text-transform:uppercase;">My Referrals</div>
+                <div style="font-size:24px; font-weight:700; color:#00e676;" id="ui-refs-count">0</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; text-align:center;">
+                <div style="font-size:11px; color:rgba(255,255,255,0.4); text-transform:uppercase;">Next Milestone</div>
+                <div style="font-size:18px; font-weight:700; color:#ffd60a; margin-top:4px;" id="ui-refs-target">0/3</div>
+            </div>
+        </div>
+
+        <div class="chant-progress-container" style="height:6px; margin: 0 0 16px 0;">
+            <div class="chant-progress-bar" id="ref-progress" style="width:0%; background: linear-gradient(90deg, #00e676, #ffd60a);"></div>
+        </div>
+        
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button class="store-buy-btn" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:linear-gradient(135deg, #00e676, #00b359); box-shadow:0 4px 15px rgba(0,230,118,0.3);" onclick="shareReferral()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+                Share Link
+            </button>
+            <button class="store-buy-btn" style="background:rgba(255,255,255,0.1); box-shadow:none; padding:8px 14px;" onclick="loadDashboard()">🔄</button>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button class="coupon-buy-btn" style="flex:1; padding:8px 6px; border-color:rgba(10,132,255,0.3); color:#0a84ff; background:rgba(10,132,255,0.1);" onclick="showRefRewards()">🎁 Rewards</button>
+            <button class="coupon-buy-btn" style="flex:1; padding:8px 6px; border-color:rgba(213,0,249,0.3); color:#ea80fc; background:rgba(213,0,249,0.1);" onclick="showRefLeaderboard()">🏆 Leaderboard</button>
+        </div>
     </div>
   </div>
 
@@ -4606,6 +4626,41 @@ app.get("/mini/:userId", (req, res) => {
     <div class="ad-sub">Ad completes in seconds</div>
   </div>
 
+  <!-- Referral Rewards Modal -->
+  <div class="confirm-overlay" id="refRewardsModal">
+    <div class="confirm-box" style="text-align:left; max-width:320px;">
+        <h3 style="margin:0 0 16px 0; color:#ffd60a; text-align:center; font-size:20px;">🎁 Referral Rewards</h3>
+        <div style="font-size:14px; color:#ddd; margin-bottom:20px; line-height:1.6;">
+            <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; margin-bottom:12px;">
+                <b style="color:#fff;">Per Referral:</b><br>
+                • You get <b style="color:#00e676;">+3 MythoPoints</b><br>
+                • Friend gets <b style="color:#00e676;">+2 MythoPoints</b>
+            </div>
+            <b style="color:#fff;">Milestone Bonuses:</b><br>
+            <div style="padding-left:8px; margin-top:6px;">
+                1 Ref → +3 pts<br>
+                3 Refs → 🥉 +10 pts<br>
+                5 Refs → 🎡 +25 pts<br>
+                10 Refs → 🥈 +70 pts<br>
+                25 Refs → 🥇 +200 pts<br>
+                50 Refs → 👑 +500 pts
+            </div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('refRewardsModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
+  <!-- Referral Leaderboard Modal -->
+  <div class="confirm-overlay" id="refLeaderboardModal">
+    <div class="confirm-box" style="text-align:left; padding:24px 16px; max-height:80vh; display:flex; flex-direction:column; max-width:340px;">
+        <h3 style="margin:0 0 12px 0; color:#ea80fc; text-align:center; font-size:18px;">🏆 Top Referrers</h3>
+        <div id="ref-lb-content" style="overflow-y:auto; flex:1; margin-bottom:16px; min-height:200px;">
+            <div class="spinner"></div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('refLeaderboardModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
   <script>
     // ─── TELEGRAM WEB APP ───
     const tg = window.Telegram.WebApp;
@@ -4701,6 +4756,7 @@ app.get("/mini/:userId", (req, res) => {
       mythopoints: 0,
       streak: 0,
       credits: 0,
+      referrals: 0, // <-- ADDED THIS
       premium: { active: false, plan: 'Free', daysLeft: 0 },
       bank: { invested: 0, pendingYield: 0, loan: 0 },
       stats: { earned: 0, spent: 0 },
@@ -4798,6 +4854,23 @@ app.get("/mini/:userId", (req, res) => {
       // Spin
       document.getElementById('spin-streak').innerText = '🔥 Streak: ' + state.spin.streak + ' days';
       document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
+
+      // Referral Progress Logic
+      document.getElementById('ui-refs-count').innerText = state.referrals;
+      const milestones = [3, 5, 10, 25, 50];
+      let nextTarget = milestones.find(m => state.referrals < m);
+      let targetText, progressPercent;
+      
+      if (nextTarget) {
+          targetText = `${state.referrals}/${nextTarget}`;
+          progressPercent = (state.referrals / nextTarget) * 100;
+      } else {
+          targetText = "MAX";
+          progressPercent = 100;
+      }
+      
+      document.getElementById('ui-refs-target').innerText = targetText;
+      document.getElementById('ref-progress').style.width = Math.min(progressPercent, 100) + "%";
     }
 
     // ─── TAB SWITCHING ───
@@ -4841,6 +4914,7 @@ app.get("/mini/:userId", (req, res) => {
         state.mythopoints = data.profile.mythopoints || 0;
         state.streak = data.profile.streak || 0;
         state.verified = data.profile.is_verified || false;
+        state.referrals = data.profile.referrals || 0; // <-- ADDED THIS
         state.credits = data.search.credits || 0;
         state.premium = {
           active: data.premium.active || false,
@@ -5032,11 +5106,12 @@ app.get("/mini/:userId", (req, res) => {
         spinError.innerText = '';
         
         // 1. Show Ads when they tap the middle name "SPIN"
-        const adCompleted = await showSpinAd('spin');
-        if (!adCompleted) {
-            spinError.innerText = 'Ad was not completed. Please try again.';
-            return;
-        }
+        // AD REMOVED FOR FIRST SPIN - so it's disabled
+        // const adCompleted = await showSpinAd('spin');
+        // if (!adCompleted) {
+        //     spinError.innerText = 'Ad was not completed. Please try again.';
+        //     return;
+        // }
         
         isSpinning = true;
         this.classList.add('disabled');
@@ -5556,8 +5631,6 @@ app.get("/mini/:userId", (req, res) => {
       }
       loadRecentChats(); 
     });
-
-    
 
     async function loadPayChat(receiverId) {
       try {
@@ -6161,6 +6234,57 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
+    // ─── REFERRAL FUNCTIONS ───
+    function shareReferral() {
+        const botUsername = "MythoSerialBot"; 
+        const link = `https://t.me/${botUsername}?start=${userId}`;
+        const text = `Join me on MythoSerial and earn free Mythopoints! 🚀\n\n${link}`;
+        
+        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`);
+    }
+
+    function showRefRewards() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('refRewardsModal').classList.add('open');
+    }
+
+    async function showRefLeaderboard() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('refLeaderboardModal').classList.add('open');
+        const content = document.getElementById('ref-lb-content');
+        content.innerHTML = '<div class="spinner"></div>';
+        
+        try {
+            const res = await fetch('/api/referral/leaderboard');
+            const data = await res.json();
+            
+            if (data.success && data.leaderboard.length > 0) {
+                let html = '';
+                data.leaderboard.forEach((u, i) => {
+                    const rank = i + 1;
+                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🔹';
+                    const avatar = u.photo 
+                        ? `<img src="${u.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" />` 
+                        : `<div style="width:32px;height:32px;border-radius:50%;background:#651fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">${u.name.charAt(0).toUpperCase()}</div>`;
+                    
+                    html += `
+                        <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid rgba(255,255,255,0.06);">
+                            <div style="width:24px; text-align:center; font-size:16px;">${medal}</div>
+                            ${avatar}
+                            <div style="flex:1; font-weight:500; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">${u.name}</div>
+                            <div style="font-weight:700; color:#00e676; font-size:14px; background:rgba(0,230,118,0.1); padding:4px 8px; border-radius:12px;">${u.refs}</div>
+                        </div>
+                    `;
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="empty" style="padding:20px;">No referrals yet. Be the first!</div>';
+            }
+        } catch (e) {
+            content.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load leaderboard.</div>';
+        }
+    }
+
     // ─── INIT ───
     async function init() {
       loadChantPersistence();
@@ -6202,6 +6326,29 @@ app.get("/mini/:userId", (req, res) => {
 </body>
 </html>
     `);
+});
+
+// ==========================================
+// REFERRAL LEADERBOARD API
+// ==========================================
+app.get("/api/referral/leaderboard", async (req, res) => {
+    try {
+        const users = await usersCollection.find(
+            { referral_count: { $gt: 0 } }
+        ).sort({ referral_count: -1 }).limit(10).project({ 
+            user_id: 1, first_name: 1, username: 1, referral_count: 1, photo_url: 1 
+        }).toArray();
+
+        const formatted = users.map(u => ({
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            refs: u.referral_count || 0,
+            photo: u.photo_url || null
+        }));
+
+        res.json({ success: true, leaderboard: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 // ==========================================
@@ -6362,9 +6509,6 @@ app.post("/api/watch-earn/claim/:userId", async (req, res) => {
         res.status(500).json({ success: false, error: e.message });
     }
 });
-
-
-
 
 // ==========================================
 // MONETAG S2S POSTBACK ENDPOINT
