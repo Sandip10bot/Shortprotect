@@ -2999,29 +2999,31 @@ app.get("/mini/:userId", (req, res) => {
     .earn-fab:active { transform: scale(0.9); }
     
     .earn-fab .fab-top {
-      font-size: 7px;
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: 0.5px;
       opacity: 0.9;
-      margin-bottom: 1px;
+      margin-bottom: -2px;
+      transform: scale(0.65); /* Forces text to shrink */
     }
     
     .earn-fab .fab-mid {
       display: flex;
       align-items: center;
       gap: 2px;
+      z-index: 2;
     }
-    .earn-fab .fab-mid svg { width: 16px; height: 16px; }
-    .earn-fab .fab-mid span { font-size: 18px; font-weight: 900; }
+    .earn-fab .fab-mid svg { width: 15px; height: 15px; }
+    .earn-fab .fab-mid span { font-size: 16px; font-weight: 900; }
     
     .earn-fab .fab-bot {
-      font-size: 5px;
+      font-size: 10px;
       font-weight: 600;
-      opacity: 0.8;
-      margin-top: 1px;
-      letter-spacing: 0.2px;
+      opacity: 0.9;
+      margin-top: -2px;
       white-space: nowrap;
+      transform: scale(0.45); /* Visually shrinks the long text perfectly */
     }
+
 
     @keyframes pulseGlow {
       0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
