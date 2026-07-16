@@ -6683,7 +6683,8 @@ app.get("/cooldown-app/:userId", async (req, res) => {
 
     const minutes = Math.floor(timeRemaining / 60);
     const seconds = timeRemaining % 60;
-    const timeStr = \`\${minutes}m \${seconds}s\`;
+    const timeStr = minutes + "m " + seconds + "s";
+
 
     res.send(`
     <!DOCTYPE html>
