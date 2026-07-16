@@ -4180,7 +4180,8 @@ app.get("/mini/:userId", (req, res) => {
           <span id="ui-prem-plan">No active plan</span>
         </div>
         <!-- Button moved to Bottom (Closes WebApp on click so command runs in background) -->
-        <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium'); tg.close();">Upgrade</a>
+        <a href="https://t.me/MythoSerialBot?start=upgrade" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Upgrade</a>
+
       </div>
       <!-- Search Credits Widget - Enhanced -->
       <div class="widget w-search">
@@ -4198,7 +4199,7 @@ app.get("/mini/:userId", (req, res) => {
           Refill With /get
         </div>
         <!-- Button moved to Bottom -->
-        <a href="https://t.me/MythoSerialBot?start=get" target="_blank" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium'); tg.close();">Refill</a>
+        <a href="https://t.me/MythoSerialBot?start=get" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Refill</a>
       </div>
     </div>
 
