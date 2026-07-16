@@ -4862,7 +4862,7 @@ app.get("/mini/:userId", (req, res) => {
       let targetText, progressPercent;
       
       if (nextTarget) {
-          targetText = `${state.referrals}/${nextTarget}`;
+          targetText = '${state.referrals}/${nextTarget};
           progressPercent = (state.referrals / nextTarget) * 100;
       } else {
           targetText = "MAX";
