@@ -2968,152 +2968,66 @@ app.get("/mini/:userId", (req, res) => {
     @keyframes spin { to { transform: rotate(360deg); } }
     .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
 
-    /* === AI FAB === */
-    .ai-fab {
+    
+
+    
+
+
+    /* === WATCH & EARN FAB (AI STYLE) === */
+    .earn-fab {
       position: fixed;
       bottom: 100px;
       right: 20px;
       width: 60px;
       height: 60px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #d500f9, #651fff);
+      background: linear-gradient(135deg, #d500f9, #651fff); 
       border: none;
-      box-shadow: 0 4px 30px rgba(213,0,249,0.5);
+      box-shadow: 0 4px 30px rgba(213,0,249,0.5); 
       color: white;
-      font-size: 20px;
-      font-weight: 800;
       cursor: pointer;
       z-index: 200;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       transition: transform 0.2s, box-shadow 0.2s;
-      animation: pulseGlow 2s infinite alternate;
+      animation: pulseGlow 2s infinite alternate; 
+      padding: 0;
+      line-height: 1;
     }
-    .ai-fab:active { transform: scale(0.9); }
+    .earn-fab:active { transform: scale(0.9); }
+    
+    .earn-fab .fab-top {
+      font-size: 7px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      opacity: 0.9;
+      margin-bottom: 1px;
+    }
+    
+    .earn-fab .fab-mid {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .earn-fab .fab-mid svg { width: 16px; height: 16px; }
+    .earn-fab .fab-mid span { font-size: 18px; font-weight: 900; }
+    
+    .earn-fab .fab-bot {
+      font-size: 5px;
+      font-weight: 600;
+      opacity: 0.8;
+      margin-top: 1px;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+
     @keyframes pulseGlow {
       0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
       100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
     }
 
-    /* === AI CHAT OVERLAY === */
-    .ai-chat-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      z-index: 300;
-      justify-content: center;
-      align-items: flex-end;
-    }
-    .ai-chat-overlay.open { display: flex; }
-    .ai-chat-panel {
-      width: 100%;
-      max-width: 420px;
-      height: 80vh;
-      background: #0a0014;
-      border-radius: 30px 30px 0 0;
-      box-shadow: 0 -10px 50px rgba(0,0,0,0.8);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.04);
-    }
-    .ai-chat-header {
-      padding: 16px 20px;
-      background: rgba(10,0,20,0.8);
-      backdrop-filter: blur(10px);
-      border-bottom: 0.5px solid rgba(255,255,255,0.06);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-    .ai-chat-header h3 { font-weight: 600; font-size: 18px; }
-    .ai-chat-header .close-btn {
-      background: none;
-      border: none;
-      color: #fff;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0 8px;
-    }
-    .ai-chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .msg {
-      max-width: 80%;
-      padding: 10px 14px;
-      border-radius: 16px;
-      font-size: 15px;
-      line-height: 1.4;
-      word-wrap: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .msg.bot {
-      align-self: flex-start;
-      background: rgba(255,255,255,0.06);
-      color: #eee;
-      border-bottom-left-radius: 4px;
-    }
-    .msg.bot b { color: #ea80fc; }
-    .ai-chat-footer {
-      padding: 12px 16px;
-      background: rgba(10,0,20,0.8);
-      border-top: 0.5px solid rgba(255,255,255,0.04);
-      display: flex;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-    .ai-chat-footer input {
-      flex: 1;
-      padding: 10px 14px;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color: #fff;
-      font-size: 15px;
-      outline: none;
-    }
-    .ai-chat-footer input::placeholder { color: rgba(255,255,255,0.2); }
-    .ai-chat-footer button {
-      padding: 10px 18px;
-      border-radius: 20px;
-      border: none;
-      background: linear-gradient(135deg, #d500f9, #651fff);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.1s;
-    }
-    .ai-chat-footer button:active { transform: scale(0.95); }
-    .ai-clear-btn {
-      background: rgba(255,69,58,0.15) !important;
-      color: #ff453a !important;
-      border: 1px solid rgba(255,69,58,0.15) !important;
-    }
-    .typing-indicator {
-      align-self: flex-start;
-      color: rgba(255,255,255,0.25);
-      font-size: 14px;
-      padding: 4px 12px;
-    }
-    @media (max-width: 480px) {
-      .ai-chat-panel { height: 90vh; border-radius: 20px 20px 0 0; }
-      .ai-fab { bottom: 90px; right: 16px; width: 54px; height: 54px; font-size: 18px; }
-    }
 
     /* === LEADERBOARD === */
     .lb-item {
@@ -6017,76 +5931,41 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
-    // ─── AI CHAT ───
-    const aiFab = document.getElementById('aiFab');
-    const aiOverlay = document.getElementById('aiChatOverlay');
-    const aiClose = document.getElementById('aiCloseBtn');
-    const aiMessages = document.getElementById('aiMessages');
-    const aiInput = document.getElementById('aiInput');
-    const aiSend = document.getElementById('aiSendBtn');
-    const aiClear = document.getElementById('aiClearBtn');
+    
+    // ─── WATCH & EARN FAB LOGIC ───
+    const earnFab = document.getElementById('earnFab');
+    if(earnFab) {
+        earnFab.addEventListener('click', async function() {
+            if (typeof show_9055307 !== 'function') {
+                alert('Ad service is still loading. Please wait a moment.');
+                return;
+            }
 
-    aiFab.addEventListener('click', () => {
-      aiOverlay.classList.add('open');
-      aiInput.focus();
-      tg.HapticFeedback.impactOccurred('medium');
-    });
-    aiClose.addEventListener('click', () => aiOverlay.classList.remove('open'));
-    aiOverlay.addEventListener('click', (e) => {
-      if (e.target === aiOverlay) aiOverlay.classList.remove('open');
-    });
-
-    function addMessage(text, sender) {
-      const div = document.createElement('div');
-      div.className = 'msg ' + sender;
-      div.innerHTML = text;
-      aiMessages.appendChild(div);
-      aiMessages.scrollTop = aiMessages.scrollHeight;
-    }
-
-    async function sendMessage() {
-      const msg = aiInput.value.trim();
-      if (!msg) return;
-      addMessage(msg, 'user');
-      aiInput.value = '';
-      const typing = document.createElement('div');
-      typing.className = 'typing-indicator';
-      typing.innerText = 'Mythobot is typing...';
-      aiMessages.appendChild(typing);
-      aiMessages.scrollTop = aiMessages.scrollHeight;
-
-      try {
-        const res = await fetch('/api/ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, message: msg })
+            const confirmed = await showConfirm('Watch a quick ad to earn 1 to 3 MythoPoints? (Max 5 per day)');
+            if (!confirmed) return;
+            
+            show_9055307().then(() => {
+                tg.HapticFeedback.notificationOccurred('success');
+                fetch('/api/watch-earn/claim/' + userId, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(async data => {
+                        if(data.success) {
+                            state.mythopoints = data.newBalance;
+                            updateUI();
+                            await showSuccess(`+${data.reward} MythoPoints!`, 'Reward Claimed');
+                        } else {
+                            alert(data.error || "Error claiming reward.");
+                        }
+                    }).catch(err => {
+                        alert("Network error while claiming reward.");
+                    });
+            }).catch((error) => {
+                alert("Ad failed to load or was closed early.");
+                console.error("Monetag Error:", error);
+            });
         });
-        const data = await res.json();
-        typing.remove();
-        if (data.success) {
-          addMessage(data.reply, 'bot');
-          tg.HapticFeedback.notificationOccurred('success');
-        } else {
-          addMessage('❌ Something went wrong. Try again.', 'bot');
-        }
-      } catch (e) {
-        typing.remove();
-        addMessage('❌ Network error. Please check your connection.', 'bot');
-      }
     }
-
-    aiSend.addEventListener('click', sendMessage);
-    aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
-
-    aiClear.addEventListener('click', async () => {
-      if (confirm('Clear conversation memory?')) {
-        try {
-          await fetch('/api/ai/clear/' + userId, { method: 'POST' });
-          aiMessages.innerHTML = '<div class="msg bot">Memory cleared. Start fresh!</div>';
-          tg.HapticFeedback.notificationOccurred('warning');
-        } catch (e) {}
-      }
-    });
+  
 
     // ─── CHANT & EARN (Tap to Earn) ───
     const CHANT_KEY = 'mytho_chant_' + userId;
@@ -6437,200 +6316,53 @@ app.get("/api/history/:userId", async (req, res) => {
         res.status(500).json({ success: false, error: "Failed to fetch history" });
     }
 });
+// ==========================================
+// WATCH & EARN CLAIM API (Limit: 5/day)
+// ==========================================
+app.post("/api/watch-earn/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const today = new Date().toISOString().split('T')[0];
+        const user = await usersCollection.findOne({ user_id: uid });
+        
+        const watchCount = (user?.watch_earn_date === today) ? (user?.watch_earn_count || 0) : 0;
+        
+        if (watchCount >= 5) {
+            return res.status(400).json({ success: false, error: "Daily limit of 5 ads reached! Come back tomorrow." });
+        }
 
-// ==========================================
-// AI MEMORY FUNCTIONS (unchanged)
-// ==========================================
-async function addToMemory(userId, message) {
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    if (!doc) {
-        await usersCollection.insertOne({
-            user_id: key,
-            chat_id: parseInt(userId),
-            user_id_num: parseInt(userId),
-            conversation: [message],
-            total_messages: 1,
-            first_seen: new Date(),
-            last_seen: new Date()
-        });
-    } else {
-        let conv = doc.conversation || [];
-        conv.push(message);
-        if (conv.length > 1000) conv = conv.slice(-1000);
+        const reward = Math.floor(Math.random() * 3) + 1;
+
         await usersCollection.updateOne(
-            { user_id: key },
-            {
-                $set: {
-                    conversation: conv,
-                    total_messages: conv.length,
-                    last_seen: new Date()
+            { user_id: uid },
+            { 
+                $inc: { mythopoints: reward },
+                $set: { 
+                    watch_earn_date: today,
+                    watch_earn_count: watchCount + 1
                 }
-            }
+            },
+            { upsert: true }
         );
-    }
-}
 
-async function getMemory(userId) {
-    const key = `${userId}:${userId}`;
-    const doc = await usersCollection.findOne({ user_id: key });
-    if (doc && doc.conversation) {
-        const recent = doc.conversation.slice(-14);
-        return recent.join('\n');
-    }
-    return '';
-}
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: reward,
+            type: "EARNED",
+            reason: `Watched Ad for points (${watchCount + 1}/5)`,
+            date: new Date()
+        });
 
-async function clearMemory(userId) {
-    const key = `${userId}:${userId}`;
-    await usersCollection.updateOne(
-        { user_id: key },
-        {
-            $set: {
-                conversation: [],
-                total_messages: 0
-            }
-        },
-        { upsert: true }
-    );
-}
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
 
-// ==========================================
-// AI API ENDPOINT (unchanged)
-// ==========================================
-app.post("/api/ai", async (req, res) => {
-    try {
-        const { userId, message } = req.body;
-        if (!userId || !message) {
-            return res.status(400).json({ success: false, error: "Missing userId or message" });
-        }
-
-        await addToMemory(userId, `User: ${message}`);
-
-        let sysPrompt = "You are MythoBot. made by @sandip10x Talk in a friendly, Gen-Z Hinglish tone. Be direct. Rules: 1. Keep replies under 500 chars. 2. Use <b>bold</b> for keywords. 3. No markdown.";
-
-        const SERIAL_COMMANDS = {
-            "shiv shakti": "/ss s01e01",
-            "dwarkadheesh": "/d s01e01",
-            "karmadhikari shanidev": "/karm s01e01",
-            "chandra dev": "/cd s01e01",
-            "mahishasura mardini": "/mm s01e01",
-            "jai mahalakshmi": "/jm s01e01",
-            "chandra nandni": "/cn s01e01",
-            "brij ke gopal": "/bkg s01e01",
-            "yashomati maiya ke nandlala": "/ymkn s01e01",
-            "meera": "/meera s01e01",
-            "bangla": "/bang s01e01",
-            "dharm yoddha garud": "/dyg s01e01",
-            "siya ke ram": "/skr s01e01",
-            "ram siya ke luv kush": "/rsklk s01e01",
-            "tenali rama": "/tr s01e01",
-            "devon ke dev mahadev": "/dkdm s01e01",
-            "karn sangini": "/ks s01e01",
-            "bolo ambe maa ki jai": "/maa s01e01",
-            "sriman rama": "/rama s01e01",
-            "the legend of hanuman": "/tloh s01e01",
-            "ramayan luv kush": "/ramayan2 s01e01",
-            "hatim": "/hatim s01e01",
-            "ramanand sagar ramayan": "/ramayan s01e01",
-            "shrimad ramayan": "/sr s01e01",
-            "ramayan sabke jeevan ka aadhar": "/rsjka s01e01",
-            "radhakrishn": "/rk s1 e01",
-            "veer hanuman": "/vh s01e01",
-            "prithviraj chauhan": "/cspc s01e01",
-            "suryaputra karn": "/spk s01e01",
-            "jai kanhaiya laal ki": "/jklk s1 e01",
-            "kaamdhenu gaumata": "/kg s01e01",
-            "kakbhushundi ramayan": "/kr s01e01",
-            "mata saraswati": "/ms s01e01",
-            "shri krishna": "/sk s01e01",
-            "mahabharat": "/mb s01e01",
-            "jag jaanani maa vaishnodevi": "/jjmv s01e01",
-            "shri tirupati balaji": "/stb s01e01",
-            "ganesh kartikey": "/gk s01e01",
-            "kurukshetra": "/kurukshetra s01e01",
-            "mahabharat - ek dharmayudh": "/med s01e01",
-            "budh dev": "/bd s01e01"
-        };
-
-        function detectSerial(text) {
-            const lower = text.toLowerCase().trim();
-            for (const [name, cmd] of Object.entries(SERIAL_COMMANDS)) {
-                if (lower.includes(name)) return { serial: name, command: cmd };
-            }
-            return null;
-        }
-
-        let finalPrompt = "";
-        const serial = detectSerial(message);
-        if (serial) {
-            finalPrompt = `${sysPrompt} Task: User wants ${serial.serial}. Tell them to send: ${serial.command}`;
-        } else {
-            let history = await getMemory(userId);
-            if (history && history.length > 400) {
-                history = "..." + history.slice(-400);
-            }
-            if (history) {
-                finalPrompt = `${sysPrompt} Chat context: ${history}. User says: ${message}`;
-            } else {
-                finalPrompt = `${sysPrompt} User says: ${message}`;
-            }
-        }
-
-        const encoded = encodeURIComponent(finalPrompt);
-        const apiUrl = `https://apis.prexzyvilla.site/ai/gpt-5?text=${encoded}`;
-        
-        let fetchModule;
-        try { fetchModule = (await import('node-fetch')).default; } catch (e) { fetchModule = fetch; }
-        
-        const response = await fetchModule(apiUrl);
-        let reply = null;
-        
-        if (response.ok) {
-            const data = await response.json();
-            reply = data.text || data.reply || data.response || data.message || data.data || null;
-            if (reply && typeof reply === 'string') {
-                reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-                reply = reply.replace(/\n/g, ' ');
-            }
-        }
-
-        if (!reply) {
-            reply = "Arre yaar, lagta hai network devlok (API) mein thoda busy chal raha hai! Thodi der mein wapas try kar 😅✨";
-        }
-
-        await addToMemory(userId, `Mythobot: ${reply}`);
-
-        res.json({ success: true, reply });
-    } catch (error) {
-        console.error("AI API error:", error);
-        res.status(500).json({ success: false, error: "AI service unavailable" });
-    }
-});
-
-// ==========================================
-// AI MEMORY ENDPOINTS
-// ==========================================
-app.get("/api/ai/memory/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        const memory = await getMemory(userId);
-        res.json({ success: true, memory });
+        res.json({ success: true, reward: reward, newBalance: updatedUser.mythopoints });
     } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to fetch memory" });
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
 
-app.post("/api/ai/clear/:userId", async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        await clearMemory(userId);
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: "Failed to clear memory" });
-    }
-});
+
 
 // ==========================================
 // MONETAG S2S POSTBACK ENDPOINT
