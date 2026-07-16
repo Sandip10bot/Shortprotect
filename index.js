@@ -5952,7 +5952,7 @@ app.get("/mini/:userId", (req, res) => {
                         if(data.success) {
                             state.mythopoints = data.newBalance;
                             updateUI();
-                            await showSuccess(`+${data.reward} MythoPoints!`, 'Reward Claimed');
+                            await showSuccess('+' + data.reward + ' MythoPoints!', 'Reward Claimed'); 
                         } else {
                             alert(data.error || "Error claiming reward.");
                         }
