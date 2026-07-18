@@ -6670,6 +6670,9 @@ app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
     }
 });
 
+// ==========================================
+// WATCH AD TO FORWARD (DIAGNOSTIC VERSION)
+// ==========================================
 app.get("/forward-ad/:userId/:fileId", async (req, res) => {
     const { userId, fileId } = req.params;
     res.send(`
@@ -6677,10 +6680,11 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
         <title>Watch Ad to Forward</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
         ${THEME_CSS}
     </head>
     <body>
@@ -6698,33 +6702,49 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
             const tg = window.Telegram.WebApp;
             tg.expand();
             
+            // Check if Telegram WebApp initialized
+            console.log("Telegram WebApp state:", tg);
+
             document.getElementById('watch-ad-btn').addEventListener('click', function() {
+                // DIAGNOSTIC ALERT 1: Checks if the click works
+                alert("⚙️ System: Click detected successfully!");
+
                 if (typeof show_9055307 !== 'function') {
-                    alert('Ad service is still loading. Please try again in a few seconds.');
+                    // DIAGNOSTIC ALERT 2: Checks if Monetag SDK script loaded
+                    alert("❌ SDK Error: Monetag script failed to load as a function. Type found: " + typeof show_9055307);
                     return;
                 }
                 
-                show_9055307().then(() => {
-                    tg.HapticFeedback.notificationOccurred('success');
-                    document.getElementById('watch-ad-btn').style.display = 'none';
-                    document.getElementById('loading-msg').style.display = 'block';
+                try {
+                    // DIAGNOSTIC ALERT 3: Firing the Monetag promise call
+                    alert("🚀 Calling Monetag SDK Engine...");
                     
-                    // Redirect back to the bot using the specific deep link
-                    tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
-                    
-                    setTimeout(() => {
-                        tg.close();
-                    }, 1000);
-                }).catch((error) => {
-                    alert("Ad failed to load or was closed early. Please try again.");
-                    console.error("Monetag Error:", error);
-                });
+                    show_9055307().then(() => {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        document.getElementById('watch-ad-btn').style.display = 'none';
+                        document.getElementById('loading-msg').style.display = 'block';
+                        
+                        // Open Telegram Redirect deep link
+                        tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
+                        
+                        setTimeout(() => {
+                            tg.close();
+                        }, 1200);
+                    }).catch((error) => {
+                        // DIAGNOSTIC ALERT 4: Captures asynchronous promise errors
+                        alert("⚠️ Monetag Promise Error: " + JSON.stringify(error));
+                    });
+                } catch (e) {
+                    // DIAGNOSTIC ALERT 5: Captures silent crash errors
+                    alert("💥 Runtime Crash Error: " + e.message);
+                }
             });
         </script>
     </body>
     </html>
     `);
 });
+
 
 
 
