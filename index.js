@@ -6670,6 +6670,63 @@ app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
     }
 });
 
+app.get("/forward-ad/:userId/:fileId", async (req, res) => {
+    const { userId, fileId } = req.params;
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Watch Ad to Forward</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <div style="font-size:40px; margin-bottom:10px;">🍋</div>
+            <h2>Unlock Forward</h2>
+            <p>Watch a short ad to instantly get the forwarded file without spending any Mythopoints!</p>
+            <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad</button>
+            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
+                Verifying... Please wait ⚙️
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            document.getElementById('watch-ad-btn').addEventListener('click', function() {
+                if (typeof show_9055307 !== 'function') {
+                    alert('Ad service is still loading. Please try again in a few seconds.');
+                    return;
+                }
+                
+                show_9055307().then(() => {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    document.getElementById('watch-ad-btn').style.display = 'none';
+                    document.getElementById('loading-msg').style.display = 'block';
+                    
+                    // Redirect back to the bot using the specific deep link
+                    tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
+                    
+                    setTimeout(() => {
+                        tg.close();
+                    }, 1000);
+                }).catch((error) => {
+                    alert("Ad failed to load or was closed early. Please try again.");
+                    console.error("Monetag Error:", error);
+                });
+            });
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+
 
 // ========================
 // HOME & FALLBACK ROUTE
