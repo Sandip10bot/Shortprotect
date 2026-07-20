@@ -4962,7 +4962,7 @@ app.get("/mini/:userId", (req, res) => {
 
     spinAdBtn.addEventListener('click', function() {
       if (typeof show_9055307 !== 'function') {
-        alert('Ad service is loading or unavailable. Please try again.');
+        alert('Ad service is loading or unavailable. Once Check If you enabled DNS OR Adblocker please disable it!');
         spinAdOverlay.classList.remove('open');
         if (spinAdResolve) spinAdResolve(false);
         return;
