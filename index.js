@@ -1585,7 +1585,7 @@ app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
                 mythopoints: user?.mythopoints || 0,
                 streak: user?.streak || 0,
                 is_verified: user?.is_verified || false,
-                referrals: user?.referral_count || 0 // <-- ADDED
+                referrals: user?.referral_count || 0
             },
             bank: {
                 invested: bank?.invested || 0,
@@ -2214,7 +2214,7 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
                 recentUsersMap.set(otherId, {
                     lastMessage: c.message || 'Payment transaction',
                     timestamp: c.timestamp,
-                    unreadCount: 0 // Count initialize kiya
+                    unreadCount: 0
                 });
                 userIds.add(otherId);
             }
@@ -2237,7 +2237,7 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
             photo_url: u.photo_url || null,
             lastMessage: recentUsersMap.get(u.user_id).lastMessage,
             timestamp: recentUsersMap.get(u.user_id).timestamp,
-            unreadCount: recentUsersMap.get(u.user_id).unreadCount // Frontend ko count bheja
+            unreadCount: recentUsersMap.get(u.user_id).unreadCount
         })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); 
 
         res.json({ success: true, recent: formatted });
@@ -2249,7 +2249,6 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
 app.post("/api/payment/chat/mark-read", async (req, res) => {
     try {
         const { userId, otherId } = req.body;
-        // Samne wale (otherId) ke bheje gaye sabhi messages ko read: true set kar do
         await paymentChatCollection.updateMany(
             { senderId: parseInt(otherId), receiverId: parseInt(userId), read: { $ne: true } },
             { $set: { read: true } }
@@ -2579,7 +2578,403 @@ app.get("/api/chant/leaderboard", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Chat & Pay & Spin & Monetag)
+// REFERRAL LEADERBOARD API
+// ==========================================
+app.get("/api/referral/leaderboard", async (req, res) => {
+    try {
+        const users = await usersCollection.find(
+            { referral_count: { $gt: 0 } }
+        ).sort({ referral_count: -1 }).limit(10).project({ 
+            user_id: 1, first_name: 1, username: 1, referral_count: 1, photo_url: 1 
+        }).toArray();
+
+        const formatted = users.map(u => ({
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            refs: u.referral_count || 0,
+            photo: u.photo_url || null
+        }));
+
+        res.json({ success: true, leaderboard: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// LEADERBOARD API (UPDATED: includes photo_url)
+// ==========================================
+app.get("/api/leaderboard/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { timeframe = "all", page = 1 } = req.query;
+        const limit = 10;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let pointField = "mythopoints";
+        if (timeframe === "weekly") pointField = "weekly_points";
+        if (timeframe === "monthly") pointField = "monthly_points";
+
+        const query = {};
+        query[pointField] = { $gt: 0 };
+
+        const totalUsers = await usersCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+        const users = await usersCollection
+            .find(query)
+            .sort({ [pointField]: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        const formattedUsers = users.map(u => {
+            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
+            let safeUsername = null;
+            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
+                safeUsername = rawUsername.trim().startsWith('@') 
+                    ? rawUsername.trim() 
+                    : `@${rawUsername.trim()}`;
+            }
+            let rawName = u.name || u.first_name || null;
+            if (!rawName) {
+                if (safeUsername) {
+                    rawName = safeUsername;
+                } else {
+                    rawName = `User ${u.user_id}`;
+                }
+            }
+            let finalName = String(rawName); 
+            if (finalName.length > 15) {
+                finalName = finalName.substring(0, 15) + "..";
+            }
+            return {
+                user_id: u.user_id,
+                name: finalName,
+                username: safeUsername,
+                points: u[pointField] || 0,
+                title: getRankTitle(u[pointField] || 0),
+                photo_url: u.photo_url || null
+            };
+        });
+
+        let currentUser = null;
+        const userDoc = await usersCollection.findOne({ user_id: uid });
+        if (userDoc && userDoc[pointField] > 0) {
+            const rankQuery = {};
+            rankQuery[pointField] = { $gt: userDoc[pointField] };
+            const higherCount = await usersCollection.countDocuments(rankQuery);
+            currentUser = {
+                points: userDoc[pointField],
+                rank: higherCount + 1,
+                title: getRankTitle(userDoc[pointField])
+            };
+        }
+
+        res.json({
+            success: true,
+            page: parseInt(page),
+            totalPages: totalPages,
+            users: formattedUsers,
+            currentUser: currentUser
+        });
+    } catch (error) {
+        console.error("Leaderboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+    }
+});
+
+// ==========================================
+// HISTORY API (unchanged)
+// ==========================================
+app.get("/api/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { filter = "ALL", page = 1 } = req.query;
+        const limit = 15;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let query = { user_id: uid };
+        if (filter !== "ALL") {
+            query.type = filter.toUpperCase();
+        }
+
+        const historyRecords = await mpHistoryCollection
+            .find(query)
+            .sort({ date: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ 
+            success: true, 
+            history: historyRecords 
+        });
+    } catch (error) {
+        console.error("History API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch history" });
+    }
+});
+
+// ==========================================
+// WATCH & EARN CLAIM API (Limit: 5/day)
+// ==========================================
+app.post("/api/watch-earn/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const today = new Date().toISOString().split('T')[0];
+        const user = await usersCollection.findOne({ user_id: uid });
+        
+        const watchCount = (user?.watch_earn_date === today) ? (user?.watch_earn_count || 0) : 0;
+        
+        if (watchCount >= 5) {
+            return res.status(400).json({ success: false, error: "Daily limit of 5 ads reached! Come back tomorrow." });
+        }
+
+        const reward = Math.floor(Math.random() * 3) + 1;
+
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { 
+                $inc: { mythopoints: reward },
+                $set: { 
+                    watch_earn_date: today,
+                    watch_earn_count: watchCount + 1
+                }
+            },
+            { upsert: true }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: reward,
+            type: "EARNED",
+            reason: `Watched Ad for points (${watchCount + 1}/5)`,
+            date: new Date()
+        });
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+
+        res.json({ success: true, reward: reward, newBalance: updatedUser.mythopoints });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// MONETAG S2S POSTBACK ENDPOINT
+// ==========================================
+app.get("/api/monetag-postback", async (req, res) => {
+    const userId = req.query.userid;
+    const rewardAmt = req.query.reward || 0;
+    const transactionId = req.query.tid || "unknown";
+
+    if (!userId) {
+        return res.status(400).json({ error: "Missing userid" });
+    }
+
+    console.log(`✅ [Monetag] User: ${userId} | Reward: ${rewardAmt} | TID: ${transactionId}`);
+
+    res.status(200).json({ success: true, status: "ok" });
+});
+
+// ==========================================
+// WATCH AD TO SKIP SEARCH COOLDOWN (WEBAPP)
+// ==========================================
+
+app.get("/cooldown-app/:userId", async (req, res) => {
+    const uid = parseInt(req.params.userId);
+    
+    const searchDoc = await searchLimitCollection.findOne({ user_id: uid });
+    
+    const now = Math.floor(Date.now() / 1000);
+    let inCooldown = false;
+    let timeRemaining = 0;
+    
+    if (searchDoc && searchDoc.last_search) {
+        const timePassed = now - searchDoc.last_search;
+        if (timePassed < 300) { 
+            inCooldown = true;
+            timeRemaining = 300 - timePassed;
+        }
+    }
+
+    const minutes = Math.floor(timeRemaining / 60);
+    const seconds = timeRemaining % 60;
+    const timeStr = minutes + "m " + seconds + "s";
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <title>Skip Cooldown</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <h2 style="font-size: 22px;">Skip Cooldown</h2>
+            
+            <div id="ui-cooldown-active" style="display: ${inCooldown ? 'block' : 'none'};">
+                <div style="font-size:40px; margin-bottom:10px;">⏳</div>
+                <p>You have a cooldown period of <b>${timeStr}</b> remaining.</p>
+                <p style="font-size: 13px; color: #aaa;">Watch a quick ad to skip the timer instantly!</p>
+                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad to Skip</button>
+            </div>
+
+            <div id="ui-cooldown-passed" style="display: ${inCooldown ? 'none' : 'block'};">
+                <div style="font-size:40px; margin-bottom:10px;">✅</div>
+                <p>Your cooldown period has already passed.</p>
+                <h3 style="color: #00e676;">You can search now!</h3>
+                <button class="btn" onclick="Telegram.WebApp.close()" style="margin-top: 15px;">Return to Bot</button>
+            </div>
+            
+            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
+                Unlocking... Please wait ⚙️
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            const watchBtn = document.getElementById('watch-ad-btn');
+            
+            if (watchBtn) {
+                watchBtn.addEventListener('click', function() {
+                    if (typeof show_9055307 !== 'function') {
+                        alert('Ad service is still loading. Please try again in a few seconds.');
+                        return;
+                    }
+                    
+                    show_9055307().then(() => {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        document.getElementById('ui-cooldown-active').style.display = 'none';
+                        document.getElementById('loading-msg').style.display = 'block';
+                        
+                        fetch('/api/skip-cooldown/claim/${uid}', { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                document.getElementById('loading-msg').style.display = 'none';
+                                if(data.success) {
+                                    document.getElementById('ui-cooldown-passed').style.display = 'block';
+                                    document.getElementById('ui-cooldown-passed').querySelector('h3').innerText = "Cooldown Skipped Successfully!";
+                                } else {
+                                    alert("Error skipping cooldown.");
+                                }
+                            }).catch(err => {
+                                alert("Network error while claiming reward.");
+                            });
+
+                    }).catch((error) => {
+                        alert("Ad failed to load or was closed early.");
+                        console.error("Monetag Error:", error);
+                    });
+                });
+            }
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        await searchLimitCollection.updateOne(
+            { user_id: uid },
+            { $set: { last_search: 0 } },
+            { upsert: true }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: 0,
+            type: "EARNED",
+            reason: "Watched Ad to Skip Cooldown",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: "Cooldown skipped!" });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// WATCH AD TO FORWARD (DIAGNOSTIC VERSION)
+// ==========================================
+app.get("/forward-ad/:userId/:fileId", async (req, res) => {
+    const { userId, fileId } = req.params;
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <title>Watch Ad to Forward</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <div style="font-size:40px; margin-bottom:10px;">🍋</div>
+            <h2>Unlock Forward</h2>
+            <p>Watch a short ad to instantly get the forwarded file without spending any Mythopoints!</p>
+            <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad</button>
+            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
+                Verifying... Please wait ⚙️
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            console.log("Telegram WebApp state:", tg);
+
+            document.getElementById('watch-ad-btn').addEventListener('click', function() {
+                alert("⚙️ System: Click detected successfully!");
+
+                if (typeof show_9055307 !== 'function') {
+                    alert("❌ SDK Error: Monetag script failed to load as a function. Type found: " + typeof show_9055307);
+                    return;
+                }
+                
+                try {
+                    alert("🚀 Calling Monetag SDK Engine...");
+                    
+                    show_9055307().then(() => {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        document.getElementById('watch-ad-btn').style.display = 'none';
+                        document.getElementById('loading-msg').style.display = 'block';
+                        
+                        tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
+                        
+                        setTimeout(() => {
+                            tg.close();
+                        }, 1200);
+                    }).catch((error) => {
+                        alert("⚠️ Monetag Promise Error: " + JSON.stringify(error));
+                    });
+                } catch (e) {
+                    alert("💥 Runtime Crash Error: " + e.message);
+                }
+            });
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Settings Modal & Features)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -2642,6 +3037,31 @@ app.get("/mini/:userId", (req, res) => {
       height: 24px;
       fill: #ea80fc;
     }
+
+    /* === SETTINGS MODAL & FEATURES === */
+    .settings-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); z-index: 900; justify-content: center; align-items: center; }
+    .settings-overlay.open { display: flex; animation: fadeIn 0.3s; }
+    .settings-box { background: #1a0a2b; border-radius: 24px; width: 90%; max-width: 340px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 60px rgba(0,0,0,0.8); max-height: 80vh; overflow-y: auto; }
+    .settings-box h3 { margin: 0 0 20px 0; color: #ea80fc; text-align: center; }
+    .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .setting-item:last-child { border-bottom: none; }
+    .setting-label { font-size: 14px; color: #fff; font-weight: 500; }
+    
+    /* Toggle Switch */
+    .toggle-switch { position: relative; width: 44px; height: 24px; appearance: none; background: rgba(255,255,255,0.1); border-radius: 24px; outline: none; cursor: pointer; transition: 0.3s; }
+    .toggle-switch:checked { background: #00e676; }
+    .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+    .toggle-switch:checked::after { transform: translateX(20px); }
+    
+    /* Privacy Blur */
+    .privacy-blur { filter: blur(8px); transition: filter 0.3s; user-select: none; }
+    
+    /* Floating Pill Nav Modifier */
+    .tab-bar.floating-pill { bottom: 15px; width: 92%; left: 4%; border-radius: 40px; border: 1px solid rgba(255,255,255,0.1); padding: 8px 0; box-shadow: 0 10px 40px rgba(0,0,0,0.6); background: rgba(10,0,20,0.95); }
+    
+    /* Settings Gear Icon */
+    .settings-gear { position: absolute; top: -5px; right: -5px; background: #1a0a2b; border: 2px solid #00e676; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #00e676; font-size: 14px; z-index: 10; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 10px rgba(0,230,118,0.3); }
+    .settings-gear:active { transform: scale(0.85); box-shadow: 0 0 5px rgba(0,230,118,0.5); }
 
     /* === NAVBAR === */
     .navbar {
@@ -2993,7 +3413,7 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: 700;
       opacity: 0.9;
       margin-bottom: -2px;
-      transform: scale(0.65); /* Forces text to shrink */
+      transform: scale(0.65);
     }
     
     .earn-fab .fab-mid {
@@ -3011,7 +3431,7 @@ app.get("/mini/:userId", (req, res) => {
       opacity: 0.9;
       margin-top: -2px;
       white-space: nowrap;
-      transform: scale(0.45); /* Visually shrinks the long text perfectly */
+      transform: scale(0.45);
     }
 
     @keyframes pulseGlow {
@@ -3095,7 +3515,7 @@ app.get("/mini/:userId", (req, res) => {
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === PAYMENT - CHAT STYLE (New) === */
+    /* === PAYMENT - CHAT STYLE === */
     .payment-chat-container {
       max-height: 250px;
       overflow-y: auto;
@@ -3255,7 +3675,7 @@ app.get("/mini/:userId", (req, res) => {
     .quick-action.store { border-color: rgba(255,214,10,0.15); }
     .quick-action.pay { border-color: rgba(10,132,255,0.15); }
 
-    /* === STORE (Professional Redesign) === */
+    /* === STORE === */
     .store-section-title {
       font-size: 12px;
       color: rgba(255,255,255,0.4);
@@ -3265,7 +3685,6 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: 700;
     }
     
-    /* Boosts List Cards */
     .store-card {
       background: rgba(45,10,80,0.3);
       backdrop-filter: blur(12px);
@@ -3856,7 +4275,6 @@ app.get("/mini/:userId", (req, res) => {
       z-index: 20;
     }
 
-    /* Enhanced Spin Center Button */
     .spin-center {
       position: absolute;
       top: 50%;
@@ -3965,7 +4383,6 @@ app.get("/mini/:userId", (req, res) => {
       margin-top: 12px;
     }
 
-    
     /* === PAYMENT - CHAT STYLE (Enhanced PhonePe/WhatsApp Style) === */
     .pay-search-area { display: block; }
     .pay-search-area.hidden { display: none; }
@@ -3977,7 +4394,7 @@ app.get("/mini/:userId", (req, res) => {
       position: fixed;
       top: 0; left: 0; width: 100%;
       background: #0a0014;
-      z-index: 200; /* Covers the bottom tab-bar */
+      z-index: 200;
     }
     .pay-fullscreen.open { display: flex; animation: fadeSlide 0.3s ease; }
 
@@ -4035,7 +4452,6 @@ app.get("/mini/:userId", (req, res) => {
       padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4; word-wrap: break-word;
     }
     
-    /* Text Message Bubbles */
     .chat-msg.sent .bubble.text {
       background: linear-gradient(135deg, #d500f9, #651fff); color: #fff; border-bottom-right-radius: 4px;
     }
@@ -4043,7 +4459,6 @@ app.get("/mini/:userId", (req, res) => {
       background: rgba(255,255,255,0.08); color: #eee; border-bottom-left-radius: 4px;
     }
 
-    /* Payment Card Bubble */
     .chat-msg .bubble.payment {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.08);
@@ -4100,7 +4515,10 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: HOME ========== -->
   <div id="tab-home" class="tab-content active">
     <div class="profile-hdr">
-      <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+      <div style="position:relative;">
+        <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+        <div class="settings-gear" id="openSettingsBtn">⚙️</div>
+      </div>
       <div class="profile-info">
         <h1 id="ui-name">Loading...</h1>
         <p id="ui-id">ID: ${userId}</p>
@@ -4109,7 +4527,6 @@ app.get("/mini/:userId", (req, res) => {
       <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
       </a>
-
     </div>
 
     <!-- ========== SCRATCH CARD BANNER ========== -->
@@ -4179,9 +4596,7 @@ app.get("/mini/:userId", (req, res) => {
         <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
           <span id="ui-prem-plan">No active plan</span>
         </div>
-        <!-- Button moved to Bottom (Closes WebApp on click so command runs in background) -->
         <a href="https://t.me/MythoSerialBot?start=upgrade" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Upgrade</a>
-
       </div>
       <!-- Search Credits Widget - Enhanced -->
       <div class="widget w-search">
@@ -4198,7 +4613,6 @@ app.get("/mini/:userId", (req, res) => {
         <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
           Refill With /get
         </div>
-        <!-- Button moved to Bottom -->
         <a href="https://t.me/MythoSerialBot?start=get" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Refill</a>
       </div>
     </div>
@@ -4262,7 +4676,7 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-    <!-- ========== NEW: REFERRAL CONTROL PANEL ========== -->
+    <!-- ========== REFERRAL CONTROL PANEL ========== -->
     <h3 style="font-size:16px; margin: 16px 16px 4px; font-weight:600;">🚀 Refer & Earn</h3>
     <div class="glass" style="margin: 0 16px 20px;">
         <div class="grid-2" style="margin-bottom: 12px; gap:8px;">
@@ -4350,7 +4764,6 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: STORE ========== -->
   <div id="tab-store" class="tab-content">
     
-    <!-- Header -->
     <div class="glass">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
@@ -4359,10 +4772,8 @@ app.get("/mini/:userId", (req, res) => {
       <p style="font-size: 13px; color: rgba(255,255,255,0.5); margin:0;">Spend Mythopoints to enhance your experience.</p>
     </div>
 
-    <!-- Category 1: Premium Boosts -->
     <div class="store-section-title">Premium Boosts</div>
     
-    <!-- Credits -->
     <div class="store-card">
       <div class="store-icon-wrap" style="background: rgba(10,132,255,0.15); color: #0a84ff;">
         <svg viewBox="0 0 24 24"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4h2.35v4h4v-4h2v-4h-8.35zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
@@ -4374,7 +4785,6 @@ app.get("/mini/:userId", (req, res) => {
       <button class="store-buy-btn" onclick="purchase('credits')">50 pts</button>
     </div>
 
-    <!-- Skip Cooldown -->
     <div class="store-card">
       <div class="store-icon-wrap" style="background: rgba(48,209,88,0.15); color: #30d158;">
         <svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
@@ -4386,7 +4796,6 @@ app.get("/mini/:userId", (req, res) => {
       <button class="store-buy-btn" onclick="purchase('skip_cooldown')">50 pts</button>
     </div>
 
-    <!-- Mystery Box -->
     <div class="store-card">
       <div class="store-icon-wrap" style="background: rgba(213,0,249,0.15); color: #ea80fc;">
         <svg viewBox="0 0 24 24"><path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1h-4v-1c0-.55.45-1 1-1 1.14 0 2.12.58 2.66 1.44l.34.46.34-.46C15.88 4.58 16.86 4 18 4zM9 4c.55 0 1 .45 1 1v1H6c0-.55.45-1 1-1s1-.45 1-1zm11 16H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v7z"/></svg>
@@ -4398,11 +4807,9 @@ app.get("/mini/:userId", (req, res) => {
       <button class="store-buy-btn" onclick="purchase('mystery')">100 pts</button>
     </div>
 
-    <!-- Category 2: Coupons Grid -->
     <div class="store-section-title">Discount Coupons</div>
     <div class="coupon-grid">
       
-      <!-- 10% Coupon -->
       <div class="coupon-card">
         <div class="coupon-icon">
           <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
@@ -4414,7 +4821,6 @@ app.get("/mini/:userId", (req, res) => {
         <button class="coupon-buy-btn" onclick="purchase('coupon_10')">200 pts</button>
       </div>
 
-      <!-- 20% Coupon -->
       <div class="coupon-card">
         <div class="coupon-icon">
           <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
@@ -4426,7 +4832,6 @@ app.get("/mini/:userId", (req, res) => {
         <button class="coupon-buy-btn" onclick="purchase('coupon_20')">500 pts</button>
       </div>
 
-      <!-- 30% Coupon -->
       <div class="coupon-card">
         <div class="coupon-icon">
           <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
@@ -4438,7 +4843,6 @@ app.get("/mini/:userId", (req, res) => {
         <button class="coupon-buy-btn" onclick="purchase('coupon_30')">800 pts</button>
       </div>
 
-      <!-- 50% Coupon -->
       <div class="coupon-card">
         <div class="coupon-icon">
           <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
@@ -4453,11 +4857,9 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-
-  <!-- ========== TAB: PAY (Redesigned) ========== -->
+  <!-- ========== TAB: PAY ========== -->
   <div id="tab-pay" class="tab-content">
     
-    <!-- Search area (List View) -->
     <div class="pay-search-area" id="paySearchArea">
       <div class="glass" style="padding:12px 14px;">
         <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
@@ -4467,7 +4869,6 @@ app.get("/mini/:userId", (req, res) => {
         <input type="text" id="search-user" class="search-user-input" placeholder="Search name or ID..." autocomplete="off" />
         <div id="search-results"></div>
         
-        <!-- NEW: Recent Interactions Container -->
         <div id="recent-chats-container">
           <div style="font-size:12px; color:rgba(255,255,255,0.4); margin: 16px 4px 8px; text-transform:uppercase; font-weight:600;">Recent Chats</div>
           <div id="recent-chats-list">
@@ -4477,8 +4878,6 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-
-    <!-- Fullscreen Chat view -->
     <div class="pay-fullscreen" id="payFullscreen">
       <div class="chat-header">
         <button class="back-btn" id="payBackBtn">
@@ -4492,7 +4891,6 @@ app.get("/mini/:userId", (req, res) => {
       </div>
 
       <div class="chat-area" id="payChatArea">
-        <!-- chat messages will dynamically load here -->
       </div>
 
       <div class="chat-footer">
@@ -4507,7 +4905,6 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-    <!-- Payment processing overlay -->
     <div class="payment-processing" id="payment-processing" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:300; background:rgba(0,0,0,0.8); padding:20px; border-radius:20px;">
       <svg class="svg-loader" viewBox="0 0 100 100">
         <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
@@ -4516,7 +4913,6 @@ app.get("/mini/:userId", (req, res) => {
       <p style="color:rgba(255,255,255,0.8); font-size:13px; margin-top:10px;">Verifying transaction...</p>
     </div>
   </div>
-
 
   <!-- ========== TAB: PROFILE ========== -->
   <div id="tab-profile" class="tab-content">
@@ -4583,6 +4979,42 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
+  <!-- ========== SETTINGS MODAL ========== -->
+  <div class="settings-overlay" id="settingsModal">
+    <div class="settings-box">
+      <h3>⚙️ App Settings</h3>
+      <div class="setting-item">
+        <span class="setting-label">Sound Effects</span>
+        <input type="checkbox" class="toggle-switch" id="setting-sound" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Haptic Feedback</span>
+        <input type="checkbox" class="toggle-switch" id="setting-haptic" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Visual Animations</span>
+        <input type="checkbox" class="toggle-switch" id="setting-visual" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Privacy Mode</span>
+        <input type="checkbox" class="toggle-switch" id="setting-privacy">
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Floating Pill Nav</span>
+        <input type="checkbox" class="toggle-switch" id="setting-pill">
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Short Numbers</span>
+        <input type="checkbox" class="toggle-switch" id="setting-shortnum">
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Force Verification</span>
+        <input type="checkbox" class="toggle-switch" id="setting-forceverify">
+      </div>
+      <button class="withdraw-btn" style="margin-top:20px; background: rgba(255,255,255,0.1);" onclick="document.getElementById('settingsModal').classList.remove('open')">Close Settings</button>
+    </div>
+  </div>
+
   <!-- ========== TAB BAR ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
@@ -4618,7 +5050,6 @@ app.get("/mini/:userId", (req, res) => {
     </div>
     <div class="fab-bot">EARN MYTHOPOINTS</div>
   </button>
-
 
   <!-- ========== SPIN AD OVERLAY ========== -->
   <div class="spin-ad-overlay" id="spinAdOverlay">
@@ -4668,6 +5099,97 @@ app.get("/mini/:userId", (req, res) => {
     tg.expand();
     tg.setHeaderColor('#0A0014');
     tg.setBackgroundColor('#000000');
+
+    // ─── PURE CODE SOUND ENGINE & SETTINGS LOGIC ───
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+        if (!document.getElementById('setting-sound').checked) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        
+        if (type === 'click') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, now);
+            osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+            gain.gain.setValueAtTime(0.5, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'tick') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(1200, now);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+            osc.start(now); osc.stop(now + 0.05);
+        } else if (type === 'win') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.linearRampToValueAtTime(800, now + 0.2);
+            osc.frequency.linearRampToValueAtTime(1200, now + 0.4);
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.5, now + 0.1);
+            gain.gain.linearRampToValueAtTime(0, now + 0.6);
+            osc.start(now); osc.stop(now + 0.6);
+        }
+    }
+
+    // Intercept Haptics for Sound Sync
+    const origImpact = tg.HapticFeedback.impactOccurred.bind(tg.HapticFeedback);
+    const origNotify = tg.HapticFeedback.notificationOccurred.bind(tg.HapticFeedback);
+    const origSelect = tg.HapticFeedback.selectionChanged.bind(tg.HapticFeedback);
+    
+    tg.HapticFeedback.impactOccurred = (style) => {
+        if (document.getElementById('setting-haptic').checked) origImpact(style);
+        playSound('tick');
+    };
+    tg.HapticFeedback.notificationOccurred = (type) => {
+        if (document.getElementById('setting-haptic').checked) origNotify(type);
+        if (type === 'success') playSound('win');
+    };
+    tg.HapticFeedback.selectionChanged = () => {
+        if (document.getElementById('setting-haptic').checked) origSelect();
+        playSound('click');
+    };
+
+    // Settings Event Listeners
+    document.getElementById('openSettingsBtn').addEventListener('click', () => {
+        playSound('click');
+        document.getElementById('settingsModal').classList.add('open');
+    });
+
+    document.querySelectorAll('.toggle-switch').forEach(el => {
+        el.addEventListener('change', () => {
+            playSound('click');
+            updateUI();
+            
+            if (el.id === 'setting-pill') {
+                const tabBar = document.querySelector('.tab-bar');
+                el.checked ? tabBar.classList.add('floating-pill') : tabBar.classList.remove('floating-pill');
+            }
+            if (el.id === 'setting-visual') {
+                let style = document.getElementById('kill-anims');
+                if (!el.checked && !style) {
+                    style = document.createElement('style');
+                    style.id = 'kill-anims';
+                    style.innerHTML = '* { animation: none !important; transition: none !important; }';
+                    document.head.appendChild(style);
+                } else if (el.checked && style) {
+                    style.remove();
+                }
+            }
+        });
+    });
+
+    // Helper: Short Number Formatter
+    function formatNum(num) {
+        if (!document.getElementById('setting-shortnum')?.checked) return num.toLocaleString();
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+        return num.toString();
+    }
 
     const userId = ${userId};
 
@@ -4757,7 +5279,7 @@ app.get("/mini/:userId", (req, res) => {
       mythopoints: 0,
       streak: 0,
       credits: 0,
-      referrals: 0, // <-- ADDED THIS
+      referrals: 0,
       premium: { active: false, plan: 'Free', daysLeft: 0 },
       bank: { invested: 0, pendingYield: 0, loan: 0 },
       stats: { earned: 0, spent: 0 },
@@ -4774,16 +5296,29 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     function updateUI() {
-      document.getElementById('ui-pts').innerText = state.mythopoints.toLocaleString();
-      document.getElementById('ui-credits').innerText = state.credits;
-      document.getElementById('streak-count').innerText = state.streak + ' Day Streak';
-      document.getElementById('ui-life-earn').innerText = state.stats.earned.toLocaleString();
-      document.getElementById('ui-life-spent').innerText = state.stats.spent.toLocaleString();
-      document.getElementById('profile-pts').innerText = state.mythopoints.toLocaleString();
-      document.getElementById('profile-streak').innerText = state.streak;
+      // 1. Privacy Mode Logic
+      const privacyOn = document.getElementById('setting-privacy')?.checked;
+      const ptsNodes = ['ui-pts', 'ui-life-earn', 'ui-life-spent', 'profile-pts', 'ui-bank-invest', 'ui-bank-yield', 'ui-bank-loan'];
       
+      ptsNodes.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) privacyOn ? el.classList.add('privacy-blur') : el.classList.remove('privacy-blur');
+      });
+
+      // 2. Short Number Formatter Injection
+      document.getElementById('ui-pts').innerText = formatNum(state.mythopoints);
+      document.getElementById('ui-credits').innerText = formatNum(state.credits);
+      document.getElementById('streak-count').innerText = formatNum(state.streak) + ' Day Streak';
+      document.getElementById('ui-life-earn').innerText = formatNum(state.stats.earned);
+      document.getElementById('ui-life-spent').innerText = formatNum(state.stats.spent);
+      document.getElementById('profile-pts').innerText = formatNum(state.mythopoints);
+      
+      // 3. Force Verification Override Logic
+      const forceVerify = document.getElementById('setting-forceverify')?.checked;
+      const isVerified = state.verified || forceVerify;
+
       const badge = document.getElementById('ui-verified');
-      if (state.verified) {
+      if (isVerified) {
         badge.innerText = 'Online';
         badge.style.background = 'rgba(48,209,88,0.12)';
         badge.style.color = '#30d158';
@@ -4804,9 +5339,9 @@ app.get("/mini/:userId", (req, res) => {
         document.getElementById('ui-prem-plan').innerText = 'No active plan';
       }
       
-      document.getElementById('ui-bank-invest').innerText = state.bank.invested.toLocaleString() + ' pts';
-      document.getElementById('ui-bank-yield').innerText = '+' + state.bank.pendingYield.toLocaleString();
-      document.getElementById('ui-bank-loan').innerText = state.bank.loan.toLocaleString();
+      document.getElementById('ui-bank-invest').innerText = formatNum(state.bank.invested) + ' pts';
+      document.getElementById('ui-bank-yield').innerText = '+' + formatNum(state.bank.pendingYield);
+      document.getElementById('ui-bank-loan').innerText = formatNum(state.bank.loan);
       
       // Chant
       document.getElementById('chant-level').innerText = state.chant.level;
@@ -4844,7 +5379,7 @@ app.get("/mini/:userId", (req, res) => {
       }
       
       const profileVerified = document.getElementById('profile-verified');
-      if (state.verified) {
+      if (isVerified) {
         profileVerified.innerText = '✅ Verified';
         profileVerified.style.color = '#30d158';
       } else {
@@ -4857,16 +5392,15 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
 
       // Referral Progress Logic
-      document.getElementById('ui-refs-count').innerText = state.referrals;
+      document.getElementById('ui-refs-count').innerText = formatNum(state.referrals);
       const milestones = [3, 5, 10, 25, 50];
       let nextTarget = milestones.find(m => state.referrals < m);
       let targetText, progressPercent;
       
       if (nextTarget) {
-          targetText = state.referrals + "/" + nextTarget;
+          targetText = formatNum(state.referrals) + "/" + formatNum(nextTarget);
           progressPercent = (state.referrals / nextTarget) * 100;
       } else {
-
           targetText = "MAX";
           progressPercent = 100;
       }
@@ -4916,7 +5450,7 @@ app.get("/mini/:userId", (req, res) => {
         state.mythopoints = data.profile.mythopoints || 0;
         state.streak = data.profile.streak || 0;
         state.verified = data.profile.is_verified || false;
-        state.referrals = data.profile.referrals || 0; // <-- ADDED THIS
+        state.referrals = data.profile.referrals || 0;
         state.credits = data.search.credits || 0;
         state.premium = {
           active: data.premium.active || false,
@@ -4986,7 +5520,7 @@ app.get("/mini/:userId", (req, res) => {
       }
     });
 
-    // === SPIN WHEEL LOGIC (Enhanced Premium & Perfect Sync) ===
+    // === SPIN WHEEL LOGIC ===
     const spinCenterBtn = document.getElementById('spinCenterBtn');
     const spinResult = document.getElementById('spin-result');
     const spinRoll = document.getElementById('spin-roll');
@@ -4995,12 +5529,11 @@ app.get("/mini/:userId", (req, res) => {
     const spinError = document.getElementById('spin-error');
 
     let isSpinning = false;
-    let lastSegment = -1; // Used for haptic ticking
+    let lastSegment = -1;
 
     const wheelCanvas = document.getElementById('spinWheel');
     const ctx = wheelCanvas.getContext('2d');
     
-    // Premium Segment Colors
     const segments = [
       { label: '1', color: '#ff0055', glow: '#ff4d4d' },
       { label: '2', color: '#6600ff', glow: '#9933ff' },
@@ -5020,7 +5553,6 @@ app.get("/mini/:userId", (req, res) => {
       
       ctx.clearRect(0, 0, w, h);
       
-      // Draw Inner Segments
       for (let i = 0; i < segments.length; i++) {
         const startAngle = rotation + i * segmentAngle;
         const endAngle = startAngle + segmentAngle;
@@ -5060,7 +5592,6 @@ app.get("/mini/:userId", (req, res) => {
         ctx.restore();
       }
       
-      // Outer Metallic Gold Rim
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
       const rimGrad = ctx.createLinearGradient(0, 0, w, h);
@@ -5071,7 +5602,6 @@ app.get("/mini/:userId", (req, res) => {
       ctx.strokeStyle = rimGrad;
       ctx.stroke();
       
-      // Glowing LED Bulbs on the Rim
       const numDots = 24;
       for (let j = 0; j < numDots; j++) {
         const dotAngle = rotation + (j * 2 * Math.PI / numDots);
@@ -5085,8 +5615,6 @@ app.get("/mini/:userId", (req, res) => {
         ctx.fill();
         ctx.shadowBlur = 0;
       }
-      
-      // (Center button is now drawn via HTML, so we skip it here)
     }
 
     let currentRotation = 0;
@@ -5095,7 +5623,6 @@ app.get("/mini/:userId", (req, res) => {
     spinCenterBtn.addEventListener('click', async function() {
         if (isSpinning) return;
         
-        // If it's in DOUBLE mode, route to double function
         if (this.innerText === 'DOUBLE') {
             handleDouble();
             return;
@@ -5107,17 +5634,9 @@ app.get("/mini/:userId", (req, res) => {
         }
         spinError.innerText = '';
         
-        // 1. Show Ads when they tap the middle name "SPIN"
-        // AD REMOVED FOR FIRST SPIN - so it's disabled
-        // const adCompleted = await showSpinAd('spin');
-        // if (!adCompleted) {
-        //     spinError.innerText = 'Ad was not completed. Please try again.';
-        //     return;
-        // }
-        
         isSpinning = true;
         this.classList.add('disabled');
-        spinResult.style.display = 'none'; // Keep result completely hidden
+        spinResult.style.display = 'none';
         
         try {
             const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
@@ -5127,35 +5646,30 @@ app.get("/mini/:userId", (req, res) => {
                 const targetSegmentIndex = data.roll - 1; 
                 const currentRotMod = currentRotation % (2 * Math.PI);
                 
-                // Align target segment under the top pointer (-PI/2)
                 const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
                 
                 let rotationNeeded = offsetAngle - currentRotMod;
                 while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
                 
-                // Add 25 extra rotations for a heavy 15-second spin
                 const extraSpins = 25 * 2 * Math.PI; 
                 const targetRotation = currentRotation + rotationNeeded + extraSpins;
                 
-                const duration = 15000; // EXACTLY 15 SECONDS
+                const duration = 15000;
                 const start = performance.now();
                 const startRot = currentRotation;
                 
                 function animateSpin(time) {
                     const progress = Math.min((time - start) / duration, 1);
                     
-                    // Quintic easing out: super fast start, incredibly suspenseful long slow down
                     const eased = 1 - Math.pow(1 - progress, 5); 
                     const rot = startRot + (targetRotation - startRot) * eased;
                     
                     drawWheel(rot);
                     
-                    // Physical Simulation: Calculate if a new segment is passing the top pointer
                     let topAngle = (3 * Math.PI / 2 - rot) % (2 * Math.PI);
                     if (topAngle < 0) topAngle += 2 * Math.PI;
                     const currentSegment = Math.floor(topAngle / segmentAngle);
                     
-                    // Trigger haptic feedback "Tick" every time a line crosses the pointer
                     if (currentSegment !== lastSegment && progress < 0.99) {
                         tg.HapticFeedback.impactOccurred('light');
                         lastSegment = currentSegment;
@@ -5165,8 +5679,8 @@ app.get("/mini/:userId", (req, res) => {
                         requestAnimationFrame(animateSpin);
                     } else {
                         currentRotation = targetRotation;
-                        tg.HapticFeedback.impactOccurred('heavy'); // Final thud
-                        showSpinResult(data); // ONLY show result after 15s ends
+                        tg.HapticFeedback.impactOccurred('heavy');
+                        showSpinResult(data);
                     }
                 }
                 requestAnimationFrame(animateSpin);
@@ -5224,7 +5738,6 @@ app.get("/mini/:userId", (req, res) => {
         state.spin.doubleUsed = false;
         updateUI();
         
-        // Reveal results only after animation ends
         spinResult.style.display = 'block';
         spinRoll.innerText = '🎲 ' + data.roll;
         
@@ -5237,7 +5750,6 @@ app.get("/mini/:userId", (req, res) => {
         }
         spinPoints.innerText = pointsMsg;
         
-        // Replace center with DOUBLE text
         if (data.canDouble !== false) {
           spinCenterBtn.classList.remove('disabled');
           spinCenterBtn.innerText = 'DOUBLE';
@@ -5273,7 +5785,6 @@ app.get("/mini/:userId", (req, res) => {
           state.spin.doubleUsed = data.doubleUsed;
           updateUI();
           
-          // Only show results directly if the user has ALREADY spun before arriving on the page
           if (data.roll !== null && !data.doubleUsed && !isSpinning) {
             spinResult.style.display = 'block';
             spinRoll.innerText = '🎲 ' + data.roll;
@@ -5511,8 +6022,7 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-
-    // ─── PAYMENT (PhonePe/WhatsApp Hybrid) ───
+    // ─── PAYMENT ───
     let selectedReceiver = null;
     let payChatPollInterval = null;
 
@@ -5570,7 +6080,6 @@ app.get("/mini/:userId", (req, res) => {
             const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
                           \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
             
-            // Unread Count Badge HTML
             const unreadBadge = u.unreadCount > 0 
                 ? \`<div style="background:#00e676; color:#000; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px;">\${u.unreadCount}</div>\` 
                 : '';
@@ -5613,7 +6122,6 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('payAmountInput').focus();
       document.getElementById('payStatus').innerHTML = '';
 
-      // Hit API to mark messages as read
       fetch('/api/payment/chat/mark-read', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -5654,7 +6162,7 @@ app.get("/mini/:userId", (req, res) => {
           \`;
 
           if (filtered.length === 0) {
-             // Empty state
+            // Empty state
           } else {
             let lastDate = '';
             filtered.reverse().forEach(c => {
@@ -5708,12 +6216,11 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Handles both Chatting and Sending Money in the same input box
     document.getElementById('paySendBtn').addEventListener('click', async function() {
       const inputVal = document.getElementById('payAmountInput').value.trim();
       if (!inputVal || !selectedReceiver) return;
       
-      const isNumeric = /^\\d+$/.test(inputVal); // Check if the input is strictly numbers
+      const isNumeric = /^\\d+$/.test(inputVal);
       
       if (isNumeric) {
           const amount = parseInt(inputVal);
@@ -5721,7 +6228,6 @@ app.get("/mini/:userId", (req, res) => {
               document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Minimum 200 MythoPoints.</span>';
               return;
           }
-          // --- SEND PAYMENT ---
           const processing = document.getElementById('payment-processing');
           processing.classList.add('active');
           this.disabled = true;
@@ -5752,7 +6258,6 @@ app.get("/mini/:userId", (req, res) => {
             document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Network error.</span>';
           }
       } else {
-          // --- SEND CHAT MESSAGE ---
           try {
               const res = await fetch('/api/payment/chat/message', {
                   method: 'POST',
@@ -5777,7 +6282,7 @@ app.get("/mini/:userId", (req, res) => {
         }
     });
        
-    // ─── HISTORY with Infinite Scroll ───
+    // ─── HISTORY ───
     let historyPage = 1;
     let historyLoading = false;
     let historyHasMore = true;
@@ -6008,7 +6513,6 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
-    
     // ─── WATCH & EARN FAB LOGIC ───
     const earnFab = document.getElementById('earnFab');
     if(earnFab) {
@@ -6043,8 +6547,7 @@ app.get("/mini/:userId", (req, res) => {
         });
     }
   
-
-    // ─── CHANT & EARN (Tap to Earn) ───
+    // ─── CHANT & EARN ───
     const CHANT_KEY = 'mytho_chant_' + userId;
     let chantTapCount = 0;
     const orb = document.getElementById('chant-orb');
@@ -6294,7 +6797,7 @@ app.get("/mini/:userId", (req, res) => {
       await fetchChantStats();
       await loadChantLeaderboard();
       await loadSpinStatus();
-      loadRecentChats(); //
+      loadRecentChats();
       
       if (document.getElementById('tab-bank').classList.contains('active')) { 
         loadBankData(); 
@@ -6306,8 +6809,6 @@ app.get("/mini/:userId", (req, res) => {
         loadRatingStatus(); 
       }
 
-      // --- MONETAG AUTO IN-APP INTERSTITIAL ---
-      // This will trigger automatically 5 seconds after the app loads
       if (typeof show_9055307 === 'function') {
           show_9055307({
             type: 'inApp',
@@ -6329,424 +6830,6 @@ app.get("/mini/:userId", (req, res) => {
 </html>
     `);
 });
-
-// ==========================================
-// REFERRAL LEADERBOARD API
-// ==========================================
-app.get("/api/referral/leaderboard", async (req, res) => {
-    try {
-        const users = await usersCollection.find(
-            { referral_count: { $gt: 0 } }
-        ).sort({ referral_count: -1 }).limit(10).project({ 
-            user_id: 1, first_name: 1, username: 1, referral_count: 1, photo_url: 1 
-        }).toArray();
-
-        const formatted = users.map(u => ({
-            name: u.first_name || u.username || `User ${u.user_id}`,
-            refs: u.referral_count || 0,
-            photo: u.photo_url || null
-        }));
-
-        res.json({ success: true, leaderboard: formatted });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// ==========================================
-// LEADERBOARD API (UPDATED: includes photo_url)
-// ==========================================
-app.get("/api/leaderboard/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        const { timeframe = "all", page = 1 } = req.query;
-        const limit = 10;
-        const skip = (parseInt(page) - 1) * limit;
-
-        let pointField = "mythopoints";
-        if (timeframe === "weekly") pointField = "weekly_points";
-        if (timeframe === "monthly") pointField = "monthly_points";
-
-        const query = {};
-        query[pointField] = { $gt: 0 };
-
-        const totalUsers = await usersCollection.countDocuments(query);
-        const totalPages = Math.ceil(totalUsers / limit) || 1;
-
-        const users = await usersCollection
-            .find(query)
-            .sort({ [pointField]: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        const formattedUsers = users.map(u => {
-            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
-            let safeUsername = null;
-            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
-                safeUsername = rawUsername.trim().startsWith('@') 
-                    ? rawUsername.trim() 
-                    : `@${rawUsername.trim()}`;
-            }
-            let rawName = u.name || u.first_name || null;
-            if (!rawName) {
-                if (safeUsername) {
-                    rawName = safeUsername;
-                } else {
-                    rawName = `User ${u.user_id}`;
-                }
-            }
-            let finalName = String(rawName); 
-            if (finalName.length > 15) {
-                finalName = finalName.substring(0, 15) + "..";
-            }
-            return {
-                user_id: u.user_id,
-                name: finalName,
-                username: safeUsername,
-                points: u[pointField] || 0,
-                title: getRankTitle(u[pointField] || 0),
-                photo_url: u.photo_url || null
-            };
-        });
-
-        let currentUser = null;
-        const userDoc = await usersCollection.findOne({ user_id: uid });
-        if (userDoc && userDoc[pointField] > 0) {
-            const rankQuery = {};
-            rankQuery[pointField] = { $gt: userDoc[pointField] };
-            const higherCount = await usersCollection.countDocuments(rankQuery);
-            currentUser = {
-                points: userDoc[pointField],
-                rank: higherCount + 1,
-                title: getRankTitle(userDoc[pointField])
-            };
-        }
-
-        res.json({
-            success: true,
-            page: parseInt(page),
-            totalPages: totalPages,
-            users: formattedUsers,
-            currentUser: currentUser
-        });
-    } catch (error) {
-        console.error("Leaderboard API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
-    }
-});
-
-// ==========================================
-// HISTORY API (unchanged)
-// ==========================================
-app.get("/api/history/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        const { filter = "ALL", page = 1 } = req.query;
-        const limit = 15;
-        const skip = (parseInt(page) - 1) * limit;
-
-        let query = { user_id: uid };
-        if (filter !== "ALL") {
-            query.type = filter.toUpperCase();
-        }
-
-        const historyRecords = await mpHistoryCollection
-            .find(query)
-            .sort({ date: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        res.json({ 
-            success: true, 
-            history: historyRecords 
-        });
-    } catch (error) {
-        console.error("History API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch history" });
-    }
-});
-// ==========================================
-// WATCH & EARN CLAIM API (Limit: 5/day)
-// ==========================================
-app.post("/api/watch-earn/claim/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        const today = new Date().toISOString().split('T')[0];
-        const user = await usersCollection.findOne({ user_id: uid });
-        
-        const watchCount = (user?.watch_earn_date === today) ? (user?.watch_earn_count || 0) : 0;
-        
-        if (watchCount >= 5) {
-            return res.status(400).json({ success: false, error: "Daily limit of 5 ads reached! Come back tomorrow." });
-        }
-
-        const reward = Math.floor(Math.random() * 3) + 1;
-
-        await usersCollection.updateOne(
-            { user_id: uid },
-            { 
-                $inc: { mythopoints: reward },
-                $set: { 
-                    watch_earn_date: today,
-                    watch_earn_count: watchCount + 1
-                }
-            },
-            { upsert: true }
-        );
-
-        await mpHistoryCollection.insertOne({
-            user_id: uid,
-            amount: reward,
-            type: "EARNED",
-            reason: `Watched Ad for points (${watchCount + 1}/5)`,
-            date: new Date()
-        });
-
-        const updatedUser = await usersCollection.findOne({ user_id: uid });
-
-        res.json({ success: true, reward: reward, newBalance: updatedUser.mythopoints });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// ==========================================
-// MONETAG S2S POSTBACK ENDPOINT
-// ==========================================
-app.get("/api/monetag-postback", async (req, res) => {
-    const userId = req.query.userid;
-    const rewardAmt = req.query.reward || 0;
-    const transactionId = req.query.tid || "unknown";
-
-    if (!userId) {
-        return res.status(400).json({ error: "Missing userid" });
-    }
-
-    console.log(`✅ [Monetag] User: ${userId} | Reward: ${rewardAmt} | TID: ${transactionId}`);
-
-    res.status(200).json({ success: true, status: "ok" });
-});
-
-// ==========================================
-// WATCH AD TO SKIP SEARCH COOLDOWN (WEBAPP)
-// ==========================================
-
-// 1. The WebApp Page Endpoint
-app.get("/cooldown-app/:userId", async (req, res) => {
-    const uid = parseInt(req.params.userId);
-    
-    // Fetch user's search limit data
-    const searchDoc = await searchLimitCollection.findOne({ user_id: uid });
-    
-    const now = Math.floor(Date.now() / 1000);
-    let inCooldown = false;
-    let timeRemaining = 0;
-    
-    // Check if user has searched within the last 5 minutes (300 seconds)
-    if (searchDoc && searchDoc.last_search) {
-        const timePassed = now - searchDoc.last_search;
-        if (timePassed < 300) { 
-            inCooldown = true;
-            timeRemaining = 300 - timePassed; // Seconds left
-        }
-    }
-
-    const minutes = Math.floor(timeRemaining / 60);
-    const seconds = timeRemaining % 60;
-    const timeStr = minutes + "m " + seconds + "s";
-
-
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
-        <title>Skip Cooldown</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        
-        <!-- MONETAG SDK -->
-        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
-        
-        ${THEME_CSS}
-    </head>
-    <body>
-        <div class="container">
-            <h2 style="font-size: 22px;">Skip Cooldown</h2>
-            
-            <div id="ui-cooldown-active" style="display: ${inCooldown ? 'block' : 'none'};">
-                <div style="font-size:40px; margin-bottom:10px;">⏳</div>
-                <p>You have a cooldown period of <b>${timeStr}</b> remaining.</p>
-                <p style="font-size: 13px; color: #aaa;">Watch a quick ad to skip the timer instantly!</p>
-                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad to Skip</button>
-            </div>
-
-            <div id="ui-cooldown-passed" style="display: ${inCooldown ? 'none' : 'block'};">
-                <div style="font-size:40px; margin-bottom:10px;">✅</div>
-                <p>Your cooldown period has already passed.</p>
-                <h3 style="color: #00e676;">You can search now!</h3>
-                <button class="btn" onclick="Telegram.WebApp.close()" style="margin-top: 15px;">Return to Bot</button>
-            </div>
-            
-            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
-                Unlocking... Please wait ⚙️
-            </div>
-        </div>
-
-        <script>
-            const tg = window.Telegram.WebApp;
-            tg.expand();
-            
-            const watchBtn = document.getElementById('watch-ad-btn');
-            
-            if (watchBtn) {
-                watchBtn.addEventListener('click', function() {
-                    if (typeof show_9055307 !== 'function') {
-                        alert('Ad service is still loading. Please try again in a few seconds.');
-                        return;
-                    }
-                    
-                    // Call Monetag Ad
-                    show_9055307().then(() => {
-                        // User watched the ad successfully!
-                        tg.HapticFeedback.notificationOccurred('success');
-                        document.getElementById('ui-cooldown-active').style.display = 'none';
-                        document.getElementById('loading-msg').style.display = 'block';
-                        
-                        // Hit backend to clear the cooldown
-                        fetch('/api/skip-cooldown/claim/${uid}', { method: 'POST' })
-                            .then(res => res.json())
-                            .then(data => {
-                                document.getElementById('loading-msg').style.display = 'none';
-                                if(data.success) {
-                                    document.getElementById('ui-cooldown-passed').style.display = 'block';
-                                    document.getElementById('ui-cooldown-passed').querySelector('h3').innerText = "Cooldown Skipped Successfully!";
-                                } else {
-                                    alert("Error skipping cooldown.");
-                                }
-                            }).catch(err => {
-                                alert("Network error while claiming reward.");
-                            });
-
-                    }).catch((error) => {
-                        alert("Ad failed to load or was closed early.");
-                        console.error("Monetag Error:", error);
-                    });
-                });
-            }
-        </script>
-    </body>
-    </html>
-    `);
-});
-
-// 2. API Endpoint to Reset Cooldown after ad is watched
-app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
-    try {
-        const uid = parseInt(req.params.userId);
-        
-        // Set last_search to 0 (same logic used in the Store API to skip cooldown)
-        await searchLimitCollection.updateOne(
-            { user_id: uid },
-            { $set: { last_search: 0 } },
-            { upsert: true }
-        );
-
-        // Optionally, log it in history
-        await mpHistoryCollection.insertOne({
-            user_id: uid,
-            amount: 0,
-            type: "EARNED",
-            reason: "Watched Ad to Skip Cooldown",
-            date: new Date()
-        });
-
-        res.json({ success: true, message: "Cooldown skipped!" });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// ==========================================
-// WATCH AD TO FORWARD (DIAGNOSTIC VERSION)
-// ==========================================
-app.get("/forward-ad/:userId/:fileId", async (req, res) => {
-    const { userId, fileId } = req.params;
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
-        <title>Watch Ad to Forward</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
-        ${THEME_CSS}
-    </head>
-    <body>
-        <div class="container">
-            <div style="font-size:40px; margin-bottom:10px;">🍋</div>
-            <h2>Unlock Forward</h2>
-            <p>Watch a short ad to instantly get the forwarded file without spending any Mythopoints!</p>
-            <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad</button>
-            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
-                Verifying... Please wait ⚙️
-            </div>
-        </div>
-
-        <script>
-            const tg = window.Telegram.WebApp;
-            tg.expand();
-            
-            // Check if Telegram WebApp initialized
-            console.log("Telegram WebApp state:", tg);
-
-            document.getElementById('watch-ad-btn').addEventListener('click', function() {
-                // DIAGNOSTIC ALERT 1: Checks if the click works
-                alert("⚙️ System: Click detected successfully!");
-
-                if (typeof show_9055307 !== 'function') {
-                    // DIAGNOSTIC ALERT 2: Checks if Monetag SDK script loaded
-                    alert("❌ SDK Error: Monetag script failed to load as a function. Type found: " + typeof show_9055307);
-                    return;
-                }
-                
-                try {
-                    // DIAGNOSTIC ALERT 3: Firing the Monetag promise call
-                    alert("🚀 Calling Monetag SDK Engine...");
-                    
-                    show_9055307().then(() => {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        document.getElementById('watch-ad-btn').style.display = 'none';
-                        document.getElementById('loading-msg').style.display = 'block';
-                        
-                        // Open Telegram Redirect deep link
-                        tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
-                        
-                        setTimeout(() => {
-                            tg.close();
-                        }, 1200);
-                    }).catch((error) => {
-                        // DIAGNOSTIC ALERT 4: Captures asynchronous promise errors
-                        alert("⚠️ Monetag Promise Error: " + JSON.stringify(error));
-                    });
-                } catch (e) {
-                    // DIAGNOSTIC ALERT 5: Captures silent crash errors
-                    alert("💥 Runtime Crash Error: " + e.message);
-                }
-            });
-        </script>
-    </body>
-    </html>
-    `);
-});
-
-
-
 
 // ========================
 // HOME & FALLBACK ROUTE
