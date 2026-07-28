@@ -2974,7 +2974,387 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Settings Modal & Features)
+// SERIAL SEARCH DATA - From csearch.py
+// ==========================================
+
+const SERIAL_DATA = {
+    "Shiv Shakti": {
+        command: "ss",
+        seasons: { 1: 914 },
+        thumbnail: "https://files.catbox.moe/fdimxs.jpg",
+        displayName: "Shiv Shakti"
+    },
+    "Dwarkadheesh": {
+        command: "d",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/dwarkadheesh-thumbnail.jpg",
+        displayName: "Dwarkadheesh"
+    },
+    "Karmadhikari Shanidev": {
+        command: "ksd",
+        seasons: { 1: 192 },
+        thumbnail: "https://telegra.ph/file/karmadhikari-thumbnail.jpg",
+        displayName: "Karmadhikari Shanidev"
+    },
+    "Chandra Dev": {
+        command: "cd",
+        seasons: { 1: 26 },
+        thumbnail: "https://telegra.ph/file/chandradev-thumbnail.jpg",
+        displayName: "Chandra Dev"
+    },
+    "Mahishasura Mardini": {
+        command: "mm",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/mahishasura-thumbnail.jpg",
+        displayName: "Mahishasura Mardini"
+    },
+    "Jai Mahalakshmi": {
+        command: "jm",
+        seasons: { 1: 34 },
+        thumbnail: "https://telegra.ph/file/mahalakshmi-thumbnail.jpg",
+        displayName: "Jai Mahalakshmi"
+    },
+    "Chandra Nandni": {
+        command: "cn",
+        seasons: { 1: 35, 2: 27, 3: 46, 4: 60, 5: 45, 6: 65, 7: 8 },
+        thumbnail: "https://telegra.ph/file/chandranandni-thumbnail.jpg",
+        displayName: "Chandra Nandni"
+    },
+    "Brij Ke Gopal": {
+        command: "bkg",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/brijgopal-thumbnail.jpg",
+        displayName: "Brij Ke Gopal"
+    },
+    "Yashomati Maiya Ke Nandlala": {
+        command: "ymkn",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/ymkn-thumbnail.jpg",
+        displayName: "Yashomati Maiya Ke Nandlala"
+    },
+    "Meera": {
+        command: "meera",
+        seasons: { 1: 134 },
+        thumbnail: "https://telegra.ph/file/meera-thumbnail.jpg",
+        displayName: "Meera"
+    },
+    "Bangla": {
+        command: "bang",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/bangla-thumbnail.jpg",
+        displayName: "Bangla"
+    },
+    "Dharm Yoddha Garud": {
+        command: "dyg",
+        seasons: { 1: 100, 2: 100, 3: 34 },
+        thumbnail: "https://telegra.ph/file/garud-thumbnail.jpg",
+        displayName: "Dharm Yoddha Garud"
+    },
+    "Siya Ke Ram": {
+        command: "skr",
+        seasons: { 1: 24, 2: 17, 3: 51, 4: 31, 5: 30, 6: 152 },
+        thumbnail: "https://telegra.ph/file/siyaram-thumbnail.jpg",
+        displayName: "Siya Ke Ram"
+    },
+    "Ram Siya Ke Luv Kush": {
+        command: "rsklk",
+        seasons: { 1: 141 },
+        thumbnail: "https://telegra.ph/file/rsklk-thumbnail.jpg",
+        displayName: "Ram Siya Ke Luv Kush"
+    },
+    "Tenali Rama": {
+        command: "tr",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/tenali-thumbnail.jpg",
+        displayName: "Tenali Rama"
+    },
+    "Devon Ke Dev Mahadev": {
+        command: "dkdm",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/mahadev-thumbnail.jpg",
+        displayName: "Devon Ke Dev Mahadev"
+    },
+    "Karn Sangini": {
+        command: "ks",
+        seasons: { 1: 90 },
+        thumbnail: "https://telegra.ph/file/sangini-thumbnail.jpg",
+        displayName: "Karn Sangini"
+    },
+    "Mata Saraswati": {
+        command: "ms",
+        seasons: { 1: 25 },
+        thumbnail: "https://telegra.ph/file/saraswati-thumbnail.jpg",
+        displayName: "Mata Saraswati"
+    },
+    "Shri Tirupati Balaji": {
+        command: "stb",
+        seasons: { 1: 52 },
+        thumbnail: "https://telegra.ph/file/balaji-thumbnail.jpg",
+        displayName: "Shri Tirupati Balaji"
+    },
+    "Jag Jaanani Maa Vaishnodevi": {
+        command: "jjmv",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/vaishnodevi-thumbnail.jpg",
+        displayName: "Jag Jaanani Maa Vaishnodevi"
+    },
+    "Bolo Ambe Maa Ki Jai": {
+        command: "maa",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/ambemaa-thumbnail.jpg",
+        displayName: "Bolo Ambe Maa Ki Jai"
+    },
+    "Sriman Rama": {
+        command: "rama",
+        seasons: { 1: 8 },
+        thumbnail: "https://telegra.ph/file/srimanrama-thumbnail.jpg",
+        displayName: "Sriman Rama"
+    },
+    "The Legend of Hanuman": {
+        command: "tloh",
+        seasons: { 1: 13, 2: 13, 3: 6, 4: 7, 5: 6, 6: 7 },
+        thumbnail: "https://telegra.ph/file/legendhanuman-thumbnail.jpg",
+        displayName: "The Legend of Hanuman"
+    },
+    "Hatim": {
+        command: "hatim",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/hatim-thumbnail.jpg",
+        displayName: "Hatim"
+    },
+    "Ramanand Sagar Ramayan": {
+        command: "rsr",
+        seasons: { 1: 50 },
+        thumbnail: "https://telegra.ph/file/ramanand-thumbnail.jpg",
+        displayName: "Ramanand Sagar Ramayan"
+    },
+    "Shrimad Ramayan": {
+        command: "sr",
+        seasons: { 1: 341 },
+        thumbnail: "https://telegra.ph/file/shrimad-thumbnail.jpg",
+        displayName: "Shrimad Ramayan"
+    },
+    "Ramayan Sabke Jeevan Ka Aadhar": {
+        command: "rsjka",
+        seasons: { 1: 60 },
+        thumbnail: "https://telegra.ph/file/rsjka-thumbnail.jpg",
+        displayName: "Ramayan Sabke Jeevan Ka Aadhar"
+    },
+    "Radhakrishn": {
+        command: "rk",
+        seasons: { 1: 460, 2: 35, 3: 37, 4: 613 },
+        thumbnail: "https://telegra.ph/file/radhakrishn-thumbnail.jpg",
+        displayName: "Radhakrishn"
+    },
+    "Veer Hanuman": {
+        command: "vh",
+        seasons: { 1: 100, 2: 56 },
+        thumbnail: "https://telegra.ph/file/veerhanuman-thumbnail.jpg",
+        displayName: "Veer Hanuman"
+    },
+    "Prithviraj Chauhan": {
+        command: "cspc",
+        seasons: { 1: 88 },
+        thumbnail: "https://telegra.ph/file/prithviraj-thumbnail.jpg",
+        displayName: "Prithviraj Chauhan"
+    },
+    "Suryaputra Karn": {
+        command: "spk",
+        seasons: { 1: 307 },
+        thumbnail: "https://telegra.ph/file/suryaputra-thumbnail.jpg",
+        displayName: "Suryaputra Karn"
+    },
+    "Jai Kanhaiya Laal Ki": {
+        command: "jklk",
+        seasons: { 1: 185 },
+        thumbnail: "https://telegra.ph/file/jklk-thumbnail.jpg",
+        displayName: "Jai Kanhaiya Laal Ki"
+    },
+    "Kaamdhenu Gaumata": {
+        command: "kg",
+        seasons: { 1: 52 },
+        thumbnail: "https://telegra.ph/file/kaamdhenu-thumbnail.jpg",
+        displayName: "Kaamdhenu Gaumata"
+    },
+    "Kakbhushundi Ramayan": {
+        command: "kr",
+        seasons: { 1: 104, 2: 104, 3: 104 },
+        thumbnail: "https://telegra.ph/file/kakbhushundi-thumbnail.jpg",
+        displayName: "Kakbhushundi Ramayan"
+    },
+    "Dhruv Tara": {
+        command: "dt",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/dhruvtara-thumbnail.jpg",
+        displayName: "Dhruv Tara"
+    },
+    "Shri Krishna": {
+        command: "sk",
+        seasons: { 1: 0 },
+        thumbnail: "https://telegra.ph/file/shrikrishna-thumbnail.jpg",
+        displayName: "Shri Krishna"
+    },
+    "Ganesh Kartikey": {
+        command: "gk",
+        seasons: { 1: 156 },
+        thumbnail: "https://envs.sh/9aQ.jpg",
+        displayName: "Ganesh Kartikey"
+    },
+    "Kurukshetra": {
+        command: "kurukshetra",
+        seasons: { 1: 18 },
+        thumbnail: "https://telegra.ph/file/kurukshetra-thumbnail.jpg",
+        displayName: "Kurukshetra"
+    },
+    "Mahabharat": {
+        command: "mb",
+        seasons: { 1: 7, 2: 20, 3: 13, 4: 18, 5: 8, 6: 5, 7: 10, 8: 7, 9: 7, 10: 15, 11: 18, 12: 5, 13: 5, 14: 3, 15: 13, 16: 14, 17: 13, 18: 6, 19: 8, 20: 14, 21: 4, 22: 5, 23: 7, 24: 4, 25: 7, 26: 7, 27: 19, 28: 3 },
+        thumbnail: "https://telegra.ph/file/mahabharat-thumbnail.jpg",
+        displayName: "Mahabharat"
+    },
+    "Budh Dev": {
+        command: "bd",
+        seasons: { 1: 26 },
+        thumbnail: "https://telegra.ph/file/budhdev-thumbnail.jpg",
+        displayName: "Budh Dev"
+    },
+    "Jai Jagannath": {
+        command: "jj",
+        seasons: { 1: 272 },
+        thumbnail: "https://telegra.ph/file/jaijagannath-thumbnail.jpg",
+        displayName: "Jai Jagannath"
+    },
+    "Mangal Dev": {
+        command: "md",
+        seasons: { 1: 25 },
+        thumbnail: "https://telegra.ph/file/mangaldev-thumbnail.jpg",
+        displayName: "Mangal Dev"
+    },
+    "Ramayan (2008)": {
+        command: "ry8",
+        seasons: { 1: 300 },
+        thumbnail: "https://telegra.ph/file/ramayan2008-thumbnail.jpg",
+        displayName: "Ramayan (2008)"
+    },
+    "Ramayan (Luv Kush)": {
+        command: "rlk",
+        seasons: { 1: 44 },
+        thumbnail: "https://telegra.ph/file/luvkush-thumbnail.jpg",
+        displayName: "Ramayan (Luv Kush)"
+    },
+    "Shrimad Bhagwat Mahapuran": {
+        command: "sbm",
+        seasons: { 1: 52 },
+        thumbnail: "https://telegra.ph/file/bhagwat-thumbnail.jpg",
+        displayName: "Shrimad Bhagwat Mahapuran"
+    },
+    "Bhakter Bhagaban": {
+        command: "bbsk",
+        seasons: { 1: 16, 2: 34, 3: 22, 4: 29, 5: 48, 6: 67, 7: 63, 8: 12, 9: 53, 10: 31, 11: 34, 12: 110, 13: 61, 14: 77 },
+        thumbnail: "https://telegra.ph/file/bhakter-thumbnail.jpg",
+        displayName: "Bhakter Bhagaban"
+    },
+    "Devi Aadi Parashakti": {
+        command: "dap",
+        seasons: { 1: 87 },
+        thumbnail: "https://telegra.ph/file/deviaadi-thumbnail.jpg",
+        displayName: "Devi Aadi Parashakti"
+    },
+    "Mahima Shani Dev Ki": {
+        command: "msdk",
+        seasons: { 1: 235 },
+        thumbnail: "https://telegra.ph/file/mahimashani-thumbnail.jpg",
+        displayName: "Mahima Shani Dev Ki"
+    },
+    "Shani": {
+        command: "kds",
+        seasons: { 1: 346 },
+        thumbnail: "https://telegra.ph/file/shani-thumbnail.jpg",
+        displayName: "Shani"
+    },
+    "Jai Hanuman Sankat Mochan Naam Tiharo": {
+        command: "jhsnt",
+        seasons: { 1: 89 },
+        thumbnail: "https://telegra.ph/file/jhsnt-thumbnail.jpg",
+        displayName: "Jai Hanuman Sankat Mochan Naam Tiharo"
+    },
+    "Chandragupta Maurya": {
+        command: "cm",
+        seasons: { 1: 105 },
+        thumbnail: "https://telegra.ph/file/chandragupta-thumbnail.jpg",
+        displayName: "Chandragupta Maurya"
+    },
+    "Baal Shiv": {
+        command: "bs",
+        seasons: { 1: 215 },
+        thumbnail: "https://telegra.ph/file/baalshiv-thumbnail.jpg",
+        displayName: "Baal Shiv"
+    },
+    "Raja Shivchhatrapati": {
+        command: "rs",
+        seasons: { 1: 45 },
+        thumbnail: "https://telegra.ph/file/rajashiv-thumbnail.jpg",
+        displayName: "Raja Shivchhatrapati"
+    },
+    "Sangamarmar": {
+        command: "smm",
+        seasons: { 1: 13 },
+        thumbnail: "https://telegra.ph/file/sangamarmar-thumbnail.jpg",
+        displayName: "Sangamarmar"
+    },
+    "Shrimad Ramayan Marathi": {
+        command: "srm",
+        seasons: { 1: 101 },
+        thumbnail: "https://telegra.ph/file/shrimad-marathi-thumbnail.jpg",
+        displayName: "Shrimad Ramayan Marathi"
+    },
+    "Shrimad Ramayan Bangla": {
+        command: "srb",
+        seasons: { 1: 360 },
+        thumbnail: "https://telegra.ph/file/shrimad-bangla-thumbnail.jpg",
+        displayName: "Shrimad Ramayan Bangla"
+    },
+    "Radha Krishna": {
+        command: "rkb",
+        seasons: { 1: 1072 },
+        thumbnail: "https://telegra.ph/file/radhakrishna-thumbnail.jpg",
+        displayName: "Radha Krishna"
+    },
+    "Vighnaharta Ganesh": {
+        command: "vg",
+        seasons: { 1: 1026 },
+        thumbnail: "https://telegra.ph/file/vighnaharta-thumbnail.jpg",
+        displayName: "Vighnaharta Ganesh"
+    },
+    "Paapnaashini Ganga": {
+        command: "pg",
+        seasons: { 1: 88 },
+        thumbnail: "https://telegra.ph/file/paapnaashini-thumbnail.jpg",
+        displayName: "Paapnaashini Ganga"
+    },
+    "Hastinapur Ke Veer": {
+        command: "hkv",
+        seasons: { 1: 50 },
+        thumbnail: "https://telegra.ph/file/hastinapur-thumbnail.jpg",
+        displayName: "Hastinapur Ke Veer"
+    }
+};
+
+// API endpoint to get serial data
+app.get("/api/serials", (req, res) => {
+    const serials = Object.keys(SERIAL_DATA).map(name => ({
+        name,
+        displayName: SERIAL_DATA[name].displayName || name,
+        command: SERIAL_DATA[name].command,
+        thumbnail: SERIAL_DATA[name].thumbnail || "https://telegra.ph/file/default-thumbnail.jpg",
+        seasons: SERIAL_DATA[name].seasons,
+        totalEpisodes: Object.values(SERIAL_DATA[name].seasons).reduce((a, b) => a + b, 0)
+    }));
+    res.json({ success: true, serials });
+});
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -3059,8 +3439,18 @@ app.get("/mini/:userId", (req, res) => {
     /* Floating Pill Nav Modifier */
     .tab-bar.floating-pill { bottom: 15px; width: 92%; left: 4%; border-radius: 40px; border: 1px solid rgba(255,255,255,0.1); padding: 8px 0; box-shadow: 0 10px 40px rgba(0,0,0,0.6); background: rgba(10,0,20,0.95); }
     
-    /* Settings Gear Icon */
-    .settings-gear { position: absolute; top: -5px; right: -5px; background: #1a0a2b; border: 2px solid #00e676; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #00e676; font-size: 14px; z-index: 10; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 10px rgba(0,230,118,0.3); }
+    /* Settings Gear Icon - Smaller SVG */
+    .settings-gear { 
+      position: absolute; top: -5px; right: -5px; 
+      background: #1a0a2b; border: 2px solid #00e676; 
+      border-radius: 50%; width: 24px; height: 24px; 
+      display: flex; align-items: center; justify-content: center; 
+      cursor: pointer; color: #00e676; 
+      z-index: 10; transition: transform 0.2s, box-shadow 0.2s; 
+      box-shadow: 0 2px 10px rgba(0,230,118,0.3);
+      padding: 0;
+    }
+    .settings-gear svg { width: 14px; height: 14px; fill: #00e676; }
     .settings-gear:active { transform: scale(0.85); box-shadow: 0 0 5px rgba(0,230,118,0.5); }
 
     /* === NAVBAR === */
@@ -3329,6 +3719,218 @@ app.get("/mini/:userId", (req, res) => {
       fill: currentColor;
     }
     .switch-btn:active { transform: scale(0.9); background: rgba(213,0,249,0.15); }
+
+    /* === SEARCH WIDGET - Google Style === */
+    .search-widget {
+      margin: 8px 16px 12px;
+      border-radius: 30px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .search-widget:active {
+      transform: scale(0.97);
+      background: rgba(255,255,255,0.1);
+    }
+    .search-widget svg {
+      width: 20px;
+      height: 20px;
+      fill: rgba(255,255,255,0.4);
+      flex-shrink: 0;
+    }
+    .search-widget .search-text {
+      flex: 1;
+      color: rgba(255,255,255,0.5);
+      font-size: 15px;
+      font-weight: 400;
+    }
+    .search-widget .mic-icon {
+      width: 18px;
+      height: 18px;
+      fill: rgba(255,255,255,0.3);
+    }
+
+    /* === SEARCH OVERLAY === */
+    .search-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10,0,20,0.95);
+      backdrop-filter: blur(20px);
+      z-index: 800;
+      flex-direction: column;
+      animation: fadeSlide 0.3s ease;
+    }
+    .search-overlay.open { display: flex; }
+    
+    .search-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .search-header .back-btn {
+      background: none;
+      border: none;
+      color: #ea80fc;
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+    }
+    .search-header .back-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+    .search-header .search-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+      transition: border 0.3s;
+    }
+    .search-header .search-input:focus {
+      border-color: #d500f9;
+    }
+    .search-header .search-input::placeholder {
+      color: rgba(255,255,255,0.3);
+    }
+
+    .search-serial-row {
+      padding: 12px 16px 8px;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .search-serial-row::-webkit-scrollbar { display: none; }
+    
+    .serial-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 30px;
+      padding: 6px 14px 6px 6px;
+      margin-right: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .serial-chip:active {
+      transform: scale(0.95);
+      background: rgba(213,0,249,0.15);
+    }
+    .serial-chip.active {
+      border-color: #d500f9;
+      background: rgba(213,0,249,0.12);
+    }
+    .serial-chip img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    .serial-chip span {
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+    }
+
+    .search-results-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 16px 20px;
+    }
+
+    .season-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .season-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .season-card:active {
+      transform: scale(0.95);
+      background: rgba(213,0,249,0.1);
+    }
+    .season-card .season-num {
+      font-size: 18px;
+      font-weight: 700;
+      color: #ea80fc;
+    }
+    .season-card .season-eps {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 4px;
+    }
+
+    .episode-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(65px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .episode-btn {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 10px 4px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+      text-decoration: none;
+      display: block;
+    }
+    .episode-btn:active {
+      transform: scale(0.92);
+      background: rgba(213,0,249,0.15);
+    }
+    .episode-btn .ep-label {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    .search-section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      margin: 16px 0 10px;
+      padding: 0 4px;
+    }
+
+    .search-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: rgba(255,255,255,0.3);
+    }
 
     /* === LIST CARD === */
     .list-card { 
@@ -4517,7 +5119,9 @@ app.get("/mini/:userId", (req, res) => {
     <div class="profile-hdr">
       <div style="position:relative;">
         <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
-        <div class="settings-gear" id="openSettingsBtn">⚙️</div>
+        <div class="settings-gear" id="openSettingsBtn">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.04 7.04 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.22 0 .43-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></svg>
+        </div>
       </div>
       <div class="profile-info">
         <h1 id="ui-name">Loading...</h1>
@@ -4527,6 +5131,34 @@ app.get("/mini/:userId", (req, res) => {
       <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
       </a>
+    </div>
+
+    <!-- ========== SEARCH WIDGET - Google Style ========== -->
+    <div class="search-widget" id="searchWidget">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <span class="search-text">Search episodes...</span>
+      <svg class="mic-icon" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+    </div>
+
+    <!-- ========== SEARCH OVERLAY ========== -->
+    <div class="search-overlay" id="searchOverlay">
+      <div class="search-header">
+        <button class="back-btn" id="searchBackBtn">
+          <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search episodes..." autofocus />
+      </div>
+      
+      <div class="search-serial-row" id="serialRow">
+        <!-- Serial chips will be rendered here -->
+      </div>
+
+      <div class="search-results-scroll" id="searchResults">
+        <div class="search-section-title" id="searchSectionTitle">Top Serials</div>
+        <div id="searchContent">
+          <div class="spinner"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ========== SCRATCH CARD BANNER ========== -->
@@ -5440,6 +6072,275 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
+    // ─── SEARCH OVERLAY LOGIC ───
+    const searchWidget = document.getElementById('searchWidget');
+    const searchOverlay = document.getElementById('searchOverlay');
+    const searchBackBtn = document.getElementById('searchBackBtn');
+    const searchInput = document.getElementById('searchInput');
+    const serialRow = document.getElementById('serialRow');
+    const searchContent = document.getElementById('searchContent');
+    const searchSectionTitle = document.getElementById('searchSectionTitle');
+
+    let serialsData = [];
+    let selectedSerial = null;
+    let selectedSeason = null;
+
+    // Open search overlay
+    searchWidget.addEventListener('click', () => {
+      searchOverlay.classList.add('open');
+      setTimeout(() => searchInput.focus(), 300);
+      loadSerials();
+    });
+
+    // Close search overlay
+    searchBackBtn.addEventListener('click', () => {
+      searchOverlay.classList.remove('open');
+      selectedSerial = null;
+      selectedSeason = null;
+    });
+
+    // Search input handler
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase().trim();
+      if (query.length > 0) {
+        filterSerials(query);
+      } else {
+        showSerials();
+      }
+    });
+
+    // Load serials from API
+    async function loadSerials() {
+      try {
+        const res = await fetch('/api/serials');
+        const data = await res.json();
+        if (data.success) {
+          serialsData = data.serials;
+          showSerials();
+        }
+      } catch (e) {
+        console.error('Failed to load serials:', e);
+      }
+    }
+
+    // Show serials as chips
+    function showSerials() {
+      renderSerialChips(serialsData);
+      searchSectionTitle.innerText = 'Top Serials';
+      renderSerialGrid(serialsData);
+    }
+
+    // Filter serials based on search
+    function filterSerials(query) {
+      const filtered = serialsData.filter(s => 
+        s.displayName.toLowerCase().includes(query) || 
+        s.name.toLowerCase().includes(query)
+      );
+      renderSerialChips(filtered);
+      searchSectionTitle.innerText = filtered.length > 0 ? 'Search Results' : 'No Results Found';
+      if (filtered.length > 0) {
+        renderSerialGrid(filtered);
+      } else {
+        searchContent.innerHTML = \`
+          <div class="search-empty">
+            <div style="font-size:48px; margin-bottom:16px;">🔍</div>
+            <p>No serials found matching "<strong>\${query}</strong>"</p>
+            <p style="font-size:12px; color:rgba(255,255,255,0.3); margin-top:8px;">Try searching with a different name</p>
+          </div>
+        \`;
+      }
+    }
+
+    // Render serial chips (scrollable row)
+    function renderSerialChips(serials) {
+      if (serials.length === 0) {
+        serialRow.innerHTML = '';
+        return;
+      }
+      let html = '';
+      // Show all serials as chips (limit to first 20 for performance)
+      const showSerials = serials.slice(0, 20);
+      showSerials.forEach(s => {
+        const isActive = selectedSerial === s.name;
+        html += \`
+          <div class="serial-chip \${isActive ? 'active' : ''}" onclick="selectSerial('\${s.name}')">
+            <img src="\${s.thumbnail}" alt="\${s.displayName}" onerror="this.src='https://via.placeholder.com/32/2d0a50/ea80fc?text=?'" />
+            <span>\${s.displayName}</span>
+          </div>
+        \`;
+      });
+      serialRow.innerHTML = html;
+    }
+
+    // Render serial grid (showing seasons)
+    function renderSerialGrid(serials) {
+      if (serials.length === 0) {
+        searchContent.innerHTML = \`
+          <div class="search-empty">
+            <p>No serials available</p>
+          </div>
+        \`;
+        return;
+      }
+
+      // If a serial is selected, show its seasons
+      if (selectedSerial) {
+        const serial = serialsData.find(s => s.name === selectedSerial);
+        if (serial) {
+          renderSeasons(serial);
+          return;
+        }
+      }
+
+      // Show all serials as a grid with thumbnails
+      let html = '';
+      serials.forEach(s => {
+        const totalEps = Object.values(s.seasons).reduce((a, b) => a + b, 0);
+        html += \`
+          <div class="season-card" onclick="selectSerial('\${s.name}')" style="display:flex; flex-direction:column; align-items:center; padding:16px 12px;">
+            <img src="\${s.thumbnail}" alt="\${s.displayName}" style="width:60px; height:60px; border-radius:50%; object-fit:cover; margin-bottom:8px;" onerror="this.src='https://via.placeholder.com/60/2d0a50/ea80fc?text=?'" />
+            <div style="font-size:13px; font-weight:600; text-align:center; line-height:1.2;">\${s.displayName}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px;">\${totalEps} episodes</div>
+          </div>
+        \`;
+      });
+      searchContent.innerHTML = \`<div class="season-grid">\${html}</div>\`;
+    }
+
+    // Render seasons for a selected serial
+    function renderSeasons(serial) {
+      const seasonKeys = Object.keys(serial.seasons).map(Number).sort((a, b) => a - b);
+      let html = \`
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:0 4px;">
+          <button onclick="selectSerial(null)" style="background:none; border:none; color:#ea80fc; cursor:pointer; font-size:14px;">
+            ← Back
+          </button>
+          <div style="font-size:16px; font-weight:600; flex:1;">\${serial.displayName}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.4);">\${seasonKeys.length} seasons</div>
+        </div>
+        <div class="season-grid">
+      \`;
+      
+      seasonKeys.forEach(season => {
+        const eps = serial.seasons[season];
+        html += \`
+          <div class="season-card" onclick="selectSeason(\${season})">
+            <div class="season-num">S\${String(season).padStart(2, '0')}</div>
+            <div class="season-eps">\${eps} episodes</div>
+          </div>
+        \`;
+      });
+      html += \`</div>\`;
+      searchContent.innerHTML = html;
+      searchSectionTitle.innerText = 'Select Season';
+    }
+
+    // Render episodes for a selected season
+    function renderEpisodes(serial, season) {
+      const totalEps = serial.seasons[season];
+      const command = serial.command;
+      const displayName = serial.displayName;
+      
+      let html = \`
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:0 4px;">
+          <button onclick="selectSeason(null)" style="background:none; border:none; color:#ea80fc; cursor:pointer; font-size:14px;">
+            ← Back
+          </button>
+          <div style="font-size:16px; font-weight:600; flex:1;">\${displayName} - S\${String(season).padStart(2, '0')}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.4);">\${totalEps} eps</div>
+        </div>
+        <div class="episode-grid">
+      \`;
+      
+      // Generate episode buttons
+      for (let ep = 1; ep <= Math.min(totalEps, 100); ep++) {
+        const epStr = String(ep).padStart(2, '0');
+        const seasonStr = String(season).padStart(2, '0');
+        // Special handling for specific serials
+        let url = \`https://t.me/MythoSerialBot?start=\${command}_s\${seasonStr}e\${epStr}\`;
+        
+        // Special cases from csearch.py
+        if (command === 'kr') {
+          // For Kakbhushundi Ramayan, all episodes use s01
+          url = \`https://t.me/MythoSerialBot?start=kr_s01e\${epStr}\`;
+        } else if (command === 'rlk') {
+          // For Luv Kush, use s02 for season 1
+          const displaySeason = season === 1 ? 2 : season;
+          url = \`https://t.me/MythoSerialBot?start=rlk_s\${String(displaySeason).padStart(2, '0')}e\${epStr}\`;
+        } else if (command === 'spk') {
+          // Suryaputra Karn uses actual episode number
+          const actualEp = (season - 1) * 100 + ep;
+          url = \`https://t.me/MythoSerialBot?start=spk_s\${String(season).padStart(2, '0')}e\${actualEp}\`;
+        } else if (command === 'srb') {
+          // Shrimad Ramayan Bangla uses season based on 100 episodes
+          const seasonNum = ((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=srb_s\${String(Math.floor(seasonNum)).padStart(2, '0')}e\${ep}\`;
+        } else if (command === 'vg') {
+          // Vighnaharta Ganesh uses season based on 100 episodes
+          const seasonNum = ((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=vg_s\${String(Math.floor(seasonNum)).padStart(2, '0')}e\${ep}\`;
+        } else if (command === 'jklk') {
+          // Jai Kanhaiya Laal Ki uses underscore format
+          url = \`https://t.me/MythoSerialBot?start=jklk_s\${season}_e\${epStr}\`;
+        } else if (command === 'rk' || command === 'rkb' || command === 'ks' || command === 'ksd' || 
+                   command === 'cn' || command === 'dyg' || command === 'meera' || command === 'ry8' ||
+                   command === 'rs' || command === 'smm' || command === 'bs' || command === 'kg' ||
+                   command === 'kurukshetra' || command === 'cspc' || command === 'gk' || command === 'cm' ||
+                   command === 'jhsnt' || command === 'tloh' || command === 'srm' || command === 'hkv') {
+          // Standard format for most serials
+          url = \`https://t.me/MythoSerialBot?start=\${command}_s\${seasonStr}e\${epStr}\`;
+        } else if (command === 'rk') {
+          // Radhakrishn uses underscore
+          url = \`https://t.me/MythoSerialBot?start=rk_s\${season}_e\${epStr}\`;
+        }
+        
+        html += \`
+          <a href="\${url}" class="episode-btn" onclick="tg.HapticFeedback.impactOccurred('light'); tg.openTelegramLink('\${url}'); return false;">
+            E\${String(ep).padStart(2, '0')}
+          </a>
+        \`;
+      }
+      html += \`</div>\`;
+      
+      if (totalEps > 100) {
+        html += \`
+          <div style="text-align:center; margin-top:12px; font-size:12px; color:rgba(255,255,255,0.3);">
+            Showing first 100 episodes. Use the bot command for more: /<b>\${command}</b>
+          </div>
+        \`;
+      }
+      
+      searchContent.innerHTML = html;
+      searchSectionTitle.innerText = 'Select Episode';
+    }
+
+    // Global functions for onclick
+    window.selectSerial = function(name) {
+      if (selectedSerial === name) {
+        selectedSerial = null;
+      } else {
+        selectedSerial = name;
+      }
+      selectedSeason = null;
+      showSerials();
+      // Update chips
+      renderSerialChips(serialsData);
+    };
+
+    window.selectSeason = function(season) {
+      if (selectedSeason === season) {
+        selectedSeason = null;
+      } else {
+        selectedSeason = season;
+      }
+      const serial = serialsData.find(s => s.name === selectedSerial);
+      if (serial && selectedSeason) {
+        renderEpisodes(serial, selectedSeason);
+      } else if (serial) {
+        renderSeasons(serial);
+      }
+    };
+
     // ─── LOAD DASHBOARD DATA ───
     async function loadDashboard() {
       try {
@@ -6026,11 +6927,11 @@ app.get("/mini/:userId", (req, res) => {
     let selectedReceiver = null;
     let payChatPollInterval = null;
 
-    const searchInput = document.getElementById('search-user');
+    const searchInputPay = document.getElementById('search-user');
     const searchResults = document.getElementById('search-results');
     const recentChatsContainer = document.getElementById('recent-chats-container');
 
-    searchInput.addEventListener('input', async function() {
+    searchInputPay.addEventListener('input', async function() {
       const query = this.value.trim();
       if (query.length < 2) {
         searchResults.innerHTML = '';
