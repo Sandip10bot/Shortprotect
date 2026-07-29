@@ -27,6 +27,7 @@ let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollec
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
 let userSettingsCollection;
+let userShortenersCollection;
 
 async function connectDB() {
   try {
@@ -52,6 +53,7 @@ async function connectDB() {
     webSpinSessionsCollection = db.collection("web_spin_sessions");
     premiumUsersCollection = db.collection("premium_users");
     userSettingsCollection = db.collection("user_settings");
+    userShortenersCollection = db.collection("user_shorteners");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -3412,6 +3414,79 @@ app.get("/api/serials", (req, res) => {
     }));
     res.json({ success: true, serials });
 });
+
+// ==========================================
+// USER ANTI-BYPASS LINK GENERATOR API
+// ==========================================
+app.post("/api/user_shorten", async (req, res) => {
+    try {
+        const { user_id, target_url } = req.body;
+        if (!user_id || !target_url) {
+            return res.status(400).json({ success: false, error: "Missing user_id or target_url" });
+        }
+
+        // Verify the URL structure
+        new URL(target_url);
+
+        // Fetch the user's active shortener configuration from MongoDB
+        const db = client.db("Mytho");
+        const shortener = await db.collection("user_shorteners").findOne({ 
+            user_id: parseInt(user_id), 
+            active: true 
+        });
+
+        if (!shortener) {
+            return res.status(400).json({ success: false, error: "No active shortener site found. Please use /addsite in the bot first." });
+        }
+
+        const { domain, api_token } = shortener;
+        // Clean the domain to ensure no http/https or trailing slashes cause issues
+        const cleanDomain = domain.replace("https://", "").replace("http://", "").replace(/\/$/, "");
+
+        // Generate Mytho Anti-Bypass Target Link
+        const token = crypto.randomBytes(8).toString("hex");
+        const encodedTarget = base62_encode(target_url);
+        
+        // Create the shield URL that forces the user through your index.js Bypass page
+        const shieldUrl = `https://${req.get('host') || req.hostname}/Bypass/${user_id}/${token}?t=${encodedTarget}`;
+
+        // Save to DB so your existing /Bypass route can process it properly
+        await urlShortenerCollection.insertOne({
+            token: token,
+            creator_id: parseInt(user_id),
+            target_url: target_url,
+            encoded_target: encodedTarget,
+            created_at: new Date(),
+            clicks: 0,
+            access_logs: []
+        });
+
+        // Call the user's custom AdLinkFly/Shortener API
+        const apiUrl = `https://${cleanDomain}/api?api=${api_token}&url=${encodeURIComponent(shieldUrl)}`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+
+        if (data.status === 'success' || data.shortenedUrl || data.short_url) {
+            let finalUrl = data.shortenedUrl || data.short_url || data.url;
+            
+            // 🔥 FORCE THE LINK TO USE THE EXACT SITE DOMAIN THE USER PROVIDED
+            try {
+                const urlObj = new URL(finalUrl);
+                finalUrl = `https://${cleanDomain}${urlObj.pathname}${urlObj.search}`;
+            } catch(e) {
+                console.error("URL parsing error:", e);
+            }
+
+            res.json({ success: true, short_url: finalUrl });
+        } else {
+            res.status(400).json({ success: false, error: "External shortener API rejected the request", details: data });
+        }
+    } catch (error) {
+        console.error("User Shorten Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error or Invalid URL" });
+    }
+});
+
 
 // ==========================================
 // MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section & Persistent Settings)
