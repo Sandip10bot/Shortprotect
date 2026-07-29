@@ -3416,7 +3416,15 @@ app.get("/api/serials", (req, res) => {
 });
 
 // ==========================================
-// USER ANTI-BYPASS LINK GENERATOR API
+// FAKE TRAP ERROR ROUTE FOR BYPASS BOTS
+// ==========================================
+app.get("/AntiBypassError", (req, res) => {
+    renderBypassError(res);
+});
+
+
+// ==========================================
+// USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
 // ==========================================
 app.post("/api/user_shorten", async (req, res) => {
     try {
@@ -3440,22 +3448,27 @@ app.post("/api/user_shorten", async (req, res) => {
         }
 
         const { domain, api_token } = shortener;
-        // Clean the domain to ensure no http/https or trailing slashes cause issues
         const cleanDomain = domain.replace("https://", "").replace("http://", "").replace(/\/$/, "");
 
-        // Generate Mytho Anti-Bypass Target Link
-        const token = crypto.randomBytes(8).toString("hex");
-        const encodedTarget = base62_encode(target_url);
+        // ==========================================
+        // 🔥 SMART FAKE TRAP FOR BYPASS BOTS 🔥
+        // ==========================================
+        const realToken = crypto.randomBytes(8).toString("hex"); // Hidden secure token
         
-        // Create the shield URL that forces the user through your index.js Bypass page
-        const shieldUrl = `https://${req.get('host') || req.hostname}/Bypass/${user_id}/${token}?t=${encodedTarget}`;
+        // 1. Fake target ab sidha "Bypass Detected" wale page par le jayega
+        const hostUrl = req.get('host') || req.hostname;
+        const fakeUrl = `https://${hostUrl}/AntiBypassError`; 
+        const fakeEncodedTarget = base62_encode(fakeUrl);
+        
+        // 2. Shield URL contains the REAL token for DB lookup, but a FAKE encoded target in 't'
+        const shieldUrl = `https://${hostUrl}/Bypass/${user_id}/${realToken}?t=${fakeEncodedTarget}`;
 
-        // Save to DB so your existing /Bypass route can process it properly
+        // 3. Save the REAL target in the database tied to the realToken securely
         await urlShortenerCollection.insertOne({
-            token: token,
+            token: realToken,
             creator_id: parseInt(user_id),
-            target_url: target_url,
-            encoded_target: encodedTarget,
+            target_url: target_url, // Real destination safely stored in DB
+            encoded_target: "hidden_in_db", 
             created_at: new Date(),
             clicks: 0,
             access_logs: []
@@ -3469,7 +3482,7 @@ app.post("/api/user_shorten", async (req, res) => {
         if (data.status === 'success' || data.shortenedUrl || data.short_url) {
             let finalUrl = data.shortenedUrl || data.short_url || data.url;
             
-            // 🔥 FORCE THE LINK TO USE THE EXACT SITE DOMAIN THE USER PROVIDED
+            // Force the link to use the exact site domain provided by the user
             try {
                 const urlObj = new URL(finalUrl);
                 finalUrl = `https://${cleanDomain}${urlObj.pathname}${urlObj.search}`;
