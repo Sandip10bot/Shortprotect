@@ -26,6 +26,7 @@ let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection
 let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
 let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
+let userSettingsCollection;
 
 async function connectDB() {
   try {
@@ -50,6 +51,7 @@ async function connectDB() {
     paymentChatCollection = db.collection("payment_chats");
     webSpinSessionsCollection = db.collection("web_spin_sessions");
     premiumUsersCollection = db.collection("premium_users");
+    userSettingsCollection = db.collection("user_settings");
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -2442,6 +2444,64 @@ app.post("/api/sync-profile", async (req, res) => {
 });
 
 // ==========================================
+// USER SETTINGS API (Persistent)
+// ==========================================
+app.post("/api/settings/save", async (req, res) => {
+    try {
+        const { userId, settings } = req.body;
+        const uid = parseInt(userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+        
+        // Merge with existing settings to preserve any other fields
+        await userSettingsCollection.updateOne(
+            { user_id: uid },
+            { 
+                $set: { 
+                    ...settings,
+                    updated_at: new Date()
+                } 
+            },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Settings save error:", error);
+        res.status(500).json({ success: false, error: "Failed to save settings" });
+    }
+});
+
+app.get("/api/settings/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+        
+        let settings = await userSettingsCollection.findOne({ user_id: uid });
+        if (!settings) {
+            // Default settings
+            settings = {
+                user_id: uid,
+                sound: true,
+                haptic: true,
+                visual: true,
+                privacy: false,
+                pillNav: false,
+                shortNum: false,
+                forceVerify: false,
+                created_at: new Date()
+            };
+            await userSettingsCollection.insertOne(settings);
+        }
+        
+        // Remove MongoDB _id before sending
+        const { _id, ...settingsWithoutId } = settings;
+        res.json({ success: true, settings: settingsWithoutId });
+    } catch (error) {
+        console.error("Settings fetch error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch settings" });
+    }
+});
+
+// ==========================================
 // CHANT & EARN (Tap to Earn) – UPDATED WITH 1 SECOND COOLDOWN
 // ==========================================
 
@@ -2974,368 +3034,368 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
 });
 
 // ==========================================
-// SERIAL SEARCH DATA - From csearch.py
+// SERIAL SEARCH DATA - From csearch.py (Only i.ibb.co thumbnails)
 // ==========================================
 
 const SERIAL_DATA = {
     "Shiv Shakti": {
         command: "ss",
         seasons: { 1: 914 },
-        thumbnail: "https://files.catbox.moe/fdimxs.jpg",
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
         displayName: "Shiv Shakti"
     },
     "Dwarkadheesh": {
         command: "d",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/dwarkadheesh-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/LP5n2y8/photo-2025-03-31-05-10-27-7599681771140715700.jpg",
         displayName: "Dwarkadheesh"
     },
     "Karmadhikari Shanidev": {
         command: "ksd",
         seasons: { 1: 192 },
-        thumbnail: "https://telegra.ph/file/karmadhikari-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/gL87Q5v3/photo-2024-12-26-12-12-43-7607751850023976976.jpg",
         displayName: "Karmadhikari Shanidev"
     },
     "Chandra Dev": {
         command: "cd",
         seasons: { 1: 26 },
-        thumbnail: "https://telegra.ph/file/chandradev-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/b5CJMTs0/photo-2024-12-24-15-58-52-7635141346096840728.jpg",
         displayName: "Chandra Dev"
     },
     "Mahishasura Mardini": {
         command: "mm",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/mahishasura-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/gdS9vwK/photo-2025-01-18-04-14-34-7596564443684411267.jpg",
         displayName: "Mahishasura Mardini"
     },
     "Jai Mahalakshmi": {
         command: "jm",
         seasons: { 1: 34 },
-        thumbnail: "https://telegra.ph/file/mahalakshmi-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/CSC4xJ9/photo-2025-01-27-06-00-27-7635140225110376472.jpg",
         displayName: "Jai Mahalakshmi"
     },
     "Chandra Nandni": {
         command: "cn",
         seasons: { 1: 35, 2: 27, 3: 46, 4: 60, 5: 45, 6: 65, 7: 8 },
-        thumbnail: "https://telegra.ph/file/chandranandni-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/hJg0hmqm/photo-2026-05-18-04-45-49-7641088540066971680.jpg",
         displayName: "Chandra Nandni"
     },
     "Brij Ke Gopal": {
         command: "bkg",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/brijgopal-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/G7JKWzW/photo-2025-02-20-06-30-25-7587769080549142302.jpg",
         displayName: "Brij Ke Gopal"
     },
     "Yashomati Maiya Ke Nandlala": {
         command: "ymkn",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/ymkn-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/4RwFsKp/photo-2025-02-02-05-20-58-7579527255950082854.jpg",
         displayName: "Yashomati Maiya Ke Nandlala"
     },
     "Meera": {
         command: "meera",
         seasons: { 1: 134 },
-        thumbnail: "https://telegra.ph/file/meera-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/nMNjkkYJ/photo-2026-06-06-04-27-38-7648144999535607836.jpg",
         displayName: "Meera"
     },
     "Bangla": {
         command: "bang",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/bangla-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
         displayName: "Bangla"
     },
     "Dharm Yoddha Garud": {
         command: "dyg",
         seasons: { 1: 100, 2: 100, 3: 34 },
-        thumbnail: "https://telegra.ph/file/garud-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/3bgFqVD/photo-2026-06-30-03-45-29-7657029629013655556.jpg",
         displayName: "Dharm Yoddha Garud"
     },
     "Siya Ke Ram": {
         command: "skr",
         seasons: { 1: 24, 2: 17, 3: 51, 4: 31, 5: 30, 6: 152 },
-        thumbnail: "https://telegra.ph/file/siyaram-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/HDJN4Dj/photo-2025-04-12-09-41-42-7585272733904694116.jpg",
         displayName: "Siya Ke Ram"
     },
     "Ram Siya Ke Luv Kush": {
         command: "rsklk",
         seasons: { 1: 141 },
-        thumbnail: "https://telegra.ph/file/rsklk-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/FqsNvPJ/photo-2025-04-05-05-23-06-7581052428326426516.jpg",
         displayName: "Ram Siya Ke Luv Kush"
     },
     "Tenali Rama": {
         command: "tr",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/tenali-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/z8yBYK3/photo-2025-06-10-09-13-06-7604925046016847949.jpg",
         displayName: "Tenali Rama"
     },
     "Devon Ke Dev Mahadev": {
         command: "dkdm",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/mahadev-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/2gy8jK2/photo-2025-06-23-09-08-07-7611488977898018294.jpg",
         displayName: "Devon Ke Dev Mahadev"
     },
     "Karn Sangini": {
         command: "ks",
         seasons: { 1: 90 },
-        thumbnail: "https://telegra.ph/file/sangini-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/SpLRp9B/photo-2026-05-30-04-27-17-7645537026673999876.jpg",
         displayName: "Karn Sangini"
     },
     "Mata Saraswati": {
         command: "ms",
         seasons: { 1: 25 },
-        thumbnail: "https://telegra.ph/file/saraswati-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/Hphh3XVR/photo-2024-11-11-15-11-54-7635140409793970192.jpg",
         displayName: "Mata Saraswati"
     },
     "Shri Tirupati Balaji": {
         command: "stb",
         seasons: { 1: 52 },
-        thumbnail: "https://telegra.ph/file/balaji-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/99MqTqgK/photo-2024-09-01-04-08-23-7635141019679326232.jpg",
         displayName: "Shri Tirupati Balaji"
     },
     "Jag Jaanani Maa Vaishnodevi": {
         command: "jjmv",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/vaishnodevi-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/1f7t83D/photo-2025-05-29-04-11-41-7643326846606822532.jpg",
         displayName: "Jag Jaanani Maa Vaishnodevi"
     },
     "Bolo Ambe Maa Ki Jai": {
         command: "maa",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/ambemaa-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/0FjtCNq/photo-2025-06-16-08-25-03-7609344192725896061.jpg",
         displayName: "Bolo Ambe Maa Ki Jai"
     },
     "Sriman Rama": {
         command: "rama",
         seasons: { 1: 8 },
-        thumbnail: "https://telegra.ph/file/srimanrama-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/dsSqBWNm/photo-2025-01-21-07-03-34-7598189848368775196.jpg",
         displayName: "Sriman Rama"
     },
     "The Legend of Hanuman": {
         command: "tloh",
         seasons: { 1: 13, 2: 13, 3: 6, 4: 7, 5: 6, 6: 7 },
-        thumbnail: "https://telegra.ph/file/legendhanuman-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/pjvX2r5t/photo-2024-12-19-03-29-05-7597807763783155716.jpg",
         displayName: "The Legend of Hanuman"
     },
     "Hatim": {
         command: "hatim",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/hatim-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/DGxwSJz/photo-2025-06-12-07-56-15-7605499944947512450.jpg",
         displayName: "Hatim"
     },
     "Ramanand Sagar Ramayan": {
         command: "rsr",
         seasons: { 1: 50 },
-        thumbnail: "https://telegra.ph/file/ramanand-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/MPjH85p/photo-2025-02-26-05-28-27-7591247647277933692.jpg",
         displayName: "Ramanand Sagar Ramayan"
     },
     "Shrimad Ramayan": {
         command: "sr",
         seasons: { 1: 341 },
-        thumbnail: "https://telegra.ph/file/shrimad-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/51MJLm2/photo-2025-05-08-03-51-37-7587054966308235584.jpg",
         displayName: "Shrimad Ramayan"
     },
     "Ramayan Sabke Jeevan Ka Aadhar": {
         command: "rsjka",
         seasons: { 1: 60 },
-        thumbnail: "https://telegra.ph/file/rsjka-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/ChjNnkh/photo-2025-05-03-13-52-16-7585084653194901950.jpg",
         displayName: "Ramayan Sabke Jeevan Ka Aadhar"
     },
     "Radhakrishn": {
         command: "rk",
         seasons: { 1: 460, 2: 35, 3: 37, 4: 613 },
-        thumbnail: "https://telegra.ph/file/radhakrishn-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/JRygz3XD/photo-2026-06-02-09-49-26-7646733050511884324.jpg",
         displayName: "Radhakrishn"
     },
     "Veer Hanuman": {
         command: "vh",
         seasons: { 1: 100, 2: 56 },
-        thumbnail: "https://telegra.ph/file/veerhanuman-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/7nbsg8Y/photo-2025-04-25-05-49-20-7581834215599137296.jpg",
         displayName: "Veer Hanuman"
     },
     "Prithviraj Chauhan": {
         command: "cspc",
         seasons: { 1: 88 },
-        thumbnail: "https://telegra.ph/file/prithviraj-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/9mb2C2Vk/photo-2025-07-02-11-27-23-7630099372318916612.jpg",
         displayName: "Prithviraj Chauhan"
     },
     "Suryaputra Karn": {
         command: "spk",
         seasons: { 1: 307 },
-        thumbnail: "https://telegra.ph/file/suryaputra-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/xtKFW4wJ/photo-2026-07-27-03-59-33-7667052557969129520.jpg",
         displayName: "Suryaputra Karn"
     },
     "Jai Kanhaiya Laal Ki": {
         command: "jklk",
         seasons: { 1: 185 },
-        thumbnail: "https://telegra.ph/file/jklk-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/4RWQTrXg/photo-2026-02-18-06-46-44-7608093119535382552.jpg",
         displayName: "Jai Kanhaiya Laal Ki"
     },
     "Kaamdhenu Gaumata": {
         command: "kg",
         seasons: { 1: 52 },
-        thumbnail: "https://telegra.ph/file/kaamdhenu-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/LXNBQTtM/photo-2026-02-04-18-29-30-7604087959452647448.jpg",
         displayName: "Kaamdhenu Gaumata"
     },
     "Kakbhushundi Ramayan": {
         command: "kr",
         seasons: { 1: 104, 2: 104, 3: 104 },
-        thumbnail: "https://telegra.ph/file/kakbhushundi-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/JP8yj2T/photo-2026-07-01-02-43-08-7657384801334198304.jpg",
         displayName: "Kakbhushundi Ramayan"
     },
     "Dhruv Tara": {
         command: "dt",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/dhruvtara-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/cXXCphb/photo-2025-07-18-05-27-07-7616936323912040814.jpg",
         displayName: "Dhruv Tara"
     },
     "Shri Krishna": {
         command: "sk",
         seasons: { 1: 0 },
-        thumbnail: "https://telegra.ph/file/shrikrishna-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/7nbsg8Y/photo-2025-04-25-05-49-20-7581834215599137296.jpg",
         displayName: "Shri Krishna"
     },
     "Ganesh Kartikey": {
         command: "gk",
         seasons: { 1: 156 },
-        thumbnail: "https://envs.sh/9aQ.jpg",
+        thumbnail: "https://i.ibb.co/LDfMvfhG/photo-2025-10-06-14-30-11-7627837255993786376.jpg",
         displayName: "Ganesh Kartikey"
     },
     "Kurukshetra": {
         command: "kurukshetra",
         seasons: { 1: 18 },
-        thumbnail: "https://telegra.ph/file/kurukshetra-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/JRW0pxQr/photo-2025-10-10-12-07-52-7597691554853027868.jpg",
         displayName: "Kurukshetra"
     },
     "Mahabharat": {
         command: "mb",
         seasons: { 1: 7, 2: 20, 3: 13, 4: 18, 5: 8, 6: 5, 7: 10, 8: 7, 9: 7, 10: 15, 11: 18, 12: 5, 13: 5, 14: 3, 15: 13, 16: 14, 17: 13, 18: 6, 19: 8, 20: 14, 21: 4, 22: 5, 23: 7, 24: 4, 25: 7, 26: 7, 27: 19, 28: 3 },
-        thumbnail: "https://telegra.ph/file/mahabharat-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/WD3ZbJ6/photo-2025-04-15-06-58-03-7584404290012614476.jpg",
         displayName: "Mahabharat"
     },
     "Budh Dev": {
         command: "bd",
         seasons: { 1: 26 },
-        thumbnail: "https://telegra.ph/file/budhdev-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/Pz41pj0T/photo-2025-11-13-05-01-06-7635139151368552472.jpg",
         displayName: "Budh Dev"
     },
     "Jai Jagannath": {
         command: "jj",
         seasons: { 1: 272 },
-        thumbnail: "https://telegra.ph/file/jaijagannath-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
         displayName: "Jai Jagannath"
     },
     "Mangal Dev": {
         command: "md",
         seasons: { 1: 25 },
-        thumbnail: "https://telegra.ph/file/mangaldev-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/WQrzmtN/photo-2026-05-02-04-06-21-7635140993909522436.jpg",
         displayName: "Mangal Dev"
     },
     "Ramayan (2008)": {
         command: "ry8",
         seasons: { 1: 300 },
-        thumbnail: "https://telegra.ph/file/ramayan2008-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/k2nKV02c/photo-2025-08-22-06-22-11-7624806520911298588.jpg",
         displayName: "Ramayan (2008)"
     },
     "Ramayan (Luv Kush)": {
         command: "rlk",
         seasons: { 1: 44 },
-        thumbnail: "https://telegra.ph/file/luvkush-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/gyF1rHW/photo-2025-08-08-06-18-37-7619255412413860408.jpg",
         displayName: "Ramayan (Luv Kush)"
     },
     "Shrimad Bhagwat Mahapuran": {
         command: "sbm",
         seasons: { 1: 52 },
-        thumbnail: "https://telegra.ph/file/bhagwat-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/Y2DT2Dp/photo-2025-08-02-04-19-24-7617394010198705004.jpg",
         displayName: "Shrimad Bhagwat Mahapuran"
     },
     "Bhakter Bhagaban": {
         command: "bbsk",
         seasons: { 1: 16, 2: 34, 3: 22, 4: 29, 5: 48, 6: 67, 7: 63, 8: 12, 9: 53, 10: 31, 11: 34, 12: 110, 13: 61, 14: 77 },
-        thumbnail: "https://telegra.ph/file/bhakter-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/cSqZC1P3/photo-2026-01-21-04-26-51-7597673988436787208.jpg",
         displayName: "Bhakter Bhagaban"
     },
     "Devi Aadi Parashakti": {
         command: "dap",
         seasons: { 1: 87 },
-        thumbnail: "https://telegra.ph/file/deviaadi-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/b7PRhCb/photo-2026-01-22-04-29-40-7597937238579388980.jpg",
         displayName: "Devi Aadi Parashakti"
     },
     "Mahima Shani Dev Ki": {
         command: "msdk",
         seasons: { 1: 235 },
-        thumbnail: "https://telegra.ph/file/mahimashani-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/BsG1LtL/photo-2025-06-21-09-22-54-7610940870637037699.jpg",
         displayName: "Mahima Shani Dev Ki"
     },
     "Shani": {
         command: "kds",
         seasons: { 1: 346 },
-        thumbnail: "https://telegra.ph/file/shani-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/F8Pp8Vk/photo-2025-05-11-09-16-59-7588264655872797310.jpg",
         displayName: "Shani"
     },
     "Jai Hanuman Sankat Mochan Naam Tiharo": {
         command: "jhsnt",
         seasons: { 1: 89 },
-        thumbnail: "https://telegra.ph/file/jhsnt-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/d4nhyG1Y/photo-2026-01-27-05-11-57-7599904785860395040.jpg",
         displayName: "Jai Hanuman Sankat Mochan Naam Tiharo"
     },
     "Chandragupta Maurya": {
         command: "cm",
         seasons: { 1: 105 },
-        thumbnail: "https://telegra.ph/file/chandragupta-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/jkvwhjPN/photo-2026-01-25-05-34-26-7599168405127561244.jpg",
         displayName: "Chandragupta Maurya"
     },
     "Baal Shiv": {
         command: "bs",
         seasons: { 1: 215 },
-        thumbnail: "https://telegra.ph/file/baalshiv-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/p6QwkdQn/photo-2026-01-23-05-09-37-7598419869637279748.jpg",
         displayName: "Baal Shiv"
     },
     "Raja Shivchhatrapati": {
         command: "rs",
         seasons: { 1: 45 },
-        thumbnail: "https://telegra.ph/file/rajashiv-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/KxpQRmfk/photo-2026-02-19-03-54-28-7608419764683145256.jpg",
         displayName: "Raja Shivchhatrapati"
     },
     "Sangamarmar": {
         command: "smm",
         seasons: { 1: 13 },
-        thumbnail: "https://telegra.ph/file/sangamarmar-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/vxf1jJVH/photo-2026-03-09-06-38-32-7615595993609797652.jpg",
         displayName: "Sangamarmar"
     },
     "Shrimad Ramayan Marathi": {
         command: "srm",
         seasons: { 1: 101 },
-        thumbnail: "https://telegra.ph/file/shrimad-marathi-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/d4D80N40/photo-2026-06-27-04-46-27-7655932080185933828.jpg",
         displayName: "Shrimad Ramayan Marathi"
     },
     "Shrimad Ramayan Bangla": {
         command: "srb",
         seasons: { 1: 360 },
-        thumbnail: "https://telegra.ph/file/shrimad-bangla-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/ns4ZQk7p/photo-2026-07-20-04-13-28-7664458621060644888.jpg",
         displayName: "Shrimad Ramayan Bangla"
     },
     "Radha Krishna": {
         command: "rkb",
         seasons: { 1: 1072 },
-        thumbnail: "https://telegra.ph/file/radhakrishna-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/JRygz3XD/photo-2026-06-02-09-49-26-7646733050511884324.jpg",
         displayName: "Radha Krishna"
     },
     "Vighnaharta Ganesh": {
         command: "vg",
         seasons: { 1: 1026 },
-        thumbnail: "https://telegra.ph/file/vighnaharta-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/v4Tj2nmy/photo-2026-07-04-03-21-38-7658507815023018012.jpg",
         displayName: "Vighnaharta Ganesh"
     },
     "Paapnaashini Ganga": {
         command: "pg",
         seasons: { 1: 88 },
-        thumbnail: "https://telegra.ph/file/paapnaashini-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/BHSKj76q/photo-2026-07-02-04-41-16-7657786170322976784.jpg",
         displayName: "Paapnaashini Ganga"
     },
     "Hastinapur Ke Veer": {
         command: "hkv",
         seasons: { 1: 50 },
-        thumbnail: "https://telegra.ph/file/hastinapur-thumbnail.jpg",
+        thumbnail: "https://i.ibb.co/27V2wwnX/photo-2026-06-01-07-35-00-7646327408030646276.jpg",
         displayName: "Hastinapur Ke Veer"
     }
 };
@@ -3346,7 +3406,7 @@ app.get("/api/serials", (req, res) => {
         name,
         displayName: SERIAL_DATA[name].displayName || name,
         command: SERIAL_DATA[name].command,
-        thumbnail: SERIAL_DATA[name].thumbnail || "https://telegra.ph/file/default-thumbnail.jpg",
+        thumbnail: SERIAL_DATA[name].thumbnail || "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
         seasons: SERIAL_DATA[name].seasons,
         totalEpisodes: Object.values(SERIAL_DATA[name].seasons).reduce((a, b) => a + b, 0)
     }));
@@ -3354,7 +3414,7 @@ app.get("/api/serials", (req, res) => {
 });
 
 // ==========================================
-// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section)
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section & Persistent Settings)
 // ==========================================
 
 app.get("/mini/:userId", (req, res) => {
@@ -3857,6 +3917,58 @@ app.get("/mini/:userId", (req, res) => {
       flex: 1;
       overflow-y: auto;
       padding: 8px 16px 20px;
+    }
+
+    /* YouTube-style thumbnail grid - one per row */
+    .serial-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .serial-list-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 16px;
+      padding: 10px 14px;
+      border: 1px solid rgba(255,255,255,0.04);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .serial-list-item:active {
+      transform: scale(0.97);
+      background: rgba(213,0,249,0.08);
+    }
+    .serial-list-item .thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: #1a0a2b;
+    }
+    .serial-list-item .info {
+      flex: 1;
+      min-width: 0;
+    }
+    .serial-list-item .info .title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .serial-list-item .info .sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 2px;
+    }
+    .serial-list-item .arrow {
+      color: rgba(255,255,255,0.2);
+      flex-shrink: 0;
     }
 
     .season-grid {
@@ -5643,7 +5755,7 @@ app.get("/mini/:userId", (req, res) => {
         <span class="setting-label">Force Verification</span>
         <input type="checkbox" class="toggle-switch" id="setting-forceverify">
       </div>
-      <button class="withdraw-btn" style="margin-top:20px; background: rgba(255,255,255,0.1);" onclick="document.getElementById('settingsModal').classList.remove('open')">Close Settings</button>
+      <button class="withdraw-btn" style="margin-top:20px; background: rgba(255,255,255,0.1);" onclick="closeSettings()">Close Settings</button>
     </div>
   </div>
 
@@ -5732,6 +5844,99 @@ app.get("/mini/:userId", (req, res) => {
     tg.setHeaderColor('#0A0014');
     tg.setBackgroundColor('#000000');
 
+    // ─── USER SETTINGS (Persistent) ───
+    const userId = ${userId};
+    let userSettings = {};
+
+    async function loadUserSettings() {
+      try {
+        const res = await fetch('/api/settings/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          userSettings = data.settings;
+          applySettingsToUI();
+        }
+      } catch (e) {
+        console.warn('Failed to load settings:', e);
+        // Apply defaults
+        userSettings = {
+          sound: true,
+          haptic: true,
+          visual: true,
+          privacy: false,
+          pillNav: false,
+          shortNum: false,
+          forceVerify: false
+        };
+        applySettingsToUI();
+      }
+    }
+
+    function applySettingsToUI() {
+      document.getElementById('setting-sound').checked = userSettings.sound !== undefined ? userSettings.sound : true;
+      document.getElementById('setting-haptic').checked = userSettings.haptic !== undefined ? userSettings.haptic : true;
+      document.getElementById('setting-visual').checked = userSettings.visual !== undefined ? userSettings.visual : true;
+      document.getElementById('setting-privacy').checked = userSettings.privacy || false;
+      document.getElementById('setting-pill').checked = userSettings.pillNav || false;
+      document.getElementById('setting-shortnum').checked = userSettings.shortNum || false;
+      document.getElementById('setting-forceverify').checked = userSettings.forceVerify || false;
+
+      // Apply pill nav
+      const tabBar = document.querySelector('.tab-bar');
+      if (userSettings.pillNav) {
+        tabBar.classList.add('floating-pill');
+      } else {
+        tabBar.classList.remove('floating-pill');
+      }
+
+      // Apply visual animations
+      if (userSettings.visual === false) {
+        let style = document.getElementById('kill-anims');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'kill-anims';
+          style.innerHTML = '* { animation: none !important; transition: none !important; }';
+          document.head.appendChild(style);
+        }
+      } else {
+        const style = document.getElementById('kill-anims');
+        if (style) style.remove();
+      }
+
+      updateUI();
+    }
+
+    async function saveUserSettings() {
+      try {
+        const settings = {
+          sound: document.getElementById('setting-sound').checked,
+          haptic: document.getElementById('setting-haptic').checked,
+          visual: document.getElementById('setting-visual').checked,
+          privacy: document.getElementById('setting-privacy').checked,
+          pillNav: document.getElementById('setting-pill').checked,
+          shortNum: document.getElementById('setting-shortnum').checked,
+          forceVerify: document.getElementById('setting-forceverify').checked
+        };
+        userSettings = settings;
+        const res = await fetch('/api/settings/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, settings: settings })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          console.warn('Failed to save settings:', data.error);
+        }
+      } catch (e) {
+        console.warn('Failed to save settings:', e);
+      }
+    }
+
+    function closeSettings() {
+      document.getElementById('settingsModal').classList.remove('open');
+      saveUserSettings();
+    }
+
     // ─── PURE CODE SOUND ENGINE & SETTINGS LOGIC ───
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(type) {
@@ -5812,6 +6017,8 @@ app.get("/mini/:userId", (req, res) => {
                     style.remove();
                 }
             }
+            // Save settings on any toggle change
+            saveUserSettings();
         });
     });
 
@@ -5822,8 +6029,6 @@ app.get("/mini/:userId", (req, res) => {
         if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
         return num.toString();
     }
-
-    const userId = ${userId};
 
     // ─── USER DATA ───
     const tgUser = tg.initDataUnsafe?.user;
@@ -6123,11 +6328,11 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    // Show serials as chips
+    // Show serials as chips and list
     function showSerials() {
       renderSerialChips(serialsData);
       searchSectionTitle.innerText = 'Top Serials';
-      renderSerialGrid(serialsData);
+      renderSerialList(serialsData);
     }
 
     // Filter serials based on search
@@ -6139,7 +6344,7 @@ app.get("/mini/:userId", (req, res) => {
       renderSerialChips(filtered);
       searchSectionTitle.innerText = filtered.length > 0 ? 'Search Results' : 'No Results Found';
       if (filtered.length > 0) {
-        renderSerialGrid(filtered);
+        renderSerialList(filtered);
       } else {
         searchContent.innerHTML = \`
           <div class="search-empty">
@@ -6158,13 +6363,12 @@ app.get("/mini/:userId", (req, res) => {
         return;
       }
       let html = '';
-      // Show all serials as chips (limit to first 20 for performance)
       const showSerials = serials.slice(0, 20);
       showSerials.forEach(s => {
         const isActive = selectedSerial === s.name;
         html += \`
           <div class="serial-chip \${isActive ? 'active' : ''}" onclick="selectSerial('\${s.name}')">
-            <img src="\${s.thumbnail}" alt="\${s.displayName}" onerror="this.src='https://via.placeholder.com/32/2d0a50/ea80fc?text=?'" />
+            <img src="\${s.thumbnail}" alt="\${s.displayName}" onerror="this.src='https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg'" />
             <span>\${s.displayName}</span>
           </div>
         \`;
@@ -6172,8 +6376,8 @@ app.get("/mini/:userId", (req, res) => {
       serialRow.innerHTML = html;
     }
 
-    // Render serial grid (showing seasons)
-    function renderSerialGrid(serials) {
+    // Render serial list (YouTube-style one per row)
+    function renderSerialList(serials) {
       if (serials.length === 0) {
         searchContent.innerHTML = \`
           <div class="search-empty">
@@ -6192,19 +6396,25 @@ app.get("/mini/:userId", (req, res) => {
         }
       }
 
-      // Show all serials as a grid with thumbnails
-      let html = '';
+      // Show all serials as a list (YouTube-style one per row)
+      let html = '<div class="serial-list">';
       serials.forEach(s => {
         const totalEps = Object.values(s.seasons).reduce((a, b) => a + b, 0);
         html += \`
-          <div class="season-card" onclick="selectSerial('\${s.name}')" style="display:flex; flex-direction:column; align-items:center; padding:16px 12px;">
-            <img src="\${s.thumbnail}" alt="\${s.displayName}" style="width:60px; height:60px; border-radius:50%; object-fit:cover; margin-bottom:8px;" onerror="this.src='https://via.placeholder.com/60/2d0a50/ea80fc?text=?'" />
-            <div style="font-size:13px; font-weight:600; text-align:center; line-height:1.2;">\${s.displayName}</div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px;">\${totalEps} episodes</div>
+          <div class="serial-list-item" onclick="selectSerial('\${s.name}')">
+            <img src="\${s.thumbnail}" class="thumb" alt="\${s.displayName}" onerror="this.src='https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg'" />
+            <div class="info">
+              <div class="title">\${s.displayName}</div>
+              <div class="sub">\${totalEps} episodes • \${Object.keys(s.seasons).length} seasons</div>
+            </div>
+            <div class="arrow">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="rgba(255,255,255,0.2)"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+            </div>
           </div>
         \`;
       });
-      searchContent.innerHTML = \`<div class="season-grid">\${html}</div>\`;
+      html += '</div>';
+      searchContent.innerHTML = html;
     }
 
     // Render seasons for a selected serial
@@ -6256,41 +6466,26 @@ app.get("/mini/:userId", (req, res) => {
       for (let ep = 1; ep <= Math.min(totalEps, 100); ep++) {
         const epStr = String(ep).padStart(2, '0');
         const seasonStr = String(season).padStart(2, '0');
-        // Special handling for specific serials
         let url = \`https://t.me/MythoSerialBot?start=\${command}_s\${seasonStr}e\${epStr}\`;
         
         // Special cases from csearch.py
         if (command === 'kr') {
-          // For Kakbhushundi Ramayan, all episodes use s01
           url = \`https://t.me/MythoSerialBot?start=kr_s01e\${epStr}\`;
         } else if (command === 'rlk') {
-          // For Luv Kush, use s02 for season 1
           const displaySeason = season === 1 ? 2 : season;
           url = \`https://t.me/MythoSerialBot?start=rlk_s\${String(displaySeason).padStart(2, '0')}e\${epStr}\`;
         } else if (command === 'spk') {
-          // Suryaputra Karn uses actual episode number
           const actualEp = (season - 1) * 100 + ep;
           url = \`https://t.me/MythoSerialBot?start=spk_s\${String(season).padStart(2, '0')}e\${actualEp}\`;
         } else if (command === 'srb') {
-          // Shrimad Ramayan Bangla uses season based on 100 episodes
-          const seasonNum = ((ep - 1) / 100) + 1;
-          url = \`https://t.me/MythoSerialBot?start=srb_s\${String(Math.floor(seasonNum)).padStart(2, '0')}e\${ep}\`;
+          const seasonNum = Math.floor((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=srb_s\${String(seasonNum).padStart(2, '0')}e\${ep}\`;
         } else if (command === 'vg') {
-          // Vighnaharta Ganesh uses season based on 100 episodes
-          const seasonNum = ((ep - 1) / 100) + 1;
-          url = \`https://t.me/MythoSerialBot?start=vg_s\${String(Math.floor(seasonNum)).padStart(2, '0')}e\${ep}\`;
+          const seasonNum = Math.floor((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=vg_s\${String(seasonNum).padStart(2, '0')}e\${ep}\`;
         } else if (command === 'jklk') {
-          // Jai Kanhaiya Laal Ki uses underscore format
           url = \`https://t.me/MythoSerialBot?start=jklk_s\${season}_e\${epStr}\`;
-        } else if (command === 'rk' || command === 'rkb' || command === 'ks' || command === 'ksd' || 
-                   command === 'cn' || command === 'dyg' || command === 'meera' || command === 'ry8' ||
-                   command === 'rs' || command === 'smm' || command === 'bs' || command === 'kg' ||
-                   command === 'kurukshetra' || command === 'cspc' || command === 'gk' || command === 'cm' ||
-                   command === 'jhsnt' || command === 'tloh' || command === 'srm' || command === 'hkv') {
-          // Standard format for most serials
-          url = \`https://t.me/MythoSerialBot?start=\${command}_s\${seasonStr}e\${epStr}\`;
         } else if (command === 'rk') {
-          // Radhakrishn uses underscore
           url = \`https://t.me/MythoSerialBot?start=rk_s\${season}_e\${epStr}\`;
         }
         
@@ -6323,7 +6518,6 @@ app.get("/mini/:userId", (req, res) => {
       }
       selectedSeason = null;
       showSerials();
-      // Update chips
       renderSerialChips(serialsData);
     };
 
@@ -7693,6 +7887,7 @@ app.get("/mini/:userId", (req, res) => {
 
     // ─── INIT ───
     async function init() {
+      await loadUserSettings();
       loadChantPersistence();
       await loadDashboard();
       await fetchChantStats();
