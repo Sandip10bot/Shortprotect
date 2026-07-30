@@ -137,23 +137,119 @@ function renderBypassError(res) {
       <!DOCTYPE html>
       <html lang="en">
       <head>
-          <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Access Denied</title>
-          ${THEME_CSS}
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>System Locked | Anti-Bypass</title>
+          <style>
+              @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+              
+              body {
+                  margin: 0;
+                  padding: 0;
+                  background-color: #050914; 
+                  background-image: radial-gradient(circle at 50% -20%, #2a0a18, #050914);
+                  color: #ffffff;
+                  font-family: 'Poppins', sans-serif;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  min-height: 100vh;
+                  overflow: hidden;
+              }
+              .trap-container {
+                  background: rgba(20, 25, 40, 0.6);
+                  backdrop-filter: blur(12px);
+                  -webkit-backdrop-filter: blur(12px);
+                  padding: 40px 30px;
+                  border-radius: 20px;
+                  border: 1px solid rgba(255, 42, 68, 0.3);
+                  box-shadow: 0 0 40px rgba(255, 42, 68, 0.15), inset 0 0 20px rgba(255, 42, 68, 0.05);
+                  text-align: center;
+                  max-width: 400px;
+                  width: 90%;
+                  animation: lockDown 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+              }
+              @keyframes lockDown {
+                  0% { transform: translateY(-50px); opacity: 0; }
+                  100% { transform: translateY(0); opacity: 1; }
+              }
+              .alert-icon {
+                  width: 80px;
+                  height: 80px;
+                  background: rgba(255, 42, 68, 0.1);
+                  border-radius: 50%;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  font-size: 40px;
+                  margin: 0 auto 20px;
+                  border: 2px solid #ff2a44;
+                  box-shadow: 0 0 20px rgba(255, 42, 68, 0.4);
+                  animation: pulseIcon 2s infinite;
+              }
+              @keyframes pulseIcon {
+                  0% { box-shadow: 0 0 0 0 rgba(255, 42, 68, 0.4); }
+                  70% { box-shadow: 0 0 0 20px rgba(255, 42, 68, 0); }
+                  100% { box-shadow: 0 0 0 0 rgba(255, 42, 68, 0); }
+              }
+              h2.title {
+                  color: #ff2a44;
+                  margin: 0 0 10px 0;
+                  font-size: 28px;
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  letter-spacing: 2px;
+              }
+              p.desc {
+                  color: #a0aec0;
+                  font-size: 14px;
+                  margin-bottom: 20px;
+                  line-height: 1.6;
+              }
+              .roast-box {
+                  background: rgba(255, 255, 255, 0.03);
+                  border-radius: 12px;
+                  padding: 18px;
+                  border: 1px solid rgba(255, 42, 68, 0.2);
+                  position: relative;
+              }
+              .roast-box span {
+                  color: #ff8fa3; /* Soft pinkish/red for the sweet roast */
+                  font-weight: 600;
+                  display: block;
+                  margin-bottom: 8px;
+                  font-size: 16px;
+              }
+              .roast-text {
+                  color: #cbd5e1; 
+                  font-size: 13.5px;
+                  line-height: 1.6;
+              }
+          </style>
+          \${THEME_CSS}
       </head>
       <body>
-          <div class="container">
-              <div style="font-size:60px; margin-bottom:10px;">🚫</div>
-              <h2 class="error-title">Bypass Detected</h2>
-              <p>Unauthorized request detected.</p>
-              <div class="manual-box" style="display:block; text-align:center;">
-                  <p style="color:white; margin:0;">Please Don't Bypass Support Admin To Open Ads 🕵️‍♀️</p>
+          <div class="trap-container">
+              <div class="alert-icon">🚫</div>
+              <h2 class="title">Bypass Detected</h2>
+              <p class="desc">The shortcut era is officially dead. You are locked in Mytho's Anti-Bypass System.</p>
+              
+              <div class="roast-box">
+                  <span>Aww, cute attempt! ✨</span>
+                  <div class="roast-text">
+                      You really thought your little bypass trick would work? Bless your heart. <br><br>
+                      Thanks for stopping by (and triggering our ads). Now close this tab and go open the link the honest way, sweetheart! ✨
+                  </div>
               </div>
           </div>
+
+          <!-- Monetag Ad Script -->
+          <script>(function(s){s.dataset.zone='11457255',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
       </body>
       </html>
     `);
 }
+
 
 function isRefererValid(req) {
     const referer = (req.get("referrer") || req.get("referer") || "").toLowerCase();
