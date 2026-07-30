@@ -138,113 +138,179 @@ function renderBypassError(res) {
       <html lang="en">
       <head>
           <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
           <title>System Locked | Anti-Bypass</title>
           <style>
-              @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+              @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+              
+              :root {
+                  --bg: #000000;
+                  --card-bg: rgba(20, 20, 24, 0.65);
+                  --text-main: #ffffff;
+                  --text-muted: #888888;
+                  --accent: #ff2a44;
+                  --border: rgba(255, 255, 255, 0.08);
+              }
+              
+              * { 
+                  box-sizing: border-box; 
+                  margin: 0; 
+                  padding: 0; 
+              }
               
               body {
-                  margin: 0;
-                  padding: 0;
-                  background-color: #050914; 
-                  background-image: radial-gradient(circle at 50% -20%, #2a0a18, #050914);
-                  color: #ffffff;
-                  font-family: 'Poppins', sans-serif;
+                  background-color: var(--bg);
+                  background-image: 
+                      radial-gradient(circle at 50% 0%, rgba(255, 42, 68, 0.12) 0%, transparent 60%),
+                      radial-gradient(circle at 50% 100%, rgba(255, 42, 68, 0.03) 0%, transparent 50%);
+                  color: var(--text-main);
+                  font-family: 'Inter', sans-serif;
                   display: flex;
                   justify-content: center;
                   align-items: center;
                   min-height: 100vh;
-                  overflow: hidden;
+                  padding: 20px;
+                  overflow-x: hidden;
               }
-              .trap-container {
-                  background: rgba(20, 25, 40, 0.6);
-                  backdrop-filter: blur(12px);
-                  -webkit-backdrop-filter: blur(12px);
-                  padding: 40px 30px;
-                  border-radius: 20px;
-                  border: 1px solid rgba(255, 42, 68, 0.3);
-                  box-shadow: 0 0 40px rgba(255, 42, 68, 0.15), inset 0 0 20px rgba(255, 42, 68, 0.05);
+
+              .container {
+                  position: relative;
+                  width: 100%;
+                  max-width: 420px;
+                  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                  opacity: 0;
+                  transform: translateY(30px);
+              }
+
+              @keyframes slideUp {
+                  to { transform: translateY(0); opacity: 1; }
+              }
+
+              .card {
+                  background: var(--card-bg);
+                  backdrop-filter: blur(24px);
+                  -webkit-backdrop-filter: blur(24px);
+                  border: 1px solid var(--border);
+                  border-radius: 24px;
+                  padding: 40px 32px;
                   text-align: center;
-                  max-width: 400px;
-                  width: 90%;
-                  animation: lockDown 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+                  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
               }
-              @keyframes lockDown {
-                  0% { transform: translateY(-50px); opacity: 0; }
-                  100% { transform: translateY(0); opacity: 1; }
-              }
-              .alert-icon {
-                  width: 80px;
-                  height: 80px;
-                  background: rgba(255, 42, 68, 0.1);
-                  border-radius: 50%;
+
+              .icon-wrapper {
+                  width: 72px;
+                  height: 72px;
+                  background: linear-gradient(135deg, rgba(255, 42, 68, 0.15), rgba(255, 42, 68, 0.05));
+                  border: 1px solid rgba(255, 42, 68, 0.25);
+                  border-radius: 20px;
                   display: flex;
                   justify-content: center;
                   align-items: center;
-                  font-size: 40px;
-                  margin: 0 auto 20px;
-                  border: 2px solid #ff2a44;
-                  box-shadow: 0 0 20px rgba(255, 42, 68, 0.4);
-                  animation: pulseIcon 2s infinite;
+                  font-size: 32px;
+                  margin: 0 auto 24px;
+                  box-shadow: 0 10px 25px rgba(255, 42, 68, 0.15);
+                  transform: rotate(-6deg);
+                  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+                  cursor: pointer;
               }
-              @keyframes pulseIcon {
-                  0% { box-shadow: 0 0 0 0 rgba(255, 42, 68, 0.4); }
-                  70% { box-shadow: 0 0 0 20px rgba(255, 42, 68, 0); }
-                  100% { box-shadow: 0 0 0 0 rgba(255, 42, 68, 0); }
+              
+              .icon-wrapper:hover {
+                  transform: rotate(0deg) scale(1.08);
               }
-              h2.title {
-                  color: #ff2a44;
-                  margin: 0 0 10px 0;
-                  font-size: 28px;
-                  font-weight: 800;
-                  text-transform: uppercase;
-                  letter-spacing: 2px;
+
+              h1 {
+                  font-size: 24px;
+                  font-weight: 700;
+                  letter-spacing: -0.5px;
+                  margin-bottom: 10px;
+                  color: #ffffff;
               }
-              p.desc {
-                  color: #a0aec0;
-                  font-size: 14px;
-                  margin-bottom: 20px;
+
+              p.subtitle {
+                  font-size: 14.5px;
+                  color: var(--text-muted);
                   line-height: 1.6;
+                  margin-bottom: 30px;
               }
+
               .roast-box {
                   background: rgba(255, 255, 255, 0.03);
-                  border-radius: 12px;
-                  padding: 18px;
-                  border: 1px solid rgba(255, 42, 68, 0.2);
+                  border: 1px solid var(--border);
+                  border-radius: 16px;
+                  padding: 20px;
+                  text-align: left;
                   position: relative;
+                  overflow: hidden;
               }
-              .roast-box span {
-                  color: #ff8fa3; /* Soft pinkish/red for the sweet roast */
+
+              .roast-box::before {
+                  content: '';
+                  position: absolute;
+                  top: 0; left: 0;
+                  width: 4px;
+                  height: 100%;
+                  background: var(--accent);
+                  border-radius: 4px 0 0 4px;
+              }
+
+              .roast-title {
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  font-size: 15px;
                   font-weight: 600;
-                  display: block;
-                  margin-bottom: 8px;
-                  font-size: 16px;
+                  color: #ffffff;
+                  margin-bottom: 10px;
               }
+
+              .roast-title span {
+                  color: var(--accent);
+              }
+
               .roast-text {
-                  color: #cbd5e1; 
                   font-size: 13.5px;
+                  color: #a1a1aa;
                   line-height: 1.6;
               }
+
+              .footer-text {
+                  margin-top: 24px;
+                  font-size: 11px;
+                  color: #555555;
+                  text-transform: uppercase;
+                  letter-spacing: 1.5px;
+                  font-weight: 600;
+              }
+
+              /* Ultra-Small Mobile Adjustments */
+              @media (max-width: 380px) {
+                  .card { padding: 32px 20px; }
+                  h1 { font-size: 22px; }
+                  .roast-box { padding: 16px; }
+              }
           </style>
-          \${THEME_CSS}
       </head>
       <body>
-          <div class="trap-container">
-              <div class="alert-icon">🚫</div>
-              <h2 class="title">Bypass Detected</h2>
-              <p class="desc">The shortcut era is officially dead. You are locked in Mytho's Anti-Bypass System.</p>
-              
-              <div class="roast-box">
-                  <span>Aww, cute attempt! ✨</span>
-                  <div class="roast-text">
-                      You really thought your little bypass trick would work? Bless your heart. <br><br>
-                      Thanks for stopping by (and triggering our ads). Now close this tab and go open the link the honest way, sweetheart! ✨
+          <div class="container">
+              <div class="card">
+                  <div class="icon-wrapper">🚫</div>
+                  <h1>Bypass Detected</h1>
+                  <p class="subtitle">The shortcut era is officially dead. You are secured inside Mytho's Anti-Bypass System.</p>
+                  
+                  <div class="roast-box">
+                      <div class="roast-title"><span>✦</span> Aww, cute attempt! 💅</div>
+                      <div class="roast-text">
+                          You really thought your little bypass trick would work? Bless your heart.<br><br>
+                          Thanks for stopping by (and triggering our ads). Now close this tab and go open the link the honest way, sweetheart! ✨
+                      </div>
                   </div>
+                  
+                  <div class="footer-text">Protected by MythoserialBot</div>
               </div>
           </div>
 
-          <!-- Monetag Ad Script -->
-          <script>(function(s){s.dataset.zone='11457255',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
+          <!-- Newly Added Ad Script (Push Notification Removed) -->
+          <script>(function(s){s.dataset.zone='11457391',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
       </body>
       </html>
     `);
