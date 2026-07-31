@@ -28,6 +28,7 @@ let ipVerificationCollection, ratingsCollection, withdrawsCollection;
 let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
 let userSettingsCollection;
 let userShortenersCollection;
+let userSessionsCollection; // For online status tracking
 
 async function connectDB() {
   try {
@@ -54,6 +55,12 @@ async function connectDB() {
     premiumUsersCollection = db.collection("premium_users");
     userSettingsCollection = db.collection("user_settings");
     userShortenersCollection = db.collection("user_shorteners");
+    userSessionsCollection = db.collection("user_sessions");
+    
+    // Create indexes for performance
+    await paymentChatCollection.createIndex({ senderId: 1, receiverId: 1, timestamp: -1 });
+    await paymentChatCollection.createIndex({ read: 1 });
+    await userSessionsCollection.createIndex({ lastSeen: -1 });
     
     console.log("✅ MongoDB connected for all collections");
   } catch (error) {
@@ -2145,7 +2152,7 @@ app.post("/api/store/purchase/:userId", async (req, res) => {
 });
 
 // ==========================================
-// 💸 PAYMENT API – WITH CHAT SUPPORT
+// 💸 PAYMENT API – WITH CHAT SUPPORT (UPDATED)
 // ==========================================
 
 async function canMakePayment(userId) {
@@ -2247,7 +2254,7 @@ app.post("/api/payment/send", async (req, res) => {
                     date: new Date()
                 }, { session });
                 
-                // Save payment chat message
+                // Save payment chat message with read status
                 await paymentChatCollection.insertOne({
                     senderId: sender,
                     receiverId: receiver,
@@ -2256,7 +2263,11 @@ app.post("/api/payment/send", async (req, res) => {
                     tax: tax,
                     message: `💸 Payment of ${amt} Mythopoints sent!`,
                     timestamp: new Date(),
-                    type: 'payment'
+                    type: 'payment',
+                    read: false,
+                    reactions: [],
+                    deletedFor: [],
+                    messageId: new Date().getTime().toString() + Math.random().toString(36).substr(2, 5)
                 });
             });
             await session.endSession();
@@ -2311,18 +2322,82 @@ app.get("/api/users/search", async (req, res) => {
 });
 
 // ==========================================
-// PAYMENT CHAT API
+// PAYMENT CHAT API (UPDATED with reactions, deletion, read receipts)
 // ==========================================
 
+// Track online status - update user session
+app.post("/api/payment/online", async (req, res) => {
+    try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ success: false, error: "Missing userId" });
+        
+        const uid = parseInt(userId);
+        await userSessionsCollection.updateOne(
+            { userId: uid },
+            { 
+                $set: { 
+                    lastSeen: new Date(),
+                    isOnline: true
+                } 
+            },
+            { upsert: true }
+        );
+        
+        // Clean up old sessions (older than 2 minutes)
+        const twoMinutesAgo = new Date(Date.now() - 120000);
+        await userSessionsCollection.updateMany(
+            { lastSeen: { $lt: twoMinutesAgo } },
+            { $set: { isOnline: false } }
+        );
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Check online status of a user
+app.get("/api/payment/online-status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const session = await userSessionsCollection.findOne({ userId: uid });
+        
+        const isOnline = session?.isOnline || false;
+        const lastSeen = session?.lastSeen || null;
+        
+        res.json({ 
+            success: true, 
+            isOnline,
+            lastSeen: lastSeen ? lastSeen.toISOString() : null
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Get chat messages for a user
 app.get("/api/payment/chat/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
+        const otherId = req.query.otherId ? parseInt(req.query.otherId) : null;
+        
+        let query = {
+            $or: [{ senderId: uid }, { receiverId: uid }]
+        };
+        
+        if (otherId) {
+            query = {
+                $or: [
+                    { senderId: uid, receiverId: otherId },
+                    { senderId: otherId, receiverId: uid }
+                ]
+            };
+        }
+        
         const chats = await paymentChatCollection
-            .find({
-                $or: [{ senderId: uid }, { receiverId: uid }]
-            })
+            .find(query)
             .sort({ timestamp: -1 })
-            .limit(50)
+            .limit(100)
             .toArray();
         
         // Get user details for each chat
@@ -2347,7 +2422,8 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
                 senderPhoto: sender.photo_url || null,
                 receiverName: receiver.first_name || receiver.username || `User ${c.receiverId}`,
                 receiverPhoto: receiver.photo_url || null,
-                isSent: c.senderId === uid
+                isSent: c.senderId === uid,
+                isDeleted: c.deletedFor ? c.deletedFor.includes(uid) : false
             };
         });
         
@@ -2357,12 +2433,13 @@ app.get("/api/payment/chat/:userId", async (req, res) => {
     }
 });
 
+// Get recent chats with unread counts
 app.get("/api/payment/recent/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
         
         const chats = await paymentChatCollection.find({
-            $or: [{ senderId: uid }, { receiverId: uid }, { senderId: String(uid) }, { receiverId: String(uid) }]
+            $or: [{ senderId: uid }, { receiverId: uid }]
         }).sort({ timestamp: -1 }).toArray();
 
         const recentUsersMap = new Map();
@@ -2371,40 +2448,60 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
         chats.forEach(c => {
             const sId = Number(c.senderId);
             const rId = Number(c.receiverId);
-            const currentUid = Number(uid);
             
-            let otherId = (sId === currentUid) ? rId : sId;
-            if (otherId === currentUid) return; // Skip self
+            let otherId = (sId === uid) ? rId : sId;
+            if (otherId === uid) return;
 
             if (!recentUsersMap.has(otherId)) {
                 recentUsersMap.set(otherId, {
                     lastMessage: c.message || 'Payment transaction',
                     timestamp: c.timestamp,
-                    unreadCount: 0
+                    unreadCount: 0,
+                    lastMessageId: c.messageId || c._id.toString()
                 });
                 userIds.add(otherId);
             }
             
-            // Agar message samne wale (otherId) ne bheja hai, aur wo 'read' nahi hai
+            // If message is from other user and not read
             if (sId === otherId && !c.read) {
                 recentUsersMap.get(otherId).unreadCount += 1;
             }
+            
+            // Update last message if this one is newer
+            const existing = recentUsersMap.get(otherId);
+            if (new Date(c.timestamp) > new Date(existing.timestamp)) {
+                existing.lastMessage = c.message || 'Payment transaction';
+                existing.timestamp = c.timestamp;
+                existing.lastMessageId = c.messageId || c._id.toString();
+            }
         });
+
+        // Also get online status for these users
+        const userSessions = await userSessionsCollection
+            .find({ userId: { $in: Array.from(userIds) } })
+            .toArray();
+        const sessionMap = {};
+        userSessions.forEach(s => sessionMap[s.userId] = s);
 
         const users = await usersCollection
             .find({ user_id: { $in: Array.from(userIds) } })
             .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
             .toArray();
 
-        const formatted = users.map(u => ({
-            id: u.user_id,
-            name: u.first_name || u.username || `User ${u.user_id}`,
-            username: u.username || null,
-            photo_url: u.photo_url || null,
-            lastMessage: recentUsersMap.get(u.user_id).lastMessage,
-            timestamp: recentUsersMap.get(u.user_id).timestamp,
-            unreadCount: recentUsersMap.get(u.user_id).unreadCount
-        })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); 
+        const formatted = users.map(u => {
+            const session = sessionMap[u.user_id] || {};
+            return {
+                id: u.user_id,
+                name: u.first_name || u.username || `User ${u.user_id}`,
+                username: u.username || null,
+                photo_url: u.photo_url || null,
+                lastMessage: recentUsersMap.get(u.user_id)?.lastMessage || '',
+                timestamp: recentUsersMap.get(u.user_id)?.timestamp || new Date(0),
+                unreadCount: recentUsersMap.get(u.user_id)?.unreadCount || 0,
+                isOnline: session.isOnline || false,
+                lastSeen: session.lastSeen || null
+            };
+        }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         res.json({ success: true, recent: formatted });
     } catch (e) {
@@ -2412,19 +2509,30 @@ app.get("/api/payment/recent/:userId", async (req, res) => {
     }
 });
 
+// Mark messages as read
 app.post("/api/payment/chat/mark-read", async (req, res) => {
     try {
         const { userId, otherId } = req.body;
-        await paymentChatCollection.updateMany(
-            { senderId: parseInt(otherId), receiverId: parseInt(userId), read: { $ne: true } },
+        if (!userId || !otherId) {
+            return res.status(400).json({ success: false, error: "Missing userId or otherId" });
+        }
+        
+        const result = await paymentChatCollection.updateMany(
+            { 
+                senderId: parseInt(otherId), 
+                receiverId: parseInt(userId), 
+                read: { $ne: true } 
+            },
             { $set: { read: true } }
         );
-        res.json({ success: true });
+        
+        res.json({ success: true, modifiedCount: result.modifiedCount });
     } catch(e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
+// Send a chat message
 app.post("/api/payment/chat/message", async (req, res) => {
     try {
         const { senderId, receiverId, message } = req.body;
@@ -2432,15 +2540,151 @@ app.post("/api/payment/chat/message", async (req, res) => {
             return res.status(400).json({ success: false, error: "Missing fields." });
         }
         
-        await paymentChatCollection.insertOne({
+        const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+        
+        const result = await paymentChatCollection.insertOne({
             senderId: parseInt(senderId),
             receiverId: parseInt(receiverId),
             message: message,
             timestamp: new Date(),
-            type: 'message'
+            type: 'message',
+            read: false,
+            reactions: [],
+            deletedFor: [],
+            messageId: messageId
         });
         
+        res.json({ success: true, messageId: messageId });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Add reaction to a message
+app.post("/api/payment/chat/reaction", async (req, res) => {
+    try {
+        const { messageId, userId, reaction } = req.body;
+        if (!messageId || !userId || !reaction) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: messageId });
+        if (!existing) {
+            return res.status(404).json({ success: false, error: "Message not found." });
+        }
+        
+        // Remove existing reaction from this user if any
+        const reactions = existing.reactions || [];
+        const filtered = reactions.filter(r => r.userId !== uid);
+        
+        // Add new reaction
+        filtered.push({ userId: uid, reaction: reaction, timestamp: new Date() });
+        
+        await paymentChatCollection.updateOne(
+            { messageId: messageId },
+            { $set: { reactions: filtered } }
+        );
+        
         res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Delete a message for self (soft delete)
+app.post("/api/payment/chat/delete", async (req, res) => {
+    try {
+        const { messageId, userId } = req.body;
+        if (!messageId || !userId) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: messageId });
+        if (!existing) {
+            return res.status(404).json({ success: false, error: "Message not found." });
+        }
+        
+        const deletedFor = existing.deletedFor || [];
+        if (!deletedFor.includes(uid)) {
+            deletedFor.push(uid);
+        }
+        
+        await paymentChatCollection.updateOne(
+            { messageId: messageId },
+            { $set: { deletedFor: deletedFor } }
+        );
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Clear chat history for self
+app.post("/api/payment/chat/clear", async (req, res) => {
+    try {
+        const { userId, otherId } = req.body;
+        if (!userId || !otherId) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        const uid = parseInt(userId);
+        const oid = parseInt(otherId);
+        
+        // Find all messages between these two users
+        const messages = await paymentChatCollection.find({
+            $or: [
+                { senderId: uid, receiverId: oid },
+                { senderId: oid, receiverId: uid }
+            ]
+        }).toArray();
+        
+        // Add userId to deletedFor for each message
+        for (const msg of messages) {
+            const deletedFor = msg.deletedFor || [];
+            if (!deletedFor.includes(uid)) {
+                deletedFor.push(uid);
+            }
+            await paymentChatCollection.updateOne(
+                { _id: msg._id },
+                { $set: { deletedFor: deletedFor } }
+            );
+        }
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Get unread message count for a user
+app.get("/api/payment/unread/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        const count = await paymentChatCollection.countDocuments({
+            receiverId: uid,
+            read: { $ne: true }
+        });
+        
+        // Also get count per sender
+        const unreadBySender = await paymentChatCollection.aggregate([
+            { $match: { receiverId: uid, read: { $ne: true } } },
+            { $group: { _id: "$senderId", count: { $sum: 1 } } }
+        ]).toArray();
+        
+        const bySender = {};
+        unreadBySender.forEach(item => {
+            bySender[item._id] = item.count;
+        });
+        
+        res.json({ 
+            success: true, 
+            total: count,
+            bySender: bySender
+        });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -3835,6 +4079,25 @@ app.get("/mini/:userId", (req, res) => {
       transition: width 0.3s;
     }
     .tab-btn.active::after { width: 70%; }
+    
+    /* Unread badge on pay tab */
+    .tab-btn .unread-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: #ff453a;
+      color: #fff;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      font-size: 10px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #0a0014;
+    }
+    .tab-btn .unread-badge.show { display: flex; }
 
     /* === WIDGETS === */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -4479,7 +4742,7 @@ app.get("/mini/:userId", (req, res) => {
     .lb-self-rank { font-weight: 700; color: #fff; }
     .lb-self-pts { font-weight: 700; color: #ffd60a; }
 
-    /* === PAYMENT - CHAT STYLE === */
+    /* === PAYMENT - CHAT STYLE (Updated with reactions, ticks, online status) === */
     .payment-chat-container {
       max-height: 250px;
       overflow-y: auto;
@@ -4518,6 +4781,7 @@ app.get("/mini/:userId", (req, res) => {
       font-size: 13px;
       line-height: 1.3;
       word-wrap: break-word;
+      position: relative;
     }
     .payment-chat-container .chat-msg.sent .bubble {
       background: linear-gradient(135deg, #d500f9, #651fff);
@@ -4546,6 +4810,80 @@ app.get("/mini/:userId", (req, res) => {
       color: rgba(255,255,255,0.2);
       margin-top: 2px;
     }
+    
+    /* Read receipt ticks */
+    .chat-msg .read-tick {
+      font-size: 10px;
+      margin-left: 4px;
+      color: rgba(255,255,255,0.3);
+    }
+    .chat-msg .read-tick.read { color: #30d158; }
+    
+    /* Online status indicator */
+    .online-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #30d158;
+      margin-left: 6px;
+      box-shadow: 0 0 10px rgba(48,209,88,0.5);
+      animation: pulse-dot 2s infinite;
+    }
+    .online-dot.offline {
+      background: #555;
+      box-shadow: none;
+      animation: none;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    
+    /* Reaction buttons */
+    .reaction-bar {
+      display: flex;
+      gap: 4px;
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+    .reaction-btn {
+      background: rgba(255,255,255,0.06);
+      border: none;
+      border-radius: 12px;
+      padding: 2px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .reaction-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.12); }
+    .reaction-btn .count { font-size: 9px; opacity: 0.5; }
+    
+    /* Message actions */
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 2px;
+      justify-content: flex-end;
+    }
+    .chat-msg:hover .msg-actions,
+    .chat-msg:active .msg-actions { display: flex; }
+    .msg-actions button {
+      background: rgba(255,255,255,0.05);
+      border: none;
+      border-radius: 8px;
+      padding: 2px 6px;
+      font-size: 10px;
+      cursor: pointer;
+      color: rgba(255,255,255,0.4);
+      transition: all 0.2s;
+    }
+    .msg-actions button:active { background: rgba(255,255,255,0.12); }
+
     .payment-chat-input-row {
       display: flex;
       gap: 6px;
@@ -5379,7 +5717,10 @@ app.get("/mini/:userId", (req, res) => {
       width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #651fff;
     }
     .chat-header .info { flex: 1; }
-    .chat-header .info h3 { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
+    .chat-header .info h3 { 
+      margin: 0; font-size: 16px; font-weight: 600; color: #fff; 
+      display: flex; align-items: center; gap: 6px;
+    }
     .chat-header .info p { margin: 2px 0 0; font-size: 12px; color: rgba(255,255,255,0.5); }
 
     .chat-area {
@@ -5388,7 +5729,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
       background: #0a0014;
       background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.05) 0%, transparent 60%);
     }
@@ -5414,6 +5755,7 @@ app.get("/mini/:userId", (req, res) => {
 
     .chat-msg .bubble {
       padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4; word-wrap: break-word;
+      position: relative;
     }
     
     .chat-msg.sent .bubble.text {
@@ -5443,7 +5785,11 @@ app.get("/mini/:userId", (req, res) => {
     }
     .payment-status.success { color: #30d158; }
     
-    .chat-msg .time { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; padding: 0 4px; }
+    .chat-msg .time { 
+      font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; padding: 0 4px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .chat-msg .time .tick { font-size: 12px; }
 
     .chat-footer {
       padding: 10px 16px;
@@ -5469,6 +5815,35 @@ app.get("/mini/:userId", (req, res) => {
       cursor: pointer; transition: transform 0.2s; flex-shrink: 0;
     }
     .pay-send-btn:active { transform: scale(0.9); }
+    
+    /* Reaction popup */
+    .reaction-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      background: rgba(20,0,30,0.95);
+      backdrop-filter: blur(16px);
+      border-radius: 20px;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      z-index: 50;
+      gap: 6px;
+      flex-wrap: wrap;
+      max-width: 200px;
+    }
+    .reaction-popup.open { display: flex; }
+    .reaction-popup .reaction-option {
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 6px;
+      border-radius: 8px;
+      transition: all 0.2s;
+      background: none;
+      border: none;
+    }
+    .reaction-popup .reaction-option:active { transform: scale(1.3); background: rgba(255,255,255,0.05); }
   </style>
 </head>
 <body>
@@ -5851,7 +6226,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB: PAY ========== -->
+  <!-- ========== TAB: PAY (UPDATED with read receipts, reactions, online status) ========== -->
   <div id="tab-pay" class="tab-content">
     
     <div class="pay-search-area" id="paySearchArea">
@@ -5879,7 +6254,7 @@ app.get("/mini/:userId", (req, res) => {
         </button>
         <img id="payUserAvatar" class="avatar" src="https://via.placeholder.com/100" alt="User" />
         <div class="info">
-          <h3 id="payUserName">User Name</h3>
+          <h3 id="payUserName">User Name <span class="online-dot offline" id="payOnlineDot"></span></h3>
           <p id="payUserId">ID: 0</p>
         </div>
       </div>
@@ -5890,7 +6265,7 @@ app.get("/mini/:userId", (req, res) => {
       <div class="chat-footer">
         <div id="payStatus" style="width: 100%; text-align:center; font-size:11px; margin-bottom:6px;"></div>
         <div class="chat-input-wrapper">
-          <input type="text" id="payAmountInput" class="chat-input" placeholder="Enter amount or chat" autocomplete="off" />
+          <input type="text" id="payAmountInput" class="chat-input" placeholder="Enter amount or chat..." autocomplete="off" />
           <button class="pay-send-btn" id="paySendBtn">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
@@ -6009,7 +6384,7 @@ app.get("/mini/:userId", (req, res) => {
     </div>
   </div>
 
-  <!-- ========== TAB BAR ========== -->
+  <!-- ========== TAB BAR (with unread badge) ========== -->
   <div class="tab-bar">
     <div class="tab-btn active" data-tab="home">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
@@ -6023,9 +6398,10 @@ app.get("/mini/:userId", (req, res) => {
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
       <span>Store</span>
     </div>
-    <div class="tab-btn" data-tab="pay">
+    <div class="tab-btn" data-tab="pay" id="payTabBtn">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v10zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
       <span>Pay</span>
+      <span class="unread-badge" id="payUnreadBadge">0</span>
     </div>
     <div class="tab-btn" data-tab="profile">
       <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
@@ -6097,6 +6473,12 @@ app.get("/mini/:userId", (req, res) => {
     // ─── USER SETTINGS (Persistent) ───
     const userId = ${userId};
     let userSettings = {};
+
+    // ─── PAYMENT CHAT STATE ───
+    let selectedReceiver = null;
+    let payChatPollInterval = null;
+    let currentChatMessages = [];
+    let unreadCountCache = {};
 
     async function loadUserSettings() {
       try {
@@ -6517,7 +6899,10 @@ app.get("/mini/:userId", (req, res) => {
       tg.HapticFeedback.selectionChanged();
       if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
       if (tabId === 'profile') { loadHistory(1, true); loadLeaderboard(); loadRatingStatus(); }
-      if (tabId === 'pay') { /* handled by show/hide */ }
+      if (tabId === 'pay') { 
+        loadRecentChats(); 
+        checkUnreadCount(); 
+      }
     }
     window.switchTab = switchTab;
 
@@ -7367,13 +7752,28 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.purchase = purchase;
 
-    // ─── PAYMENT ───
-    let selectedReceiver = null;
-    let payChatPollInterval = null;
-
+    // ─── PAYMENT ─── (UPDATED with read receipts, reactions, online status)
+    
     const searchInputPay = document.getElementById('search-user');
     const searchResults = document.getElementById('search-results');
     const recentChatsContainer = document.getElementById('recent-chats-container');
+
+    // Update online status periodically
+    async function updateOnlineStatus() {
+      try {
+        await fetch('/api/payment/online', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId })
+        });
+      } catch (e) {
+        console.warn('Failed to update online status:', e);
+      }
+    }
+    
+    // Update online status every 30 seconds
+    updateOnlineStatus();
+    setInterval(updateOnlineStatus, 30000);
 
     searchInputPay.addEventListener('input', async function() {
       const query = this.value.trim();
@@ -7428,12 +7828,18 @@ app.get("/mini/:userId", (req, res) => {
             const unreadBadge = u.unreadCount > 0 
                 ? \`<div style="background:#00e676; color:#000; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px;">\${u.unreadCount}</div>\` 
                 : '';
+                
+            const onlineDot = u.isOnline 
+                ? \`<span class="online-dot" style="width:8px;height:8px;display:inline-block;"></span>\`
+                : \`<span class="online-dot offline" style="width:8px;height:8px;display:inline-block;"></span>\`;
 
             html += \`
               <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
                 \${avatar}
                 <div class="result-info" style="flex:1; overflow:hidden;">
-                  <div class="name" style="font-size:15px; font-weight:500;">\${u.name}</div>
+                  <div class="name" style="font-size:15px; font-weight:500; display:flex; align-items:center; gap:4px;">
+                    \${u.name} \${onlineDot}
+                  </div>
                   <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">\${u.lastMessage}</div>
                 </div>
                 <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
@@ -7454,24 +7860,40 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    function selectUserForPay(id, name, photo) {
+    async function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
       document.getElementById('paySearchArea').classList.add('hidden');
       document.getElementById('payFullscreen').classList.add('open');
       
       document.getElementById('payUserAvatar').src = photo || 'https://via.placeholder.com/100';
-      document.getElementById('payUserName').innerText = name;
+      document.getElementById('payUserName').innerHTML = name + ' <span class="online-dot offline" id="payOnlineDot"></span>';
       document.getElementById('payUserId').innerText = 'ID: ' + id;
+      
+      // Check online status
+      checkUserOnlineStatus(id);
       
       loadPayChat(id);
       document.getElementById('payAmountInput').focus();
       document.getElementById('payStatus').innerHTML = '';
 
+      // Mark messages as read
       fetch('/api/payment/chat/mark-read', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: userId, otherId: id })
+      }).then(() => {
+          checkUnreadCount();
       }).catch(e => console.log(e));
+      
+      // Start polling for new messages
+      if (payChatPollInterval) {
+        clearInterval(payChatPollInterval);
+      }
+      payChatPollInterval = setInterval(() => {
+        if (selectedReceiver) {
+          loadPayChat(selectedReceiver, true);
+        }
+      }, 3000);
     }
 
     window.selectUserForPay = selectUserForPay;
@@ -7485,19 +7907,33 @@ app.get("/mini/:userId", (req, res) => {
         payChatPollInterval = null;
       }
       loadRecentChats(); 
+      checkUnreadCount();
     });
 
-    async function loadPayChat(receiverId) {
+    async function checkUserOnlineStatus(userId) {
       try {
-        const res = await fetch('/api/payment/chat/' + userId);
+        const res = await fetch('/api/payment/online-status/' + userId);
+        const data = await res.json();
+        const dot = document.getElementById('payOnlineDot');
+        if (data.success) {
+          if (data.isOnline) {
+            dot.className = 'online-dot';
+          } else {
+            dot.className = 'online-dot offline';
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check online status:', e);
+      }
+    }
+
+    async function loadPayChat(receiverId, silent = false) {
+      try {
+        const res = await fetch('/api/payment/chat/' + userId + '?otherId=' + receiverId);
         const data = await res.json();
         if (data.success) {
+          currentChatMessages = data.chats;
           const container = document.getElementById('payChatArea');
-          const filtered = data.chats.filter(c => 
-            (c.senderId === receiverId || c.receiverId === receiverId) ||
-            (c.senderId === userId && c.receiverId === receiverId) ||
-            (c.receiverId === userId && c.senderId === receiverId)
-          );
           
           let html = \`
             <div class="encryption-msg">
@@ -7506,11 +7942,22 @@ app.get("/mini/:userId", (req, res) => {
             </div>
           \`;
 
-          if (filtered.length === 0) {
-            // Empty state
+          if (data.chats.length === 0) {
+            // Empty state - show welcome message
+            html += \`
+              <div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.3);">
+                <div style="font-size:48px; margin-bottom:16px;">💬</div>
+                <p>No messages yet. Say hello or send a payment!</p>
+              </div>
+            \`;
           } else {
             let lastDate = '';
-            filtered.reverse().forEach(c => {
+            const sorted = [...data.chats].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            sorted.forEach(c => {
+              // Skip if deleted for this user
+              if (c.deletedFor && c.deletedFor.includes(userId)) return;
+              
               const isSent = c.senderId === userId;
               const dateObj = new Date(c.timestamp);
               const time = dateObj.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
@@ -7521,11 +7968,17 @@ app.get("/mini/:userId", (req, res) => {
                 lastDate = dateStr;
               }
 
-              const avatar = isSent ? 
-                (tgUser?.photo_url ? \`<img src="\${tgUser.photo_url}" class="avatar" />\` : \`<div class="avatar" style="background:#d500f9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${(tgUser?.first_name || 'U').charAt(0)}</div>\`) :
-                (c.senderPhoto ? \`<img src="\${c.senderPhoto}" class="avatar" />\` : \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${(c.senderName || 'U').charAt(0)}</div>\`);
+              // Avatar for sender
+              const senderPhoto = isSent ? (tgUser?.photo_url || null) : c.senderPhoto;
+              const senderName = isSent ? (tgUser?.first_name || 'You') : (c.senderName || 'User');
+              
+              const avatar = senderPhoto ? 
+                \`<img src="\${senderPhoto}" class="avatar" />\` : 
+                \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${senderName.charAt(0)}</div>\`;
               
               let bubbleHtml = '';
+              let isRead = c.read || false;
+              
               if (c.type === 'payment') {
                 const statusText = isSent ? 'SENT' : 'RECEIVED';
                 bubbleHtml = \`
@@ -7542,12 +7995,52 @@ app.get("/mini/:userId", (req, res) => {
                 bubbleHtml = \`<div class="bubble text">\${c.message}</div>\`;
               }
               
+              // Reactions
+              let reactionsHtml = '';
+              if (c.reactions && c.reactions.length > 0) {
+                const reactionMap = {};
+                c.reactions.forEach(r => {
+                  if (!reactionMap[r.reaction]) reactionMap[r.reaction] = [];
+                  reactionMap[r.reaction].push(r.userId);
+                });
+                reactionsHtml = \`<div class="reaction-bar">\`;
+                Object.keys(reactionMap).forEach(emoji => {
+                  const count = reactionMap[emoji].length;
+                  reactionsHtml += \`
+                    <button class="reaction-btn" onclick="addReaction('\${c.messageId}', '\${emoji}')">
+                      \${emoji} <span class="count">\${count}</span>
+                    </button>
+                  \`;
+                });
+                reactionsHtml += \`</div>\`;
+              }
+              
+              // Message actions
+              const actionsHtml = \`
+                <div class="msg-actions">
+                  <button onclick="showReactionPicker('\${c.messageId}')">😊</button>
+                  \${isSent ? \`<button onclick="deleteMessageForSelf('\${c.messageId}')">🗑️</button>\` : ''}
+                </div>
+              \`;
+              
+              // Read receipt tick
+              let tickHtml = '';
+              if (isSent) {
+                tickHtml = isRead ? 
+                  \`<span class="tick" style="color:#30d158;">✓✓</span>\` : 
+                  \`<span class="tick" style="color:rgba(255,255,255,0.3);">✓</span>\`;
+              }
+              
               html += \`
-                <div class="chat-msg \${isSent ? 'sent' : 'received'}">
+                <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}">
                   \${avatar}
                   <div class="bubble-wrapper">
                     \${bubbleHtml}
-                    <div class="time">\${time}</div>
+                    \${reactionsHtml}
+                    \${actionsHtml}
+                    <div class="time">
+                      \${time} \${tickHtml}
+                    </div>
                   </div>
                 </div>
               \`;
@@ -7555,12 +8048,139 @@ app.get("/mini/:userId", (req, res) => {
           }
           container.innerHTML = html;
           container.scrollTop = container.scrollHeight;
+          
+          // If not silent, mark messages as read
+          if (!silent && selectedReceiver) {
+            fetch('/api/payment/chat/mark-read', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: userId, otherId: selectedReceiver })
+            }).then(() => {
+              checkUnreadCount();
+            }).catch(e => console.log(e));
+          }
         }
       } catch (e) {
         console.error('Pay chat load error:', e);
       }
     }
 
+    // ─── REACTION FUNCTIONS ───
+    let reactionPickerMessageId = null;
+    const reactionOptions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏', '🔥'];
+
+    function showReactionPicker(messageId) {
+      reactionPickerMessageId = messageId;
+      // Create a reaction picker popup
+      const existing = document.querySelector('.reaction-popup');
+      if (existing) existing.remove();
+      
+      const popup = document.createElement('div');
+      popup.className = 'reaction-popup open';
+      reactionOptions.forEach(emoji => {
+        const btn = document.createElement('button');
+        btn.className = 'reaction-option';
+        btn.textContent = emoji;
+        btn.onclick = () => {
+          addReaction(messageId, emoji);
+          popup.remove();
+        };
+        popup.appendChild(btn);
+      });
+      
+      // Find the message bubble
+      const msgElement = document.querySelector(\`.chat-msg[data-message-id="\${messageId}"]\`);
+      if (msgElement) {
+        const bubble = msgElement.querySelector('.bubble-wrapper');
+        if (bubble) {
+          bubble.style.position = 'relative';
+          bubble.appendChild(popup);
+          // Auto close after 5 seconds
+          setTimeout(() => {
+            if (popup.parentNode) popup.remove();
+          }, 5000);
+        }
+      }
+      tg.HapticFeedback.impactOccurred('light');
+    }
+    window.showReactionPicker = showReactionPicker;
+
+    async function addReaction(messageId, reaction) {
+      try {
+        const res = await fetch('/api/payment/chat/reaction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId, reaction })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.impactOccurred('light');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Reaction error:', e);
+      }
+    }
+    window.addReaction = addReaction;
+
+    // ─── DELETE MESSAGE FOR SELF ───
+    async function deleteMessageForSelf(messageId) {
+      const confirmed = await showConfirm('Delete this message for yourself?');
+      if (!confirmed) return;
+      
+      try {
+        const res = await fetch('/api/payment/chat/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Delete error:', e);
+      }
+    }
+    window.deleteMessageForSelf = deleteMessageForSelf;
+
+    // ─── CLEAR CHAT HISTORY ───
+    async function clearChatHistory() {
+      if (!selectedReceiver) return;
+      const confirmed = await showConfirm('Clear all messages with this user for yourself?');
+      if (!confirmed) return;
+      
+      try {
+        const res = await fetch('/api/payment/chat/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, otherId: selectedReceiver })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          await showSuccess('Chat history cleared for you.', 'Cleared');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Clear chat error:', e);
+      }
+    }
+    window.clearChatHistory = clearChatHistory;
+
+    // Add clear chat button to header
+    document.querySelector('.chat-header').insertAdjacentHTML('beforeend', \`
+      <button onclick="clearChatHistory()" style="background:none;border:none;color:#ff453a;font-size:12px;cursor:pointer;padding:4px;">✕</button>
+    \`);
+
+    // ─── PAYMENT SEND ───
     document.getElementById('paySendBtn').addEventListener('click', async function() {
       const inputVal = document.getElementById('payAmountInput').value.trim();
       if (!inputVal || !selectedReceiver) return;
@@ -7614,6 +8234,17 @@ app.get("/mini/:userId", (req, res) => {
                   document.getElementById('payAmountInput').value = '';
                   document.getElementById('payStatus').innerHTML = '';
                   loadPayChat(selectedReceiver);
+                  // Send notification to bot
+                  try {
+                    await fetch('https://t.me/MythoSerialBot', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        chat_id: selectedReceiver, 
+                        text: \`📩 New message from \${tgUser?.first_name || 'User'}\` 
+                      })
+                    });
+                  } catch(e) {}
               }
           } catch(e) {
               console.error(e);
@@ -7626,7 +8257,31 @@ app.get("/mini/:userId", (req, res) => {
             document.getElementById('paySendBtn').click();
         }
     });
-       
+    
+    // ─── CHECK UNREAD COUNT & UPDATE BADGE ───
+    async function checkUnreadCount() {
+      try {
+        const res = await fetch('/api/payment/unread/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const badge = document.getElementById('payUnreadBadge');
+          const total = data.total || 0;
+          if (total > 0) {
+            badge.textContent = total > 99 ? '99+' : total;
+            badge.classList.add('show');
+          } else {
+            badge.classList.remove('show');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check unread count:', e);
+      }
+    }
+    
+    // Check unread count every 10 seconds
+    setInterval(checkUnreadCount, 10000);
+    checkUnreadCount();
+
     // ─── HISTORY ───
     let historyPage = 1;
     let historyLoading = false;
@@ -8144,6 +8799,7 @@ app.get("/mini/:userId", (req, res) => {
       await loadChantLeaderboard();
       await loadSpinStatus();
       loadRecentChats();
+      checkUnreadCount();
       
       if (document.getElementById('tab-bank').classList.contains('active')) { 
         loadBankData(); 
