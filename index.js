@@ -5574,73 +5574,49 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: bold;
     }
 
-        /* === SPIN WHEEL STYLES (Realistic 3D) === */
+    /* === SPIN WHEEL STYLES (Enhanced) === */
     .spin-container {
       display: flex;
       flex-direction: column;
       align-items: center;
       margin: 12px 0 20px;
-      perspective: 1000px; /* Activates 3D space */
     }
-    
     .spin-wheel-wrapper {
       position: relative;
-      width: 260px;
-      height: 260px;
+      width: 250px;
+      height: 250px;
       margin: 0 auto;
       border-radius: 50%;
+      box-shadow: 0 0 60px rgba(255, 215, 0, 0.25), 0 0 30px rgba(213,0,249,0.3);
       background: #000;
-      transform-style: preserve-3d;
-      transform: rotateX(22deg); /* Tilts the wheel backward */
-      box-shadow: 
-        0 30px 45px rgba(0,0,0,0.9), 
-        0 10px 20px rgba(213,0,249,0.3),
-        inset 0 -5px 15px rgba(0,0,0,0.5);
-      border-bottom: 8px solid #664a00; /* Creates fake 3D thickness */
     }
-    
     .spin-wheel-canvas {
       width: 100%;
       height: 100%;
       border-radius: 50%;
     }
-    
     .spin-pointer {
       position: absolute;
-      top: -20px;
+      top: -18px;
       left: 50%;
-      /* Elevates the pointer above the tilted wheel */
-      transform: translateX(-50%) translateZ(40px);
-      width: 32px;
-      height: 46px;
-      background: linear-gradient(180deg, #FFDF00 0%, #B8860B 100%);
-      clip-path: polygon(50% 100%, 0 0, 100% 0);
-      filter: drop-shadow(0 15px 12px rgba(0,0,0,0.8));
-      z-index: 40;
-    }
-    
-    /* Tiny glowing pin on the pointer */
-    .spin-pointer::after {
-      content: '';
-      position: absolute;
-      top: 6px;
-      left: 11px;
-      width: 10px;
-      height: 10px;
-      background: radial-gradient(circle, #fff, #8A6300);
-      border-radius: 50%;
-      box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+      transform: translateX(-50%) rotate(180deg);
+      width: 0;
+      height: 0;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-bottom: 25px solid #FFD700;
+      filter: drop-shadow(0 -5px 12px rgba(255, 214, 10, 0.9));
+      z-index: 20;
     }
 
     .spin-center {
       position: absolute;
       top: 50%;
       left: 50%;
-      /* Pops the button out in 3D */
-      transform: translate(-50%, -50%) translateZ(50px);
+      transform: translate(-50%, -50%);
       width: 90px;
       height: 90px;
-      background: radial-gradient(circle at 30% 30%, #4a0055 0%, #050011 80%);
+      background: radial-gradient(circle, #2a0033 0%, #050011 100%);
       border: 4px solid #FFD700;
       border-radius: 50%;
       display: flex;
@@ -5648,36 +5624,26 @@ app.get("/mini/:userId", (req, res) => {
       justify-content: center;
       color: #FFD700;
       font-weight: 900;
-      font-size: 22px;
+      font-size: 20px;
       cursor: pointer;
-      z-index: 50;
-      box-shadow: 
-        0 20px 25px rgba(0,0,0,0.95), 
-        inset 0 4px 10px rgba(255, 255, 255, 0.4),
-        inset 0 -4px 10px rgba(0,0,0,0.6);
-      transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s;
-      text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+      z-index: 30;
+      box-shadow: 0 0 25px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.3);
+      transition: transform 0.1s, font-size 0.2s;
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
       letter-spacing: 1px;
     }
-    
-    .spin-center:active { 
-      transform: translate(-50%, -50%) translateZ(25px) scale(0.95); /* Presses in physically */
-      box-shadow: 
-        0 8px 15px rgba(0,0,0,0.9), 
-        inset 0 2px 5px rgba(255, 255, 255, 0.4),
-        inset 0 -2px 5px rgba(0,0,0,0.6);
-    }
-    
+    .spin-center:active { transform: translate(-50%, -50%) scale(0.92); }
     .spin-center.disabled { 
       opacity: 0.8; 
       pointer-events: none; 
-      border-color: #555; 
+      border-color: #666; 
       color: #888; 
-      background: radial-gradient(circle at 30% 30%, #333 0%, #111 80%);
-      box-shadow: 0 5px 15px rgba(0,0,0,0.8);
+      box-shadow: none; 
       text-shadow: none;
     }
-
+    .spin-btn, .spin-double-btn {
+      display: none !important;
+    }
 
     .spin-result-box {
       margin-top: 12px;
@@ -7340,31 +7306,24 @@ app.get("/mini/:userId", (req, res) => {
     ];
     const segmentAngle = (2 * Math.PI) / segments.length;
 
-        function drawWheel(rotation = 0) {
+    function drawWheel(rotation = 0) {
       const w = wheelCanvas.width = 400; 
       const h = wheelCanvas.height = 400;
       const cx = w / 2;
       const cy = h / 2;
-      const radius = Math.min(w, h) / 2 - 24; // Scaled slightly to fit thicker 3D rim
+      const radius = Math.min(w, h) / 2 - 20; 
       
       ctx.clearRect(0, 0, w, h);
       
-      // 1. Draw Individual Segments with 3D Bevels
       for (let i = 0; i < segments.length; i++) {
         const startAngle = rotation + i * segmentAngle;
         const endAngle = startAngle + segmentAngle;
         const midAngle = startAngle + segmentAngle / 2;
         
-        // Linear gradient per segment to simulate lighting/bevels
-        const grad = ctx.createLinearGradient(
-          cx + Math.cos(startAngle) * radius, 
-          cy + Math.sin(startAngle) * radius,
-          cx + Math.cos(endAngle) * radius, 
-          cy + Math.sin(endAngle) * radius
-        );
-        grad.addColorStop(0, segments[i].color);
-        grad.addColorStop(0.5, segments[i].glow);
-        grad.addColorStop(1, segments[i].color);
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        grad.addColorStop(0, '#1a001a'); 
+        grad.addColorStop(0.5, segments[i].color);
+        grad.addColorStop(1, segments[i].glow);
         
         ctx.beginPath();
         ctx.moveTo(cx, cy);
@@ -7373,85 +7332,52 @@ app.get("/mini/:userId", (req, res) => {
         ctx.fillStyle = grad;
         ctx.fill();
         
-        // Dark inner stroke to separate the segments distinctly
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 3;
         ctx.stroke();
         
-        // Draw Text with Emboss Effect
-        const textX = cx + Math.cos(midAngle) * radius * 0.72;
-        const textY = cy + Math.sin(midAngle) * radius * 0.72;
+        const textX = cx + Math.cos(midAngle) * radius * 0.7;
+        const textY = cy + Math.sin(midAngle) * radius * 0.7;
         
         ctx.save();
         ctx.translate(textX, textY);
         ctx.rotate(midAngle + Math.PI / 2);
-        ctx.font = '900 42px "Inter", sans-serif';
+        ctx.font = '900 36px "Segoe UI", sans-serif';
         ctx.fillStyle = '#FFFFFF';
-        ctx.shadowColor = 'rgba(0,0,0,0.7)'; // Drop shadow gives depth against the bright color
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 3;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(segments[i].label, 0, 0);
         ctx.restore();
       }
       
-      // 2. Glossy Glass Overlay (Creates a highly realistic curved screen reflection)
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
-      const gloss = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
-      gloss.addColorStop(0, 'rgba(255,255,255,0.45)');
-      gloss.addColorStop(0.3, 'rgba(255,255,255,0.05)');
-      gloss.addColorStop(0.5, 'rgba(0,0,0,0.1)');
-      gloss.addColorStop(1, 'rgba(0,0,0,0.6)');
-      ctx.fillStyle = gloss;
-      ctx.fill();
-      
-      // 3. Thick 3D Metallic Rim
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
       const rimGrad = ctx.createLinearGradient(0, 0, w, h);
-      rimGrad.addColorStop(0, '#FFF8DC');
-      rimGrad.addColorStop(0.2, '#FFDF00');
-      rimGrad.addColorStop(0.5, '#B8860B');
-      rimGrad.addColorStop(0.8, '#FFDF00');
-      rimGrad.addColorStop(1, '#664a00'); // Dark edge at the bottom
-      ctx.lineWidth = 24; // Very thick for 3D effect
+      rimGrad.addColorStop(0, '#FFDF00');
+      rimGrad.addColorStop(0.5, '#FFF8DC');
+      rimGrad.addColorStop(1, '#B8860B');
+      ctx.lineWidth = 14;
       ctx.strokeStyle = rimGrad;
       ctx.stroke();
-
-      // Inner shadow inside the rim for perceived depth
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius - 12, 0, 2 * Math.PI);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-      ctx.stroke();
       
-      // 4. 3D Spherical Pegs (Dots on rim)
       const numDots = 24;
       for (let j = 0; j < numDots; j++) {
         const dotAngle = rotation + (j * 2 * Math.PI / numDots);
         const dotX = cx + Math.cos(dotAngle) * radius;
         const dotY = cy + Math.sin(dotAngle) * radius;
-        
-        // Base shadow of the peg
         ctx.beginPath();
-        ctx.arc(dotX, dotY, 6, 0, 2 * Math.PI);
-        ctx.fillStyle = '#443300'; 
+        ctx.arc(dotX, dotY, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = (j % 2 === 0) ? '#FFFFFF' : '#FFD700'; 
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 10;
         ctx.fill();
-
-        // Highlight layer to create a 3D sphere look
-        ctx.beginPath();
-        ctx.arc(dotX - 1, dotY - 1, 3, 0, 2 * Math.PI);
-        ctx.fillStyle = (j % 2 === 0) ? '#FFFFFF' : '#FFDF00'; 
-        ctx.shadowColor = (j % 2 === 0) ? 'rgba(255,255,255,0.8)' : 'rgba(255,223,0,0.8)';
-        ctx.shadowBlur = 8;
-        ctx.fill();
-        ctx.shadowBlur = 0; // Reset
+        ctx.shadowBlur = 0;
       }
     }
-
 
     let currentRotation = 0;
     drawWheel(currentRotation);
