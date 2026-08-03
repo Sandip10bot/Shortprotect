@@ -8900,53 +8900,70 @@ app.get("/api/yt/audio-info", async (req, res) => {
     }
 });
 
-// 2. Proxy Download Endpoint (Axios Stream - Crash Proof)
+// 2. Proxy Download Endpoint (Axios Stream - Crash Proof & 403 Fix)
 app.get("/api/yt/audio-download", async (req, res) => {
     const { url, format_id } = req.query;
     if (!url) return res.status(400).json({ success: false, error: "URL is required." });
 
+    let downloadUrl = "";
+
     try {
-        // Fetch the direct download links
+        // Fetch the direct download links from the API
         const apiRes = await axios.get(`https://prexzyapis.com/download/ytmp3?url=${encodeURIComponent(url)}`);
         const data = apiRes.data;
         
         if (!data.status) return res.status(400).json({ success: false, error: "Failed to fetch download links." });
 
         let selectedFormat = data.qualities.find(q => q.format_id === format_id);
-        if (!selectedFormat) selectedFormat = data.format; // Fallback to default
+        if (!selectedFormat) selectedFormat = data.format;
 
-        const downloadUrl = selectedFormat.download_url;
+        downloadUrl = selectedFormat.download_url;
         const title = data.info.title.replace(/[^\w\s-]/gi, '_').trim(); 
 
-        // Force MP3 Output format
+        // Fetch the stream with spoofed headers to bypass YouTube's 403 Forbidden
+        const audioStream = await axios({
+            method: 'GET',
+            url: downloadUrl,
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Origin': 'https://www.youtube.com',
+                'Referer': 'https://www.youtube.com/'
+            }
+        });
+
+        // Set Headers ONLY AFTER the connection is successfully established to prevent 502 crashes
         res.setHeader('Content-Disposition', `attachment; filename="${title}.mp3"`);
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Transfer-Encoding', 'chunked');
 
-        // Fetch the raw audio stream from Google securely
-        const audioStream = await axios({
-            method: 'GET',
-            url: downloadUrl,
-            responseType: 'stream'
-        });
-
-        // CRITICAL: If the user cancels the download, destroy the stream so your server doesn't crash
+        // Safe stream destruction if the user cancels the download
         req.on('close', () => {
             if (audioStream.data && typeof audioStream.data.destroy === 'function') {
                 audioStream.data.destroy();
             }
         });
 
-        // Pipe the audio directly to the user
+        // Pipe stream to the client
         audioStream.data.pipe(res);
 
     } catch (error) {
         console.error("YT Download Proxy Error:", error.message);
+        
+        // If the server fails to proxy it (e.g., Strict IP block by YouTube), gracefully recover
         if (!res.headersSent) {
-            res.status(500).send("Failed to process download stream. The media server may be blocking the connection.");
+            if (downloadUrl) {
+                console.log("Fallback activated: Redirecting client directly to Google Video URL.");
+                // Redirects the client's browser directly to the media link so they still get the file
+                return res.redirect(downloadUrl);
+            } else {
+                return res.status(500).send("Failed to process download stream.");
+            }
         }
     }
 });
+
           
 
 
