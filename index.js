@@ -8965,7 +8965,143 @@ app.get("/api/yt/audio-download", async (req, res) => {
 });
 
           
+// 3. Standalone Web Page UI (/ytmp3)
+app.get("/ytmp3", (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>YouTube to MP3 Converter</title>
+        ${THEME_CSS}
+        <style>
+            .yt-box {
+                background: rgba(28,28,30,0.68);
+                backdrop-filter: blur(40px) saturate(180%);
+                border: 0.5px solid rgba(255,255,255,0.14);
+                border-radius: 24px;
+                padding: 24px;
+                width: 100%;
+                max-width: 450px;
+                text-align: center;
+                box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+                margin: 20px;
+            }
+            .yt-input {
+                width: 100%;
+                padding: 14px 16px;
+                border-radius: 14px;
+                border: 1px solid rgba(255,255,255,0.1);
+                background: rgba(0,0,0,0.4);
+                color: #fff;
+                font-size: 15px;
+                margin-bottom: 16px;
+                outline: none;
+                transition: border 0.3s;
+            }
+            .yt-input:focus { border-color: #bf5af2; }
+            .yt-result {
+                display: none;
+                margin-top: 20px;
+                background: rgba(255,255,255,0.03);
+                padding: 16px;
+                border-radius: 16px;
+                border: 1px solid rgba(255,255,255,0.06);
+                animation: riseIn 0.4s ease;
+            }
+            .yt-thumb { width: 100%; border-radius: 12px; margin-bottom: 12px; object-fit: cover; aspect-ratio: 16/9; }
+            .yt-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #fff; }
+            select.yt-select {
+                width: 100%;
+                padding: 12px;
+                border-radius: 12px;
+                background: rgba(0,0,0,0.5);
+                color: #fff;
+                border: 1px solid rgba(255,255,255,0.1);
+                margin-bottom: 16px;
+                outline: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="yt-box">
+            <h2 style="margin-bottom: 8px;">YT to MP3 Converter</h2>
+            <p style="font-size: 13px; color: #aaa; margin-bottom: 20px;">Fastest high-quality audio downloader.</p>
+            
+            <input type="text" id="ytUrl" class="yt-input" placeholder="Paste YouTube link here..." autocomplete="off" />
+            <button class="btn" id="fetchBtn">Fetch Audio</button>
+            <div id="loading" style="display:none; margin-top:16px;">
+                <div class="loader" style="width:24px; height:24px; border-width:2px;"></div>
+            </div>
 
+            <div class="yt-result" id="resultBox">
+                <img id="vidThumb" class="yt-thumb" src="" alt="Thumbnail" />
+                <div class="yt-title" id="vidTitle">Video Title</div>
+                <select id="qualitySelect" class="yt-select"></select>
+                <button class="btn" id="downloadBtn" style="background: linear-gradient(180deg, #32d74b, #248a3d); box-shadow: 0 8px 20px rgba(48, 209, 88, 0.35);">Download MP3</button>
+            </div>
+        </div>
+
+        <script>
+            const urlInput = document.getElementById('ytUrl');
+            const fetchBtn = document.getElementById('fetchBtn');
+            const loading = document.getElementById('loading');
+            const resultBox = document.getElementById('resultBox');
+            const qualitySelect = document.getElementById('qualitySelect');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            let currentUrl = '';
+
+            fetchBtn.addEventListener('click', async () => {
+                const url = urlInput.value.trim();
+                if (!url) return alert('Please enter a YouTube URL.');
+                
+                currentUrl = url;
+                fetchBtn.style.display = 'none';
+                loading.style.display = 'block';
+                resultBox.style.display = 'none';
+
+                try {
+                    const res = await fetch('/api/yt/audio-info?url=' + encodeURIComponent(url));
+                    const data = await res.json();
+                    
+                    loading.style.display = 'none';
+                    fetchBtn.style.display = 'block';
+
+                    if (data.success) {
+                        document.getElementById('vidThumb').src = data.thumbnail;
+                        document.getElementById('vidTitle').innerText = data.title;
+                        
+                        qualitySelect.innerHTML = '';
+                        data.qualities.forEach(q => {
+                            const option = document.createElement('option');
+                            option.value = q.format_id;
+                            option.innerText = q.label;
+                            qualitySelect.appendChild(option);
+                        });
+                        
+                        resultBox.style.display = 'block';
+                    } else {
+                        alert(data.error);
+                    }
+                } catch (e) {
+                    loading.style.display = 'none';
+                    fetchBtn.style.display = 'block';
+                    alert('Network error while fetching details.');
+                }
+            });
+
+            downloadBtn.addEventListener('click', () => {
+                const formatId = qualitySelect.value;
+                const downloadUrl = '/api/yt/audio-download?url=' + encodeURIComponent(currentUrl) + '&format_id=' + formatId;
+                window.location.href = downloadUrl; 
+            });
+        </script>
+    </body>
+    </html>
+    `);
+});
 
 // ========================
 // HOME & FALLBACK ROUTE
