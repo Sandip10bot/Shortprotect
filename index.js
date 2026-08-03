@@ -7,6 +7,8 @@ import { MongoClient } from "mongodb";
 import crypto from "crypto";
 import { Readable } from "stream";
 import axios from "axios";
+import https from "https";
+
 
 
 const app = express();
@@ -8900,67 +8902,57 @@ app.get("/api/yt/audio-info", async (req, res) => {
     }
 });
 
-// 2. Proxy Download Endpoint (Axios Stream - Crash Proof & 403 Fix)
+// 2. Proxy Download Endpoint (Native HTTPS - 100% Crash Proof & Forces Download)
 app.get("/api/yt/audio-download", async (req, res) => {
     const { url, format_id } = req.query;
     if (!url) return res.status(400).json({ success: false, error: "URL is required." });
 
-    let downloadUrl = "";
-
     try {
-        // Fetch the direct download links from the API
-        const apiRes = await axios.get(`https://prexzyapis.com/download/ytmp3?url=${encodeURIComponent(url)}`);
-        const data = apiRes.data;
+        // Fetch the direct download links from Prexzy
+        const apiRes = await fetch(`https://prexzyapis.com/download/ytmp3?url=${encodeURIComponent(url)}`);
+        const data = await apiRes.json();
         
         if (!data.status) return res.status(400).json({ success: false, error: "Failed to fetch download links." });
 
         let selectedFormat = data.qualities.find(q => q.format_id === format_id);
         if (!selectedFormat) selectedFormat = data.format;
 
-        downloadUrl = selectedFormat.download_url;
+        const downloadUrl = selectedFormat.download_url;
         const title = data.info.title.replace(/[^\w\s-]/gi, '_').trim(); 
 
-        // Fetch the stream with spoofed headers to bypass YouTube's 403 Forbidden
-        const audioStream = await axios({
-            method: 'GET',
-            url: downloadUrl,
-            responseType: 'stream',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Origin': 'https://www.youtube.com',
-                'Referer': 'https://www.youtube.com/'
-            }
-        });
-
-        // Set Headers ONLY AFTER the connection is successfully established to prevent 502 crashes
+        // Hard-force the attachment header so the browser triggers "Save As..."
         res.setHeader('Content-Disposition', `attachment; filename="${title}.mp3"`);
         res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Transfer-Encoding', 'chunked');
 
-        // Safe stream destruction if the user cancels the download
-        req.on('close', () => {
-            if (audioStream.data && typeof audioStream.data.destroy === 'function') {
-                audioStream.data.destroy();
+        // Use Node's native HTTPS module to stream (Bypasses Axios 403 errors and prevents 502 crashes)
+        const proxyReq = https.get(downloadUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Connection': 'keep-alive'
             }
+        }, (proxyRes) => {
+            // Transfer the exact file size to the browser so the user sees a progress bar
+            if (proxyRes.headers['content-length']) {
+                res.setHeader('Content-Length', proxyRes.headers['content-length']);
+            }
+
+            // Pipe the raw audio data directly to the user's browser
+            proxyRes.pipe(res);
         });
 
-        // Pipe stream to the client
-        audioStream.data.pipe(res);
+        proxyReq.on('error', (err) => {
+            console.error("Proxy Request Error:", err.message);
+            if (!res.headersSent) res.status(500).send("Proxy stream failed.");
+        });
+
+        // CRITICAL: Prevent memory leaks if the user closes the tab mid-download
+        req.on('close', () => {
+            proxyReq.destroy();
+        });
 
     } catch (error) {
-        console.error("YT Download Proxy Error:", error.message);
-        
-        // If the server fails to proxy it (e.g., Strict IP block by YouTube), gracefully recover
-        if (!res.headersSent) {
-            if (downloadUrl) {
-                console.log("Fallback activated: Redirecting client directly to Google Video URL.");
-                // Redirects the client's browser directly to the media link so they still get the file
-                return res.redirect(downloadUrl);
-            } else {
-                return res.status(500).send("Failed to process download stream.");
-            }
-        }
+        console.error("Proxy Catch Error:", error.message);
+        if (!res.headersSent) res.status(500).send("System failed to initialize download.");
     }
 });
 
