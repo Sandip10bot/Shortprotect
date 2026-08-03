@@ -9087,13 +9087,17 @@ app.get("/ytmp3", (req, res) => {
             downloadBtn.addEventListener('click', () => {
                 const formatId = qualitySelect.value;
                 const downloadUrl = '/api/yt/audio-download?url=' + encodeURIComponent(currentUrl) + '&format_id=' + formatId;
-                window.location.href = downloadUrl; 
+                
+                // Creates an invisible HTML5 anchor tag to aggressively force the browser to download instead of play
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = downloadUrl;
+                a.download = 'audio.mp3'; // HTML5 Download Hint
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
             });
-        </script>
-    </body>
-    </html>
-    `);
-});
+
 
 // ========================
 // HOME & FALLBACK ROUTE
