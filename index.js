@@ -9088,15 +9088,19 @@ app.get("/ytmp3", (req, res) => {
                 const formatId = qualitySelect.value;
                 const downloadUrl = '/api/yt/audio-download?url=' + encodeURIComponent(currentUrl) + '&format_id=' + formatId;
                 
-                // Creates an invisible HTML5 anchor tag to aggressively force the browser to download instead of play
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = downloadUrl;
-                a.download = 'audio.mp3'; // HTML5 Download Hint
+                a.download = 'audio.mp3'; 
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
             });
+        </script>
+    </body>
+    </html>
+    `);
+});
 
 
 // ========================
