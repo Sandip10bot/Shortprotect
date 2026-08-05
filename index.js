@@ -8864,6 +8864,176 @@ app.get("/mini/:userId", (req, res) => {
 </html>
     `);
 });
+// ==========================================
+// ADVANCED TVWISH SCRAPER API
+// ==========================================
+
+// In-memory cache to keep response times fast and avoid IP bans
+const tvCache = new Map();
+const CACHE_TTL_CHANNELS = 12 * 60 * 60 * 1000; // 12 Hours
+const CACHE_TTL_SCHEDULE = 15 * 60 * 1000;       // 15 Minutes
+
+const fetchPage = async (targetUrl) => {
+    const { data } = await axios.get(targetUrl, {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.tvwish.com/'
+        },
+        timeout: 12000
+    });
+    return data;
+};
+
+// ---------------------------------------------------------
+// ENDPOINT 1: Fetch ALL Channels Dynamically
+// GET /api/tv/channels
+// ---------------------------------------------------------
+app.get("/api/tv/channels", async (req, res) => {
+    const cacheKey = "all_tv_channels";
+    
+    if (tvCache.has(cacheKey)) {
+        const cached = tvCache.get(cacheKey);
+        if (Date.now() - cached.time < CACHE_TTL_CHANNELS) {
+            return res.json(cached.data);
+        }
+    }
+
+    try {
+        const html = await fetchPage("https://www.tvwish.com/in/Channels");
+        const $ = cheerio.load(html);
+        const channels = [];
+        const seen = new Set();
+
+        // Target all channel schedule anchors on TVWish
+        $('a[href*="/in/Channels/"]').each((_, el) => {
+            const href = $(el).attr('href') || '';
+            
+            if (href.includes('/Schedule')) {
+                let name = $(el).text().replace(/\s+/g, ' ').trim();
+                
+                // Fallback to image alt if anchor text is empty
+                if (!name) {
+                    name = $(el).find('img').attr('alt') || '';
+                    name = name.replace(/Schedule|Logo|Channel/gi, '').trim();
+                }
+
+                if (name && !seen.has(name.toLowerCase())) {
+                    // Extract slug and ID from URL pattern: /in/Channels/{slug}/{id}/Schedule...
+                    const parts = href.split('/');
+                    const channelIndex = parts.indexOf('Channels');
+                    
+                    if (channelIndex !== -1 && parts[channelIndex + 1] && parts[channelIndex + 2]) {
+                        const slug = parts[channelIndex + 1];
+                        const channelId = parts[channelIndex + 2];
+
+                        seen.add(name.toLowerCase());
+                        channels.push({
+                            name: name,
+                            slug: slug,
+                            id: channelId,
+                            scheduleUrl: `https://www.tvwish.com/in/Channels/${slug}/${channelId}/Schedule/Today`
+                        });
+                    }
+                }
+            }
+        });
+
+        const responseData = {
+            success: true,
+            totalChannels: channels.length,
+            channels: channels
+        };
+
+        tvCache.set(cacheKey, { time: Date.now(), data: responseData });
+        res.json(responseData);
+
+    } catch (error) {
+        console.error("TV Channels Scraper Error:", error.message);
+        res.status(500).json({
+            success: false,
+            error: "Failed to scrape TVWish channels list.",
+            details: error.message
+        });
+    }
+});
+
+// ---------------------------------------------------------
+// ENDPOINT 2: Fetch Show Schedule for a Selected Channel
+// GET /api/tv/schedule?slug=dangal&id=730
+// ---------------------------------------------------------
+app.get("/api/tv/schedule", async (req, res) => {
+    const { slug, id, day = "Today" } = req.query;
+
+    if (!slug || !id) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing parameters: 'slug' and 'id' are required."
+        });
+    }
+
+    const cacheKey = `sched_${slug}_${id}_${day}`;
+    if (tvCache.has(cacheKey)) {
+        const cached = tvCache.get(cacheKey);
+        if (Date.now() - cached.time < CACHE_TTL_SCHEDULE) {
+            return res.json(cached.data);
+        }
+    }
+
+    try {
+        const targetUrl = `https://www.tvwish.com/in/Channels/${slug}/${id}/Schedule/${day}`;
+        const html = await fetchPage(targetUrl);
+        const $ = cheerio.load(html);
+        const schedule = [];
+
+        // Parsing Strategy 1: Standard HTML Table Rows
+        $('table tr').each((_, el) => {
+            const timeRaw = $(el).find('td').eq(0).text().replace(/\s+/g, ' ').trim();
+            const showRaw = $(el).find('td').eq(1).text().replace(/\s+/g, ' ').trim();
+
+            if (timeRaw && showRaw && /\d/.test(timeRaw)) {
+                schedule.push({ time: timeRaw, showName: showRaw });
+            }
+        });
+
+        // Parsing Strategy 2: Bootstrap Column Layouts (TVWish Fallback)
+        if (schedule.length === 0) {
+            $('.row').each((_, el) => {
+                const cols = $(el).find('div[class*="col-"]');
+                if (cols.length >= 2) {
+                    const timeRaw = $(cols[0]).text().replace(/\s+/g, ' ').trim();
+                    const showRaw = $(cols[1]).text().replace(/\s+/g, ' ').trim();
+
+                    if (timeRaw && showRaw && /\d{1,2}:\d{2}/.test(timeRaw)) {
+                        schedule.push({ time: timeRaw, showName: showRaw });
+                    }
+                }
+            });
+        }
+
+        const responseData = {
+            success: true,
+            channelSlug: slug,
+            channelId: id,
+            day: day,
+            totalShows: schedule.length,
+            schedule: schedule
+        };
+
+        tvCache.set(cacheKey, { time: Date.now(), data: responseData });
+        res.json(responseData);
+
+    } catch (error) {
+        console.error("TV Schedule Scraper Error:", error.message);
+        res.status(500).json({
+            success: false,
+            error: "Failed to scrape schedule for the specified channel.",
+            details: error.message
+        });
+    }
+});
+
 
 // ========================
 // HOME & FALLBACK ROUTE
