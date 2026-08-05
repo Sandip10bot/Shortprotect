@@ -8867,8 +8867,9 @@ app.get("/mini/:userId", (req, res) => {
 </html>
     `);
 });
+                
 // ==========================================
-// ADVANCED TVWISH SCRAPER API
+// ADVANCED TVWISH SCRAPER API (Anti-403 Bypass)
 // ==========================================
 
 // In-memory cache to keep response times fast and avoid IP bans
@@ -8876,17 +8877,49 @@ const tvCache = new Map();
 const CACHE_TTL_CHANNELS = 12 * 60 * 60 * 1000; // 12 Hours
 const CACHE_TTL_SCHEDULE = 15 * 60 * 1000;       // 15 Minutes
 
+// Robust fetcher with Cloudflare 403 Bypass & Multi-Proxy Fallback
 const fetchPage = async (targetUrl) => {
-    const { data } = await axios.get(targetUrl, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.tvwish.com/'
-        },
-        timeout: 12000
-    });
-    return data;
+    // Spoofed headers to mimic a real Google Chrome browser
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'no-cache'
+    };
+
+    try {
+        // Attempt 1: Direct connection with spoofed headers
+        const { data } = await axios.get(targetUrl, { headers, timeout: 12000 });
+        return data;
+    } catch (error) {
+        console.warn(`[Scraper] Direct fetch failed: ${error.message}`);
+        
+        // Attempt 2: If 403/503 Cloudflare block, use free proxy networks to bypass
+        if (error.response && (error.response.status === 403 || error.response.status === 503 || error.response.status === 406)) {
+            console.log(`[Scraper] Anti-Bot block detected. Initializing proxy bypass...`);
+            
+            try {
+                // Fallback Proxy 1: AllOrigins
+                const proxy1 = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+                const res1 = await axios.get(proxy1, { timeout: 15000 });
+                if (res1.data && res1.data.contents) return res1.data.contents;
+            } catch (e1) {
+                console.warn(`[Scraper] Proxy 1 failed, trying Proxy 2...`);
+                
+                // Fallback Proxy 2: CodeTabs
+                const proxy2 = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(targetUrl)}`;
+                const res2 = await axios.get(proxy2, { timeout: 15000 });
+                if (res2.data) return res2.data;
+            }
+        }
+        
+        throw new Error("All fetching methods and proxy fallbacks failed.");
+    }
 };
 
 // ---------------------------------------------------------
@@ -8909,7 +8942,7 @@ app.get("/api/tv/channels", async (req, res) => {
         const channels = [];
         const seen = new Set();
 
-        // Target all channel schedule anchors on TVWish
+        // Target all channel schedule anchors
         $('a[href*="/in/Channels/"]').each((_, el) => {
             const href = $(el).attr('href') || '';
             
@@ -8923,13 +8956,11 @@ app.get("/api/tv/channels", async (req, res) => {
                 }
 
                 if (name && !seen.has(name.toLowerCase())) {
-                    // Extract slug and ID from URL pattern: /in/Channels/{slug}/{id}/Schedule...
-                    const parts = href.split('/');
-                    const channelIndex = parts.indexOf('Channels');
-                    
-                    if (channelIndex !== -1 && parts[channelIndex + 1] && parts[channelIndex + 2]) {
-                        const slug = parts[channelIndex + 1];
-                        const channelId = parts[channelIndex + 2];
+                    // Extract slug and ID from URL pattern
+                    const match = href.match(/\/in\/Channels\/([^\/]+)\/(\d+)\/Schedule/i);
+                    if (match) {
+                        const slug = match[1];
+                        const channelId = match[2];
 
                         seen.add(name.toLowerCase());
                         channels.push({
