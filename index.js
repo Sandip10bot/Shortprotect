@@ -5,6 +5,9 @@
 import express from "express";
 import { MongoClient } from "mongodb";
 import crypto from "crypto";
+import axios from "axios";
+import * as cheerio from "cheerio";
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
