@@ -8942,34 +8942,36 @@ app.get("/api/tv/channels", async (req, res) => {
         const channels = [];
         const seen = new Set();
 
-        // Target all channel schedule anchors
-        $('a[href*="/in/Channels/"]').each((_, el) => {
+        // Target all links on the page and filter them via Regex
+        $('a').each((_, el) => {
             const href = $(el).attr('href') || '';
             
-            if (href.includes('/Schedule')) {
+            // Match any href that looks like: /in/Channels/dangal/730 (with or without /Schedule)
+            const match = href.match(/\/in\/Channels\/([a-zA-Z0-9\-]+)\/(\d+)/i);
+            
+            if (match) {
                 let name = $(el).text().replace(/\s+/g, ' ').trim();
                 
-                // Fallback to image alt if anchor text is empty
+                // If text is empty, check for an image alt tag inside the anchor
                 if (!name) {
-                    name = $(el).find('img').attr('alt') || '';
-                    name = name.replace(/Schedule|Logo|Channel/gi, '').trim();
+                    name = $(el).find('img').attr('alt') || $(el).find('img').attr('title') || '';
                 }
 
-                if (name && !seen.has(name.toLowerCase())) {
-                    // Extract slug and ID from URL pattern
-                    const match = href.match(/\/in\/Channels\/([^\/]+)\/(\d+)\/Schedule/i);
-                    if (match) {
-                        const slug = match[1];
-                        const channelId = match[2];
+                // Clean up any weird text that might be attached
+                name = name.replace(/Schedule|Logo|Today/gi, '').trim();
 
-                        seen.add(name.toLowerCase());
-                        channels.push({
-                            name: name,
-                            slug: slug,
-                            id: channelId,
-                            scheduleUrl: `https://www.tvwish.com/in/Channels/${slug}/${channelId}/Schedule/Today`
-                        });
-                    }
+                const slug = match[1];
+                const channelId = match[2];
+
+                // Ensure it's valid and avoid duplicates using the unique channel ID
+                if (name && name.length > 1 && !seen.has(channelId)) {
+                    seen.add(channelId);
+                    channels.push({
+                        name: name,
+                        slug: slug,
+                        id: channelId,
+                        scheduleUrl: `https://www.tvwish.com/in/Channels/${slug}/${channelId}/Schedule/Today`
+                    });
                 }
             }
         });
