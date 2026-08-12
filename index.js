@@ -5997,15 +5997,19 @@ app.get("/mini/:userId", (req, res) => {
         <div class="scratch-arrow">➔</div>
       </a>
       
-      <!-- NEW: Small Square Scratch History Button -->
-      <!-- NEW: Small Square Scratch History Button -->
-      <button onclick="openScratchHistory()" style="width: 62px; height: 62px; flex-shrink: 0; border-radius: 18px; background: transparent; border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 0; margin: 0; overflow: hidden;">
-        
-        <!-- 👇 Yahan SVG Icon hata kar Image add ki gayi hai 👇 -->
-        <img src="https://i.ibb.co/270qsDjw/photo-2026-08-12-06-02-04-7673021475883843620.jpg" style="width: 100%; height: 100%; object-fit: cover; display: block;" alt="History">
-        <!-- 👆 Yahan Tak 👆 -->
-        
+      <!-- Small Square Scratch History Button -->
+      <button onclick="openScratchHistory()" oncontextmenu="return false;" style="width: 62px; height: 62px; flex-shrink: 0; border-radius: 18px; background: transparent; border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 0; margin: 0; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent;">
+  
+        <img src="https://i.ibb.co/270qsDjw/photo-2026-08-12-06-02-04-7673021475883843620.jpg" 
+             draggable="false" 
+             oncontextmenu="return false;" 
+             style="width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none;" 
+             alt="History">
+       
       </button>
+
+
+
       
     </div>
 
