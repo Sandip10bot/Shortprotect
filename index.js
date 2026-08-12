@@ -3938,6 +3938,7 @@ app.post("/api/quiz/create", async (req, res) => {
         const quizId = metaResult.insertedId;
 
         // 2. Build & Insert all Question Documents
+        // 2. Build & Insert all Question Documents
         const questionDocs = questions.map(q => ({
             quiz_id: quizId,
             category: category,
@@ -3946,8 +3947,9 @@ app.post("/api/quiz/create", async (req, res) => {
             answer: q.answer,
             explanation: q.explanation,
             is_active: true,
-            is_rapid_fire: false // Defaults to normal
+            is_rapid_fire: q.is_rapid_fire === true // Ensures Rapid Fire state is mapped properly
         }));
+
 
         await quizCollection.insertMany(questionDocs);
 
@@ -9269,8 +9271,9 @@ app.get("/api/tv/schedule", async (req, res) => {
     }
 });
 
+
 // ==========================================
-// QUIZ CREATOR MINI APP UI
+// QUIZ CREATOR MINI APP UI (V2 - Smooth & Persistent)
 // ==========================================
 app.get("/create-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -9284,26 +9287,63 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         ${THEME_CSS}
         <style>
-            body { padding-bottom: 50px; overflow-y: auto; align-items: flex-start; }
-            .container { max-width: 600px; width: 95%; margin: 20px auto; animation: none; padding: 25px 20px; }
+            body { padding-bottom: 60px; overflow-y: auto; align-items: flex-start; }
+            .container { max-width: 600px; width: 95%; margin: 20px auto; animation: fadeUp 0.4s ease; padding: 25px 20px; }
+            @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+            
+            .header-icon { font-size: 48px; margin-bottom: 12px; text-shadow: 0 10px 30px rgba(213,0,249,0.5); }
+            
             .form-group { margin-bottom: 16px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.5px;}
-            .form-control { width: 100%; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 15px; outline: none; transition: border 0.3s; }
-            .form-control:focus { border-color: #d500f9; }
-            .q-card { background: rgba(45,10,80,0.25); border: 1px solid rgba(255,255,255,0.05); padding: 18px; border-radius: 18px; margin-bottom: 16px; position: relative; }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: bold; color: #ea80fc; }
-            .btn-remove { background: rgba(255,69,58,0.15); color: #ff453a; border: 1px solid rgba(255,69,58,0.3); padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
-            .btn-add { background: rgba(48,209,88,0.15); color: #30d158; border: 1px dashed rgba(48,209,88,0.4); width: 100%; padding: 14px; border-radius: 16px; font-weight: bold; font-size: 15px; margin-bottom: 24px; cursor: pointer; transition: transform 0.2s; }
-            .btn-add:active { transform: scale(0.98); }
-            select.form-control { appearance: none; background-color: rgba(255,255,255,0.08); }
-            option { background: #1c1c1e; color: #fff; }
+            .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.8px;}
+            
+            .form-control { width: 100%; padding: 14px 16px; border-radius: 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 15px; outline: none; transition: all 0.3s; }
+            .form-control:focus { border-color: #d500f9; background: rgba(255,255,255,0.09); box-shadow: 0 0 15px rgba(213,0,249,0.2); }
+            textarea.form-control { resize: none; font-family: inherit; }
+
+            .q-card { background: rgba(28,28,30,0.8); border: 1px solid rgba(255,255,255,0.08); padding: 20px; border-radius: 20px; margin-bottom: 20px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.3); transition: transform 0.2s; }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-weight: 800; color: #ea80fc; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; }
+            
+            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+            .btn-remove:active { transform: scale(0.9); background: rgba(255,69,58,0.2); }
+            
+            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.4); width: 100%; padding: 16px; border-radius: 16px; font-weight: bold; font-size: 15px; margin-bottom: 24px; cursor: pointer; transition: all 0.2s; }
+            .btn-add:active { transform: scale(0.96); background: rgba(48,209,88,0.2); }
+
+            /* Telegram QuizBot Style Options */
+            .options-group { background: rgba(0,0,0,0.3); border-radius: 16px; padding: 10px 16px; margin: 16px 0; border: 1px solid rgba(255,255,255,0.04); }
+            .option-row { display: flex; align-items: center; margin-bottom: 4px; cursor: pointer; position: relative; }
+            .option-row:last-child { margin-bottom: 0; }
+            
+            /* Custom Radio Tick */
+            .option-row input[type="radio"] { display: none; }
+            .radio-custom { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 14px; flex-shrink: 0; transition: 0.2s; }
+            .option-row input[type="radio"]:checked + .radio-custom { border-color: #30d158; }
+            .option-row input[type="radio"]:checked + .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #30d158; font-size: 14px; font-weight: 900; }
+            
+            .option-row .opt-val { flex: 1; border: none; border-bottom: 1px solid rgba(255,255,255,0.08); border-radius: 0; background: transparent; padding: 14px 0; font-size: 15px; }
+            .option-row:last-child .opt-val { border-bottom: none; }
+            .option-row .opt-val:focus { border-bottom-color: #ea80fc; }
+
+            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 12px; }
+            
+            /* Toggle Switch for Rapid Fire */
+            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); }
+            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.25s; flex-shrink: 0; }
+            .toggle-switch:checked { background: #d500f9; }
+            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+            .toggle-switch:checked::after { transform: translateX(20px); }
+
+            .top-bar-save { position: fixed; top: 10px; right: 15px; font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 600; z-index: 100; transition: 0.3s; opacity: 0; }
+            .top-bar-save.show { opacity: 1; }
         </style>
     </head>
     <body>
+        <div class="top-bar-save" id="save-indicator">✓ Saved to drafts</div>
+        
         <div class="container">
-            <div style="font-size:48px; margin-bottom:12px;">📝</div>
+            <div class="header-icon">📝</div>
             <h2>Create New Quiz</h2>
-            <p style="margin-bottom: 24px;">Build your questions and publish directly to the bot database.</p>
+            <p style="margin-bottom: 24px; color: rgba(255,255,255,0.6);">Build your questions and publish directly to the bot database. Your progress autosaves.</p>
             
             <div id="quiz-form">
                 <div class="form-group">
@@ -9315,23 +9355,23 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description of the quiz" required></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Time Per Question (Seconds)</label>
+                    <label>Base Time Per Question (Seconds)</label>
                     <input type="number" id="q-time" class="form-control" value="15" required>
                 </div>
 
-                <hr style="border-color: rgba(255,255,255,0.1); margin: 25px 0;">
-                <h3 style="text-align: left; margin-bottom: 15px; color: #ea80fc;">Add Questions</h3>
+                <hr style="border: none; border-top: 1px dashed rgba(255,255,255,0.15); margin: 30px 0;">
 
                 <div id="questions-container"></div>
 
-                <button type="button" class="btn-add" onclick="addQuestion()">+ Add Question</button>
+                <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
 
                 <button class="btn" id="submit-btn" onclick="submitQuiz()">🚀 Publish Quiz to Bot</button>
+                <button class="btn" style="background: rgba(255,69,58,0.1); color: #ff453a; box-shadow: none; margin-top: 12px;" onclick="clearDrafts()">🗑️ Clear Drafts</button>
             </div>
             
-            <div id="loading" style="display:none; margin-top:30px;">
+            <div id="loading" style="display:none; margin-top:30px; text-align:center;">
                 <div class="loader"></div>
-                <p>Generating and saving to database...</p>
+                <p style="color: #ea80fc; font-weight: bold;">Generating and saving to database...</p>
             </div>
         </div>
 
@@ -9340,62 +9380,191 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             tg.expand();
             tg.setHeaderColor('#000000');
             
+            const userId = ${userId};
+            const storageKey = \`mytho_quiz_draft_\${userId}\`;
             let questionCount = 0;
+            let saveTimeout;
 
+            // ==========================================
+            // UI BUILDERS
+            // ==========================================
             function addQuestion() {
                 questionCount++;
+                const id = questionCount;
                 const container = document.getElementById('questions-container');
                 const qDiv = document.createElement('div');
                 qDiv.className = 'q-card';
-                qDiv.id = \`q-card-\${questionCount}\`;
+                qDiv.id = \`q-card-\${id}\`;
 
                 qDiv.innerHTML = \`
                     <div class="q-header">
-                        <span>Question \${questionCount}</span>
-                        <button class="btn-remove" onclick="removeQuestion(\${questionCount})">Remove</button>
+                        <span>Question \${id}</span>
+                        <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
                     </div>
-                    <div class="form-group">
-                        <input type="text" class="form-control q-text" placeholder="Enter Question text..." required>
+                    
+                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+                    
+                    <div class="options-group">
+                        <label class="option-row">
+                            <input type="radio" name="q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="form-control opt-val" placeholder="Option 1" required>
+                        </label>
+                        <label class="option-row">
+                            <input type="radio" name="q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="form-control opt-val" placeholder="Option 2" required>
+                        </label>
+                        <label class="option-row">
+                            <input type="radio" name="q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="form-control opt-val" placeholder="Option 3" required>
+                        </label>
+                        <label class="option-row">
+                            <input type="radio" name="q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="form-control opt-val" placeholder="Option 4" required>
+                        </label>
                     </div>
-                    <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <input type="text" class="form-control opt-1" placeholder="Option 1" required>
-                        <input type="text" class="form-control opt-2" placeholder="Option 2" required>
-                        <input type="text" class="form-control opt-3" placeholder="Option 3" required>
-                        <input type="text" class="form-control opt-4" placeholder="Option 4" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Select Correct Answer</label>
-                        <select class="form-control q-answer">
-                            <option value="1">Option 1</option>
-                            <option value="2">Option 2</option>
-                            <option value="3">Option 3</option>
-                            <option value="4">Option 4</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+
+                    <input type="text" class="form-control q-exp" placeholder="Add an explanation... (Optional)">
+                    
+                    <div class="setting-item">
+                        <span style="font-size:13px; font-weight:700; color:#ffd60a;">⚡ Rapid Fire (7s Timer)</span>
+                        <input type="checkbox" class="toggle-switch q-rapid">
                     </div>
                 \`;
+                
                 container.appendChild(qDiv);
                 tg.HapticFeedback.selectionChanged();
+                triggerAutoSave();
+                return id;
             }
 
             function removeQuestion(id) {
                 const el = document.getElementById(\`q-card-\${id}\`);
-                if (el) el.remove();
+                if (el) {
+                    el.style.transform = 'scale(0.9)';
+                    el.style.opacity = '0';
+                    setTimeout(() => {
+                        el.remove();
+                        triggerAutoSave();
+                    }, 200);
+                }
                 tg.HapticFeedback.impactOccurred('light');
             }
 
-            // Start with one default question
-            addQuestion();
+            // ==========================================
+            // STATE PERSISTENCE (AUTO-SAVE)
+            // ==========================================
+            function saveState() {
+                const data = {
+                    title: document.getElementById('q-title').value,
+                    desc: document.getElementById('q-desc').value,
+                    time: document.getElementById('q-time').value,
+                    questions: []
+                };
+                
+                document.querySelectorAll('.q-card').forEach(card => {
+                    const text = card.querySelector('.q-text').value;
+                    const opts = card.querySelectorAll('.opt-val');
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    
+                    let ansIndex = 0;
+                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                    
+                    const exp = card.querySelector('.q-exp').value;
+                    const isRapid = card.querySelector('.q-rapid').checked;
+                    
+                    data.questions.push({
+                        text: text,
+                        opt1: opts[0].value,
+                        opt2: opts[1].value,
+                        opt3: opts[2].value,
+                        opt4: opts[3].value,
+                        ansIndex: ansIndex,
+                        exp: exp,
+                        isRapid: isRapid
+                    });
+                });
+                
+                localStorage.setItem(storageKey, JSON.stringify(data));
+                
+                // Show saved indicator
+                const indicator = document.getElementById('save-indicator');
+                indicator.classList.add('show');
+                setTimeout(() => indicator.classList.remove('show'), 2000);
+            }
 
+            function triggerAutoSave() {
+                clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(saveState, 500); // Debounce to prevent lag
+            }
+
+            function loadState() {
+                const saved = localStorage.getItem(storageKey);
+                if (saved) {
+                    try {
+                        const data = JSON.parse(saved);
+                        document.getElementById('q-title').value = data.title || '';
+                        document.getElementById('q-desc').value = data.desc || '';
+                        document.getElementById('q-time').value = data.time || '15';
+                        
+                        document.getElementById('questions-container').innerHTML = '';
+                        questionCount = 0;
+                        
+                        if (data.questions && data.questions.length > 0) {
+                            data.questions.forEach(q => {
+                                const id = addQuestion();
+                                const card = document.getElementById(\`q-card-\${id}\`);
+                                
+                                card.querySelector('.q-text').value = q.text || '';
+                                const opts = card.querySelectorAll('.opt-val');
+                                opts[0].value = q.opt1 || '';
+                                opts[1].value = q.opt2 || '';
+                                opts[2].value = q.opt3 || '';
+                                opts[3].value = q.opt4 || '';
+                                
+                                const radios = card.querySelectorAll('input[type="radio"]');
+                                if (q.ansIndex >= 0 && q.ansIndex < 4) {
+                                    radios[q.ansIndex].checked = true;
+                                }
+                                
+                                card.querySelector('.q-exp').value = q.exp || '';
+                                card.querySelector('.q-rapid').checked = q.isRapid || false;
+                            });
+                        } else {
+                            addQuestion(); // Backup fallback
+                        }
+                    } catch(e) {
+                        addQuestion(); // Fallback on error
+                    }
+                } else {
+                    addQuestion(); // Initial load
+                }
+            }
+
+            function clearDrafts() {
+                if(confirm("Are you sure you want to delete all drafted questions?")) {
+                    localStorage.removeItem(storageKey);
+                    location.reload();
+                }
+            }
+
+            // Bind global input listener for auto-save
+            document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
+            document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
+
+            // ==========================================
+            // SUBMIT LOGIC
+            // ==========================================
             async function submitQuiz() {
                 const title = document.getElementById('q-title').value.trim();
                 const desc = document.getElementById('q-desc').value.trim();
                 const time = document.getElementById('q-time').value.trim();
                 
                 if (!title || !desc || !time) {
-                    alert('Please fill all basic quiz details!');
+                    alert('Please fill out the Quiz Title and Description!');
                     return tg.HapticFeedback.notificationOccurred('error');
                 }
 
@@ -9414,31 +9583,35 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     const op2 = card.querySelector('.opt-2').value.trim();
                     const op3 = card.querySelector('.opt-3').value.trim();
                     const op4 = card.querySelector('.opt-4').value.trim();
-                    const ansIndex = card.querySelector('.q-answer').value;
+                    
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    let ansIndex = 0;
+                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                    
                     const exp = card.querySelector('.q-exp').value.trim();
+                    const isRapid = card.querySelector('.q-rapid').checked;
 
-                    if (!text || !op1 || !op2 || !op3 || !op4) {
-                        hasError = true;
-                    }
+                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
 
                     const options = [op1, op2, op3, op4];
-                    const answer = options[parseInt(ansIndex) - 1];
+                    const answer = options[ansIndex];
 
                     questions.push({
                         question: text,
                         options: options,
                         answer: answer,
-                        explanation: exp || 'Better luck next time! 🤕'
+                        explanation: exp || 'Better luck next time! 🤕',
+                        is_rapid_fire: isRapid
                     });
                 });
 
                 if (hasError) {
-                    alert('Please ensure all question texts and 4 options are filled!');
+                    alert('Please ensure all question boxes and 4 options are completely filled!');
                     return tg.HapticFeedback.notificationOccurred('error');
                 }
 
                 const payload = {
-                    userId: ${userId},
+                    userId: userId,
                     title: title,
                     description: desc,
                     time_per_question: parseInt(time),
@@ -9447,7 +9620,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
                 document.getElementById('quiz-form').style.display = 'none';
                 document.getElementById('loading').style.display = 'block';
-                tg.HapticFeedback.impactOccurred('medium');
+                tg.HapticFeedback.impactOccurred('heavy');
 
                 try {
                     const res = await fetch('/api/quiz/create', {
@@ -9460,12 +9633,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     if (data.success) {
                         tg.HapticFeedback.notificationOccurred('success');
                         
+                        // Clear drafts upon successful publish
+                        localStorage.removeItem(storageKey);
+                        
                         document.getElementById('loading').innerHTML = \`
-                            <div style="font-size:56px; margin-bottom:12px;">✅</div>
-                            <h3 style="color:#30d158; font-size:22px; margin-bottom: 8px;">Quiz Published!</h3>
-                            <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 12px; text-align:left; margin-bottom: 20px;">
-                                <p style="margin: 4px 0;"><strong>Category:</strong> <span style="color:#ea80fc;">\${data.category}</span></p>
-                                <p style="margin: 4px 0;"><strong>Quiz ID:</strong> <span style="color:#ea80fc; font-size: 13px;">\${data.quiz_id}</span></p>
+                            <div style="font-size:56px; margin-bottom:12px; animation: fadeUp 0.3s ease;">✅</div>
+                            <h3 style="color:#30d158; font-size:24px; margin-bottom: 8px;">Quiz Published!</h3>
+                            <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(48,209,88,0.2);">
+                                <p style="margin: 4px 0; color: #fff;"><strong>Category:</strong> <span style="color:#ea80fc;">\${data.category}</span></p>
+                                <p style="margin: 4px 0; color: #fff;"><strong>Quiz ID:</strong> <span style="color:#ea80fc; font-size: 13px;">\${data.quiz_id}</span></p>
                             </div>
                             <button class="btn" style="background: #30d158; box-shadow: 0 8px 20px rgba(48, 209, 88, 0.35);" onclick="tg.close()">Back to Bot</button>
                         \`;
@@ -9478,11 +9654,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     document.getElementById('loading').style.display = 'none';
                 }
             }
+
+            // Initialize app and load saved drafts
+            loadState();
         </script>
     </body>
     </html>
     `);
 });
+
 
 
 // ========================
