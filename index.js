@@ -1012,8 +1012,131 @@ app.get("/scratch-app/:userId/:token", async (req, res) => {
         return res.send(`<h2>Access Denied. Please complete the ad link first.</h2>`);
     }
     if (session.scratched) {
-        return res.send(`<h2>You have already claimed this scratch card!</h2>`);
+        return res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Already Claimed</title>
+            <script src="https://telegram.org/js/telegram-web-app.js"></script>
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+                
+                * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+                
+                body {
+                    background-color: #000000;
+                    background-image: radial-gradient(circle at 50% 0%, rgba(213, 0, 249, 0.12) 0%, transparent 60%);
+                    color: #ffffff;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+                    display: flex; justify-content: center; align-items: center;
+                    min-height: 100vh; padding: 20px; overflow-x: hidden;
+                }
+
+                .container {
+                    width: 100%; max-width: 400px;
+                    animation: slideUp 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+                }
+
+                @keyframes slideUp {
+                    from { transform: translateY(24px) scale(0.96); opacity: 0; }
+                    to { transform: translateY(0) scale(1); opacity: 1; }
+                }
+
+                .card {
+                    background: rgba(28, 28, 30, 0.75);
+                    backdrop-filter: blur(40px) saturate(180%);
+                    -webkit-backdrop-filter: blur(40px) saturate(180%);
+                    border: 0.5px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 28px;
+                    padding: 36px 30px;
+                    text-align: center;
+                    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+                }
+
+                .icon-wrapper {
+                    width: 72px; height: 72px;
+                    background: linear-gradient(135deg, #FFDF00, #D4AF37);
+                    border-radius: 20px;
+                    display: flex; justify-content: center; align-items: center;
+                    font-size: 34px; margin: 0 auto 22px;
+                    box-shadow: 0 12px 28px rgba(212, 175, 55, 0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+                }
+
+                h1 { 
+                    font-size: 22px; font-weight: 700; 
+                    margin-bottom: 8px; letter-spacing: -0.4px; 
+                }
+                
+                p.subtitle { 
+                    font-size: 14.5px; color: #8e8e93; 
+                    line-height: 1.5; margin-bottom: 26px; 
+                }
+
+                .info-box {
+                    background: rgba(120, 120, 128, 0.16);
+                    border: 0.5px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 16px; padding: 16px; text-align: left;
+                    position: relative; overflow: hidden;
+                }
+
+                .info-box::before {
+                    content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+                    background: linear-gradient(180deg, #bf5af2, #d500f9);
+                }
+
+                .info-title { 
+                    display: flex; align-items: center; gap: 8px; 
+                    font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 6px; 
+                }
+                
+                .info-text { 
+                    font-size: 13px; color: #aeaeb2; line-height: 1.55; 
+                }
+
+                .btn-close {
+                    margin-top: 26px; width: 100%;
+                    background: rgba(255, 255, 255, 0.08); 
+                    border: 0.5px solid rgba(255, 255, 255, 0.12);
+                    padding: 16px; color: white; font-weight: 600; 
+                    border-radius: 16px; font-size: 16px; letter-spacing: -0.2px;
+                    cursor: pointer; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                }
+
+                .btn-close:active { 
+                    transform: scale(0.96); 
+                    background: rgba(255, 255, 255, 0.12); 
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="card">
+                    <div class="icon-wrapper">✨</div>
+                    <h1>Already Claimed</h1>
+                    <p class="subtitle">You have already scratched this card and collected your reward.</p>
+                    
+                    <div class="info-box">
+                        <div class="info-title">💡 What's next?</div>
+                        <div class="info-text">
+                            The MythoPoints were already credited to your wallet. Come back tomorrow for a brand new daily scratch card!
+                        </div>
+                    </div>
+
+                    <button class="btn-close" onclick="Telegram.WebApp.close()">Close App</button>
+                </div>
+            </div>
+            <script>
+                const tg = window.Telegram.WebApp;
+                tg.expand();
+                tg.HapticFeedback.notificationOccurred('warning');
+            </script>
+        </body>
+        </html>
+        `);
     }
+
 
     let reward = session.reward;
     if (!reward) {
