@@ -9866,26 +9866,31 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             const tg = window.Telegram.WebApp;
             tg.expand();
             tg.setHeaderColor('#1c0a2b');
-            const userId = \`${userId}\`;
+            
+            // Fixed: Use standard quotes here so it doesn't conflict with res.send
+            const userId = "${userId}"; 
             let questionCount = 0;
 
             // Load all user quizzes
             async function loadQuizzes() {
                 const list = document.getElementById('quiz-list');
                 try {
-                    const res = await fetch(`/api/quiz/manage/list/${userId}`);
+                    // Fixed: Use string concatenation to avoid backtick conflicts
+                    const res = await fetch('/api/quiz/manage/list/' + userId);
                     const data = await res.json();
         
                     if (data.success && data.quizzes.length > 0) {
-                        list.innerHTML = data.quizzes.map(q => `
-                            <div class="quiz-card" id="card-${q._id}">
+                        // Fixed: Escaped the backticks (\`) and dollar signs (\$) 
+                        // so Node.js leaves them alone for the browser to render
+                        list.innerHTML = data.quizzes.map(q => \`
+                            <div class="quiz-card" id="card-\${q._id}">
                                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <div class="quiz-card-title">${q.title}</div>
+                                    <div class="quiz-card-title">\${q.title}</div>
                                 </div>
-                                <div class="quiz-card-stats">Questions: ${q.total_questions} • Time: ${q.time_per_question}s</div>
+                                <div class="quiz-card-stats">Questions: \${q.total_questions} • Time: \${q.time_per_question}s</div>
                     
                                 <!-- 🔥 NEW: START DIRECTLY IN GROUP BUTTON -->
-                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_${q._id}');" 
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}');" 
                                         style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 10px; border-radius: 12px; color: #000; font-size: 13px; font-weight: 800; cursor: pointer; margin-top: 10px; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
                                         onmousedown="this.style.transform='scale(0.95)'" 
                                         onmouseup="this.style.transform='scale(1)'" 
@@ -9894,11 +9899,11 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                                 </button>
                     
                                 <div class="btn-group">
-                                    <button class="btn btn-edit" onclick="openEdit('${q._id}')">✏️ Edit</button>
-                                    <button class="btn btn-delete" onclick="deleteQuiz('${q._id}')">🗑️ Delete</button>
+                                    <button class="btn btn-edit" onclick="openEdit('\${q._id}')">✏️ Edit</button>
+                                    <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
                                 </div>
                             </div>
-                        `).join('');
+                        \`).join('');
                     } else {
                         list.innerHTML = '<div class="empty-state">No quizzes found. Create one first!</div>';
                     }
@@ -9906,8 +9911,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     list.innerHTML = '<div class="empty-state">Failed to load quizzes.</div>';
                 }
             }
-
-                              
 
             // Open Edit Form and Fetch Questions
             async function openEdit(quizId) {
