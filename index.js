@@ -3908,7 +3908,7 @@ app.get("/AntiBypassError", (req, res) => {
 });
 
 // ==========================================
-// REST API TO RECEIVE MINI-APP QUIZZES
+// REST API TO RECEIVE MINI-APP QUIZZES (NO TELEGRAM PM)
 // ==========================================
 app.post("/api/quiz/create", async (req, res) => {
     try {
@@ -3918,10 +3918,8 @@ app.post("/api/quiz/create", async (req, res) => {
             return res.status(400).json({ success: false, error: "Missing required fields or questions." });
         }
 
-        // Auto-generate a clean category string from the title
         const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
 
-        // 1. Build & Insert Metadata
         const metadata = {
             title: title,
             description: description,
@@ -3937,8 +3935,6 @@ app.post("/api/quiz/create", async (req, res) => {
         const metaResult = await quizMetadataCollection.insertOne(metadata);
         const quizId = metaResult.insertedId;
 
-        // 2. Build & Insert all Question Documents
-        // 2. Build & Insert all Question Documents
         const questionDocs = questions.map(q => ({
             quiz_id: quizId,
             category: category,
@@ -3947,30 +3943,11 @@ app.post("/api/quiz/create", async (req, res) => {
             answer: q.answer,
             explanation: q.explanation,
             is_active: true,
-            is_rapid_fire: q.is_rapid_fire === true // Ensures Rapid Fire state is mapped properly
+            is_rapid_fire: q.is_rapid_fire === true 
         }));
-
 
         await quizCollection.insertMany(questionDocs);
 
-        // 3. Optional: Send a confirmation message to the admin directly on Telegram via node-fetch
-        const botToken = process.env.BOT_TOKEN; // Ensure your .env has BOT_TOKEN
-        if (botToken) {
-            const startCommand = `/quizstart <group_id> ${quizId.toString()}`;
-            const msgText = `✅ **Quiz Created Successfully via Mini App!**\n\n📚 **Title:** ${title}\n🏷️ **Category:** \`${category}\`\n🆔 **Quiz ID:** \`${quizId.toString()}\`\n❓ **Questions:** ${questions.length}\n\n**To start this quiz in a group, use:**\n\`${startCommand}\``;
-            
-            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: userId,
-                    text: msgText,
-                    parse_mode: 'Markdown'
-                })
-            }).catch(e => console.error("Telegram Webhook Notification Error:", e));
-        }
-
-        // 4. Return success back to the Mini App
         res.json({ success: true, quiz_id: quizId.toString(), category: category });
 
     } catch (e) {
@@ -3978,6 +3955,8 @@ app.post("/api/quiz/create", async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
+
+        
 
 
 
@@ -9273,7 +9252,8 @@ app.get("/api/tv/schedule", async (req, res) => {
 
 
 // ==========================================
-// QUIZ CREATOR MINI APP UI (V2 - Smooth & Persistent)
+// QUIZ CREATOR MINI APP UI (V5 - Ultimate Edition)
+// Features: Gradient Mesh, Sticky Action Bar, Confetti, Auto-Save, Rapid Fire, QuizBot UI
 // ==========================================
 app.get("/create-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -9285,105 +9265,180 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>Quiz Creator</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        ${THEME_CSS}
+        <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+        \${THEME_CSS}
         <style>
-            body { padding-bottom: 60px; overflow-y: auto; align-items: flex-start; }
-            .container { max-width: 600px; width: 95%; margin: 20px auto; animation: fadeUp 0.4s ease; padding: 25px 20px; }
-            @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+            /* Animated Gradient Mesh Background */
+            body { 
+                background: linear-gradient(-45deg, #1c0a2b, #3b0d66, #0a0014, #1a0033) !important; 
+                background-size: 400% 400% !important; 
+                animation: gradientMesh 12s ease infinite !important;
+                padding-bottom: 100px; /* Space for sticky bar */
+                overflow-x: hidden;
+                color: #ffffff;
+            }
+            @keyframes gradientMesh {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+            }
+
+            .container { max-width: 600px; width: 95%; margin: 20px auto; animation: fadeUp 0.5s cubic-bezier(0.25, 1, 0.5, 1); padding: 25px 20px; }
+            @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
             
-            .header-icon { font-size: 48px; margin-bottom: 12px; text-shadow: 0 10px 30px rgba(213,0,249,0.5); }
+            .header-icon { font-size: 54px; margin-bottom: 8px; text-shadow: 0 10px 30px rgba(213,0,249,0.6); animation: float 3s ease-in-out infinite; display: inline-block; }
+            @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
             
-            .form-group { margin-bottom: 16px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.8px;}
+            .form-group { margin-bottom: 18px; text-align: left; }
+            .form-group label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 1px;}
             
-            .form-control { width: 100%; padding: 14px 16px; border-radius: 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 15px; outline: none; transition: all 0.3s; }
-            .form-control:focus { border-color: #d500f9; background: rgba(255,255,255,0.09); box-shadow: 0 0 15px rgba(213,0,249,0.2); }
+            /* Micro-Interactions on Inputs */
+            .form-control { width: 100%; padding: 16px; border-radius: 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 15px; outline: none; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+            .form-control:focus { transform: translateY(-2px); border-color: #ea80fc; background: rgba(255,255,255,0.08); box-shadow: 0 10px 25px rgba(213,0,249,0.2); }
             textarea.form-control { resize: none; font-family: inherit; }
 
-            .q-card { background: rgba(28,28,30,0.8); border: 1px solid rgba(255,255,255,0.08); padding: 20px; border-radius: 20px; margin-bottom: 20px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.3); transition: transform 0.2s; }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-weight: 800; color: #ea80fc; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; }
+            .q-card { background: rgba(28,28,30,0.6); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); padding: 22px; border-radius: 24px; margin-bottom: 24px; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.4); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s; }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; font-weight: 800; color: #ea80fc; font-size: 14px; text-transform: uppercase; letter-spacing: 1.2px; }
             
-            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 8px 14px; border-radius: 12px; font-size: 12px; font-weight: 800; cursor: pointer; transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); }
             .btn-remove:active { transform: scale(0.9); background: rgba(255,69,58,0.2); }
             
-            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.4); width: 100%; padding: 16px; border-radius: 16px; font-weight: bold; font-size: 15px; margin-bottom: 24px; cursor: pointer; transition: all 0.2s; }
-            .btn-add:active { transform: scale(0.96); background: rgba(48,209,88,0.2); }
+            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.3); width: 100%; padding: 18px; border-radius: 20px; font-weight: 800; font-size: 15px; margin-bottom: 30px; cursor: pointer; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+            .btn-add:hover { background: rgba(48,209,88,0.15); }
+            .btn-add:active { transform: scale(0.96); }
 
-            /* Telegram QuizBot Style Options */
-            .options-group { background: rgba(0,0,0,0.3); border-radius: 16px; padding: 10px 16px; margin: 16px 0; border: 1px solid rgba(255,255,255,0.04); }
-            .option-row { display: flex; align-items: center; margin-bottom: 4px; cursor: pointer; position: relative; }
-            .option-row:last-child { margin-bottom: 0; }
+            /* Interactive Option Cards (QuizBot Style) */
+            .options-group { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
+            .option-card { 
+                display: flex; align-items: center; padding: 6px 16px; 
+                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); 
+                border-radius: 18px; cursor: pointer; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+                position: relative; overflow: hidden;
+            }
+            .option-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.06); box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
             
-            /* Custom Radio Tick */
-            .option-row input[type="radio"] { display: none; }
-            .radio-custom { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 14px; flex-shrink: 0; transition: 0.2s; }
-            .option-row input[type="radio"]:checked + .radio-custom { border-color: #30d158; }
-            .option-row input[type="radio"]:checked + .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #30d158; font-size: 14px; font-weight: 900; }
+            .option-card input[type="radio"] { display: none; }
+            .radio-custom { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 12px; flex-shrink: 0; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
             
-            .option-row .opt-val { flex: 1; border: none; border-bottom: 1px solid rgba(255,255,255,0.08); border-radius: 0; background: transparent; padding: 14px 0; font-size: 15px; }
-            .option-row:last-child .opt-val { border-bottom: none; }
-            .option-row .opt-val:focus { border-bottom-color: #ea80fc; }
+            /* Bulletproof JS-Driven Glow State */
+            .option-card.selected { 
+                border-color: #30d158; background: rgba(48,209,88,0.1); 
+                box-shadow: 0 0 20px rgba(48,209,88,0.25); transform: translateY(-2px);
+            }
+            .option-card.selected .radio-custom { border-color: #30d158; background: #30d158; box-shadow: 0 0 10px rgba(48,209,88,0.5); }
+            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #000; font-size: 14px; font-weight: 900; }
+            
+            .option-card .opt-val { flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; padding: 12px 0; font-weight: 500; transition: color 0.3s; }
+            .option-card .opt-val::placeholder { color: rgba(255,255,255,0.3); }
 
-            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 12px; }
+            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 16px; padding: 16px; }
             
-            /* Toggle Switch for Rapid Fire */
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.25s; flex-shrink: 0; }
-            .toggle-switch:checked { background: #d500f9; }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+            /* Perfect iOS Toggle Switch */
+            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); }
+            .toggle-switch { position: relative; width: 51px; height: 31px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 31px; outline: none; cursor: pointer; transition: background 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); flex-shrink: 0; }
+            .toggle-switch:checked { background: #d500f9; box-shadow: 0 0 15px rgba(213,0,249,0.4); }
+            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 3px 8px rgba(0,0,0,0.25); }
             .toggle-switch:checked::after { transform: translateX(20px); }
 
-            .top-bar-save { position: fixed; top: 10px; right: 15px; font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 600; z-index: 100; transition: 0.3s; opacity: 0; }
+            /* Sticky Bottom Action Bar */
+            .sticky-action-bar {
+                position: fixed; bottom: 0; left: 0; width: 100%;
+                background: rgba(15, 5, 25, 0.85); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                border-top: 1px solid rgba(255,255,255,0.08);
+                padding: 16px 20px calc(16px + env(safe-area-inset-bottom));
+                display: flex; gap: 12px; z-index: 100;
+                box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+                transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+            }
+            .sticky-action-bar.visible { transform: translateY(0); }
+            
+            .sticky-action-bar .btn-publish { flex: 2; background: linear-gradient(135deg, #d500f9, #651fff); border: none; padding: 16px; border-radius: 18px; color: #fff; font-weight: 800; font-size: 16px; box-shadow: 0 8px 25px rgba(213,0,249,0.4); cursor: pointer; transition: transform 0.2s; }
+            .sticky-action-bar .btn-publish:active { transform: scale(0.96); box-shadow: 0 4px 15px rgba(213,0,249,0.5); }
+            
+            .sticky-action-bar .btn-clear { flex: 1; background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.2); border-radius: 18px; color: #ff453a; font-weight: 700; font-size: 14px; cursor: pointer; transition: transform 0.2s; }
+            .sticky-action-bar .btn-clear:active { transform: scale(0.96); background: rgba(255,69,58,0.2); }
+
+            .top-bar-save { position: fixed; top: 12px; right: 16px; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); padding: 6px 12px; border-radius: 20px; font-size: 11px; color: #30d158; font-weight: 700; z-index: 100; transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1); opacity: 0; border: 1px solid rgba(48,209,88,0.3); }
             .top-bar-save.show { opacity: 1; }
         </style>
     </head>
     <body>
         <div class="top-bar-save" id="save-indicator">✓ Saved to drafts</div>
         
-        <div class="container">
-            <div class="header-icon">📝</div>
-            <h2>Create New Quiz</h2>
-            <p style="margin-bottom: 24px; color: rgba(255,255,255,0.6);">Build your questions and publish directly to the bot database. Your progress autosaves.</p>
+        <div class="container" id="main-content">
+            <div style="text-align: center;">
+                <div class="header-icon">✨</div>
+                <h2 style="font-weight: 800; letter-spacing: -0.5px; font-size: 26px;">Create New Quiz</h2>
+                <p style="margin-bottom: 32px; color: rgba(255,255,255,0.5); font-size: 14px;">Build your questions and publish directly to the bot database. Progress autosaves.</p>
+            </div>
             
             <div id="quiz-form">
-                <div class="form-group">
-                    <label>Quiz Title</label>
-                    <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                <div class="q-card" style="margin-bottom: 32px; border-color: rgba(213,0,249,0.3); background: rgba(45,10,80,0.4);">
+                    <div class="form-group">
+                        <label>Quiz Title</label>
+                        <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description of the quiz" required></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Base Time Per Question (Seconds)</label>
+                        <input type="number" id="q-time" class="form-control" value="15" required>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description of the quiz" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Base Time Per Question (Seconds)</label>
-                    <input type="number" id="q-time" class="form-control" value="15" required>
-                </div>
-
-                <hr style="border: none; border-top: 1px dashed rgba(255,255,255,0.15); margin: 30px 0;">
 
                 <div id="questions-container"></div>
 
                 <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
-
-                <button class="btn" id="submit-btn" onclick="submitQuiz()">🚀 Publish Quiz to Bot</button>
-                <button class="btn" style="background: rgba(255,69,58,0.1); color: #ff453a; box-shadow: none; margin-top: 12px;" onclick="clearDrafts()">🗑️ Clear Drafts</button>
             </div>
             
-            <div id="loading" style="display:none; margin-top:30px; text-align:center;">
+            <div id="loading" style="display:none; margin-top:40px; text-align:center;">
                 <div class="loader"></div>
-                <p style="color: #ea80fc; font-weight: bold;">Generating and saving to database...</p>
+                <p style="color: #ea80fc; font-weight: 800; letter-spacing: 1px;">Publishing to Database...</p>
             </div>
+        </div>
+
+        <!-- Sticky Bottom Action Bar -->
+        <div class="sticky-action-bar visible" id="actionBar">
+            <button class="btn-clear" onclick="clearDrafts()">🗑️ Clear</button>
+            <button class="btn-publish" id="publish-btn" onclick="submitQuiz()">🚀 Publish Quiz</button>
         </div>
 
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            tg.setHeaderColor('#000000');
+            tg.setHeaderColor('#1c0a2b');
             
-            const userId = ${userId};
+            const userId = \`${userId}\`;
             const storageKey = \`mytho_quiz_draft_\${userId}\`;
             let questionCount = 0;
             let saveTimeout;
+
+            // Confetti Animation for Success Screen
+            function triggerConfetti() {
+                const end = Date.now() + 2000;
+                (function frame() {
+                    confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
+                    confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
+            }
+
+            // Bulletproof UI Toggler for Option Cards
+            function updateOptionStyles(cardId) {
+                const card = document.getElementById(cardId);
+                if (!card) return;
+                const optionCards = card.querySelectorAll('.option-card');
+                optionCards.forEach(oc => {
+                    const radio = oc.querySelector('input[type="radio"]');
+                    if (radio && radio.checked) {
+                        oc.classList.add('selected');
+                    } else {
+                        oc.classList.remove('selected');
+                    }
+                });
+            }
 
             // ==========================================
             // UI BUILDERS
@@ -9405,37 +9460,48 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
                     
                     <div class="options-group">
-                        <label class="option-row">
+                        <label class="option-card selected">
                             <input type="radio" name="q-\${id}-ans" value="0" checked>
                             <span class="radio-custom"></span>
-                            <input type="text" class="form-control opt-val" placeholder="Option 1" required>
+                            <input type="text" class="opt-val" placeholder="Option 1" required>
                         </label>
-                        <label class="option-row">
+                        <label class="option-card">
                             <input type="radio" name="q-\${id}-ans" value="1">
                             <span class="radio-custom"></span>
-                            <input type="text" class="form-control opt-val" placeholder="Option 2" required>
+                            <input type="text" class="opt-val" placeholder="Option 2" required>
                         </label>
-                        <label class="option-row">
+                        <label class="option-card">
                             <input type="radio" name="q-\${id}-ans" value="2">
                             <span class="radio-custom"></span>
-                            <input type="text" class="form-control opt-val" placeholder="Option 3" required>
+                            <input type="text" class="opt-val" placeholder="Option 3" required>
                         </label>
-                        <label class="option-row">
+                        <label class="option-card">
                             <input type="radio" name="q-\${id}-ans" value="3">
                             <span class="radio-custom"></span>
-                            <input type="text" class="form-control opt-val" placeholder="Option 4" required>
+                            <input type="text" class="opt-val" placeholder="Option 4" required>
                         </label>
                     </div>
 
                     <input type="text" class="form-control q-exp" placeholder="Add an explanation... (Optional)">
                     
                     <div class="setting-item">
-                        <span style="font-size:13px; font-weight:700; color:#ffd60a;">⚡ Rapid Fire (7s Timer)</span>
+                        <span style="font-size:13px; font-weight:800; color:#ffd60a; display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:18px;">⚡</span> Rapid Fire (7s)
+                        </span>
                         <input type="checkbox" class="toggle-switch q-rapid">
                     </div>
                 \`;
                 
                 container.appendChild(qDiv);
+                
+                // Add event listeners to radio buttons to update the Neon Glow UI
+                const radios = qDiv.querySelectorAll('input[type="radio"]');
+                radios.forEach(r => r.addEventListener('change', () => {
+                    tg.HapticFeedback.impactOccurred('light');
+                    updateOptionStyles(\`q-card-\${id}\`);
+                    triggerAutoSave();
+                }));
+
                 tg.HapticFeedback.selectionChanged();
                 triggerAutoSave();
                 return id;
@@ -9444,14 +9510,14 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             function removeQuestion(id) {
                 const el = document.getElementById(\`q-card-\${id}\`);
                 if (el) {
-                    el.style.transform = 'scale(0.9)';
+                    el.style.transform = 'scale(0.8) translateY(20px)';
                     el.style.opacity = '0';
                     setTimeout(() => {
                         el.remove();
                         triggerAutoSave();
-                    }, 200);
+                    }, 300);
                 }
-                tg.HapticFeedback.impactOccurred('light');
+                tg.HapticFeedback.impactOccurred('medium');
             }
 
             // ==========================================
@@ -9466,7 +9532,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 };
                 
                 document.querySelectorAll('.q-card').forEach(card => {
-                    const text = card.querySelector('.q-text').value;
+                    if (card.id === '') return; // Skip title card if it matches query accidentally
+                    const textNode = card.querySelector('.q-text');
+                    if (!textNode) return; 
+
+                    const text = textNode.value;
                     const opts = card.querySelectorAll('.opt-val');
                     const radios = card.querySelectorAll('input[type="radio"]');
                     
@@ -9478,10 +9548,10 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     
                     data.questions.push({
                         text: text,
-                        opt1: opts[0].value,
-                        opt2: opts[1].value,
-                        opt3: opts[2].value,
-                        opt4: opts[3].value,
+                        opt1: opts[0] ? opts[0].value : '',
+                        opt2: opts[1] ? opts[1].value : '',
+                        opt3: opts[2] ? opts[2].value : '',
+                        opt4: opts[3] ? opts[3].value : '',
                         ansIndex: ansIndex,
                         exp: exp,
                         isRapid: isRapid
@@ -9490,7 +9560,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 
                 localStorage.setItem(storageKey, JSON.stringify(data));
                 
-                // Show saved indicator
                 const indicator = document.getElementById('save-indicator');
                 indicator.classList.add('show');
                 setTimeout(() => indicator.classList.remove('show'), 2000);
@@ -9498,7 +9567,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
             function triggerAutoSave() {
                 clearTimeout(saveTimeout);
-                saveTimeout = setTimeout(saveState, 500); // Debounce to prevent lag
+                saveTimeout = setTimeout(saveState, 500); 
             }
 
             function loadState() {
@@ -9532,43 +9601,48 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 
                                 card.querySelector('.q-exp').value = q.exp || '';
                                 card.querySelector('.q-rapid').checked = q.isRapid || false;
+                                
+                                // Apply the Neon glow to the loaded selection
+                                updateOptionStyles(\`q-card-\${id}\`);
                             });
                         } else {
-                            addQuestion(); // Backup fallback
+                            addQuestion();
                         }
                     } catch(e) {
-                        addQuestion(); // Fallback on error
+                        addQuestion();
                     }
                 } else {
-                    addQuestion(); // Initial load
+                    addQuestion();
                 }
             }
 
             function clearDrafts() {
                 if(confirm("Are you sure you want to delete all drafted questions?")) {
+                    tg.HapticFeedback.impactOccurred('heavy');
                     localStorage.removeItem(storageKey);
                     location.reload();
                 }
             }
 
-            // Bind global input listener for auto-save
+            // Bind global input listener for auto-save (catches every keystroke)
             document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
             document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
 
             // ==========================================
-            // SUBMIT LOGIC
+            // SUBMIT LOGIC & SUCCESS CONFETTI SCREEN
             // ==========================================
             async function submitQuiz() {
                 const title = document.getElementById('q-title').value.trim();
                 const desc = document.getElementById('q-desc').value.trim();
                 const time = document.getElementById('q-time').value.trim();
+                const publishBtn = document.getElementById('publish-btn');
                 
                 if (!title || !desc || !time) {
                     alert('Please fill out the Quiz Title and Description!');
                     return tg.HapticFeedback.notificationOccurred('error');
                 }
 
-                const cards = document.querySelectorAll('.q-card');
+                const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
                 if (cards.length === 0) {
                     alert('Add at least one question!');
                     return tg.HapticFeedback.notificationOccurred('error');
@@ -9579,10 +9653,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
                 cards.forEach(card => {
                     const text = card.querySelector('.q-text').value.trim();
-                    const op1 = card.querySelector('.opt-1').value.trim();
-                    const op2 = card.querySelector('.opt-2').value.trim();
-                    const op3 = card.querySelector('.opt-3').value.trim();
-                    const op4 = card.querySelector('.opt-4').value.trim();
+                    
+                    const optInputs = card.querySelectorAll('.opt-val');
+                    const op1 = optInputs[0].value.trim();
+                    const op2 = optInputs[1].value.trim();
+                    const op3 = optInputs[2].value.trim();
+                    const op4 = optInputs[3].value.trim();
                     
                     const radios = card.querySelectorAll('input[type="radio"]');
                     let ansIndex = 0;
@@ -9591,7 +9667,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     const exp = card.querySelector('.q-exp').value.trim();
                     const isRapid = card.querySelector('.q-rapid').checked;
 
-                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+                    if (!text || !op1 || !op2 || !op3 || !op4) {
+                        hasError = true;
+                    }
 
                     const options = [op1, op2, op3, op4];
                     const answer = options[ansIndex];
@@ -9618,7 +9696,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     questions: questions
                 };
 
+                // Hide sticky bar and show loading
                 document.getElementById('quiz-form').style.display = 'none';
+                document.getElementById('actionBar').classList.remove('visible'); 
                 document.getElementById('loading').style.display = 'block';
                 tg.HapticFeedback.impactOccurred('heavy');
 
@@ -9632,18 +9712,31 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     
                     if (data.success) {
                         tg.HapticFeedback.notificationOccurred('success');
+                        triggerConfetti(); // FIRE CONFETTI!
                         
-                        // Clear drafts upon successful publish
                         localStorage.removeItem(storageKey);
                         
+                        const commandText = \`/quizstart <group_id> \${data.quiz_id}\`;
+                        
                         document.getElementById('loading').innerHTML = \`
-                            <div style="font-size:56px; margin-bottom:12px; animation: fadeUp 0.3s ease;">✅</div>
-                            <h3 style="color:#30d158; font-size:24px; margin-bottom: 8px;">Quiz Published!</h3>
-                            <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(48,209,88,0.2);">
-                                <p style="margin: 4px 0; color: #fff;"><strong>Category:</strong> <span style="color:#ea80fc;">\${data.category}</span></p>
-                                <p style="margin: 4px 0; color: #fff;"><strong>Quiz ID:</strong> <span style="color:#ea80fc; font-size: 13px;">\${data.quiz_id}</span></p>
+                            <div style="font-size:72px; margin-bottom:16px; animation: float 3s ease-in-out infinite; display: inline-block;">🏆</div>
+                            <h3 style="color:#30d158; font-size:28px; margin-bottom: 8px; font-weight: 900; letter-spacing: -0.5px;">Quiz is Ready!</h3>
+                            <p style="color: rgba(255,255,255,0.7); font-size: 15px; margin-bottom: 24px;">Your epic quiz has been deployed.</p>
+                            
+                            <div style="background: rgba(45,10,80,0.6); backdrop-filter: blur(10px); padding: 24px; border-radius: 24px; text-align:left; margin-bottom: 30px; border: 1px solid rgba(213,0,249,0.3); box-shadow: 0 15px 35px rgba(0,0,0,0.4);">
+                                <p style="margin: 0 0 10px 0; color: #fff; font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">📌 Start the Quiz</p>
+                                <p style="margin: 0 0 16px 0; color: rgba(255,255,255,0.6); font-size: 13px; line-height: 1.6;">
+                                    1. Go to any group where the bot is an admin.<br>
+                                    2. Send the exact command below:
+                                </p>
+                                
+                                <div style="background: rgba(0,0,0,0.6); padding: 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(255,255,255,0.08);">
+                                    <code id="quizCmdText" style="color: #ea80fc; font-size: 14px; font-weight: bold; word-break: break-all; user-select: all;">\${commandText}</code>
+                                    <button onclick="navigator.clipboard.writeText('\${commandText}'); tg.HapticFeedback.impactOccurred('light'); this.innerText='Copied! ✓'; this.style.background='#30d158'; this.style.color='#000'; setTimeout(()=> {this.innerText='📋 Copy Command'; this.style.background='rgba(255,255,255,0.1)'; this.style.color='#fff';}, 2000);" style="background: rgba(255,255,255,0.1); border: none; padding: 12px; border-radius: 12px; color: #fff; font-size: 13px; font-weight: 800; cursor: pointer; transition: 0.3s; text-transform: uppercase; letter-spacing: 0.5px;">📋 Copy Command</button>
+                                </div>
                             </div>
-                            <button class="btn" style="background: #30d158; box-shadow: 0 8px 20px rgba(48, 209, 88, 0.35);" onclick="tg.close()">Back to Bot</button>
+                            
+                            <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 18px; border-radius: 20px; font-weight: 900; font-size: 16px; border: none; cursor: pointer; box-shadow: 0 10px 25px rgba(255,255,255,0.2);" onclick="tg.close()">CLOSE APP</button>
                         \`;
                     } else {
                         throw new Error(data.error);
@@ -9651,11 +9744,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 } catch (e) {
                     alert('Error creating quiz: ' + e.message);
                     document.getElementById('quiz-form').style.display = 'block';
+                    document.getElementById('actionBar').classList.add('visible'); // Restore sticky bar
                     document.getElementById('loading').style.display = 'none';
                 }
             }
 
-            // Initialize app and load saved drafts
+            // Init
             loadState();
         </script>
     </body>
@@ -9664,6 +9758,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 });
 
 
+
+                        
 
 // ========================
 // HOME & FALLBACK ROUTE
