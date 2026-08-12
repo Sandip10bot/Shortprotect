@@ -3907,8 +3907,9 @@ app.get("/AntiBypassError", (req, res) => {
     renderBypassError(res);
 });
 
+
 // ==========================================
-// REST API TO RECEIVE MINI-APP QUIZZES (NO TELEGRAM PM)
+// REST API TO RECEIVE MINI-APP QUIZZES
 // ==========================================
 app.post("/api/quiz/create", async (req, res) => {
     try {
@@ -3955,7 +3956,6 @@ app.post("/api/quiz/create", async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
-
         
 
 
@@ -9255,7 +9255,7 @@ app.get("/api/tv/schedule", async (req, res) => {
 // QUIZ CREATOR MINI APP UI (V5 - Ultimate Edition)
 // Features: Gradient Mesh, Sticky Action Bar, Confetti, Auto-Save, Rapid Fire, QuizBot UI
 // ==========================================
-app.get("/create-quiz-app/:userId", (req, res) => {
+app.get("/creaheyhehte-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
     res.send(`
     <!DOCTYPE html>
@@ -9750,6 +9750,479 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
 
             // Init
+            loadState();
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+
+// ==========================================
+// QUIZ CREATOR MINI APP UI (V6 - Mobile Optimized & Clean CSS)
+// ==========================================
+app.get("/create-quiz-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>Quiz Creator</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            
+            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+            
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+                background: linear-gradient(-45deg, #1c0a2b, #3b0d66, #0a0014, #1a0033); 
+                background-size: 400% 400%; 
+                animation: gradientMesh 12s ease infinite;
+                margin: 0; padding: 0 0 110px 0; 
+                color: #ffffff; 
+                min-height: 100vh;
+                -webkit-font-smoothing: antialiased;
+                letter-spacing: -0.01em;
+            }
+
+            @keyframes gradientMesh {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+            }
+
+            .container { 
+                width: 100%; max-width: 500px; margin: 0 auto; 
+                padding: 20px 16px; 
+                animation: fadeUp 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+            }
+            @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+            
+            .header-icon { font-size: 44px; margin-bottom: 6px; text-shadow: 0 10px 30px rgba(213,0,249,0.6); }
+            
+            .form-group { margin-bottom: 14px; text-align: left; }
+            .form-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.8px;}
+            
+            .form-control { 
+                width: 100%; padding: 14px; border-radius: 14px; 
+                background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); 
+                color: #fff; font-size: 15px; outline: none; 
+                transition: all 0.3s; 
+            }
+            .form-control:focus { border-color: #ea80fc; background: rgba(255,255,255,0.08); box-shadow: 0 0 15px rgba(213,0,249,0.2); }
+            textarea.form-control { resize: none; font-family: inherit; }
+
+            .q-card { 
+                background: rgba(28,28,30,0.65); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); 
+                border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 20px; 
+                margin-bottom: 16px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.4); 
+            }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 800; color: #ea80fc; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+            
+            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
+            .btn-remove:active { transform: scale(0.9); }
+            
+            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.3); width: 100%; padding: 16px; border-radius: 16px; font-weight: 800; font-size: 14px; margin-bottom: 24px; cursor: pointer; }
+            .btn-add:active { transform: scale(0.97); }
+
+            /* Interactive Option Cards (QuizBot Style) */
+            .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+            .option-card { 
+                display: flex; align-items: center; padding: 4px 12px; 
+                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); 
+                border-radius: 14px; cursor: pointer; transition: all 0.2s; 
+            }
+            .option-card input[type="radio"] { display: none; }
+            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
+            
+            .option-card.selected { 
+                border-color: #30d158; background: rgba(48,209,88,0.12); 
+                box-shadow: 0 0 15px rgba(48,209,88,0.2); 
+            }
+            .option-card.selected .radio-custom { border-color: #30d158; background: #30d158; }
+            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #000; font-size: 13px; font-weight: 900; }
+            
+            .option-card .opt-val { flex: 1; background: transparent; border: none; color: #fff; font-size: 14px; outline: none; padding: 10px 0; font-weight: 500; }
+            .option-card .opt-val::placeholder { color: rgba(255,255,255,0.3); }
+
+            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 12px; }
+            
+            /* iOS Toggle Switch */
+            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+            .toggle-switch:checked { background: #d500f9; box-shadow: 0 0 12px rgba(213,0,249,0.4); }
+            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+            .toggle-switch:checked::after { transform: translateX(20px); }
+
+            /* Sticky Bottom Action Bar */
+            .sticky-action-bar {
+                position: fixed; bottom: 0; left: 0; width: 100%;
+                background: rgba(15, 5, 25, 0.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                border-top: 1px solid rgba(255,255,255,0.08);
+                padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+                display: flex; gap: 10px; z-index: 100;
+                box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+                transform: translateY(100%); transition: transform 0.3s ease;
+            }
+            .sticky-action-bar.visible { transform: translateY(0); }
+            
+            .sticky-action-bar .btn-publish { flex: 2; background: linear-gradient(135deg, #d500f9, #651fff); border: none; padding: 14px; border-radius: 14px; color: #fff; font-weight: 800; font-size: 15px; box-shadow: 0 6px 20px rgba(213,0,249,0.4); cursor: pointer; }
+            .sticky-action-bar .btn-clear { flex: 1; background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.2); border-radius: 14px; color: #ff453a; font-weight: 700; font-size: 13px; cursor: pointer; }
+
+            .top-bar-save { position: fixed; top: 10px; right: 12px; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); padding: 4px 10px; border-radius: 16px; font-size: 10px; color: #30d158; font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(48,209,88,0.3); }
+            .top-bar-save.show { opacity: 1; }
+
+            .loader { 
+                border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9;
+                border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; 
+                margin: 0 auto 16px auto;
+            }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+    </head>
+    <body>
+        <div class="top-bar-save" id="save-indicator">✓ Saved</div>
+        
+        <div class="container" id="main-content">
+            <div style="text-align: center;">
+                <div class="header-icon">✨</div>
+                <h2 style="font-weight: 800; font-size: 22px; margin-bottom: 4px;">Create New Quiz</h2>
+                <p style="margin-bottom: 24px; color: rgba(255,255,255,0.5); font-size: 13px;">Progress autosaves securely.</p>
+            </div>
+            
+            <div id="quiz-form">
+                <div class="q-card" style="margin-bottom: 24px; border-color: rgba(213,0,249,0.3); background: rgba(45,10,80,0.35);">
+                    <div class="form-group">
+                        <label>Quiz Title</label>
+                        <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description" required></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Time Per Question (Sec)</label>
+                        <input type="number" id="q-time" class="form-control" value="15" required>
+                    </div>
+                </div>
+
+                <div id="questions-container"></div>
+
+                <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
+            </div>
+            
+            <div id="loading" style="display:none; margin-top:30px; text-align:center;">
+                <div class="loader"></div>
+                <p style="color: #ea80fc; font-weight: 800; font-size: 14px;">Publishing to Database...</p>
+            </div>
+        </div>
+
+        <!-- Sticky Bottom Action Bar -->
+        <div class="sticky-action-bar visible" id="actionBar">
+            <button class="btn-clear" onclick="clearDrafts()">🗑️ Clear</button>
+            <button class="btn-publish" id="publish-btn" onclick="submitQuiz()">🚀 Publish Quiz</button>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.setHeaderColor('#1c0a2b');
+            
+            const userId = \`${userId}\`;
+            const storageKey = \`mytho_quiz_draft_\${userId}\`;
+            let questionCount = 0;
+            let saveTimeout;
+
+            function triggerConfetti() {
+                const end = Date.now() + 1500;
+                (function frame() {
+                    confetti({ particleCount: 4, angle: 60, spread: 50, origin: { x: 0 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
+                    confetti({ particleCount: 4, angle: 120, spread: 50, origin: { x: 1 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
+            }
+
+            function updateOptionStyles(cardId) {
+                const card = document.getElementById(cardId);
+                if (!card) return;
+                card.querySelectorAll('.option-card').forEach(oc => {
+                    const radio = oc.querySelector('input[type="radio"]');
+                    if (radio && radio.checked) {
+                        oc.classList.add('selected');
+                    } else {
+                        oc.classList.remove('selected');
+                    }
+                });
+            }
+
+            function addQuestion() {
+                questionCount++;
+                const id = questionCount;
+                const container = document.getElementById('questions-container');
+                const qDiv = document.createElement('div');
+                qDiv.className = 'q-card';
+                qDiv.id = \`q-card-\${id}\`;
+
+                qDiv.innerHTML = \`
+                    <div class="q-header">
+                        <span>Question \${id}</span>
+                        <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
+                    </div>
+                    
+                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+                    
+                    <div class="options-group">
+                        <label class="option-card selected">
+                            <input type="radio" name="q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        </label>
+                    </div>
+
+                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+                    
+                    <div class="setting-item">
+                        <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
+                        <input type="checkbox" class="toggle-switch q-rapid">
+                    </div>
+                \`;
+                
+                container.appendChild(qDiv);
+                
+                qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
+                    tg.HapticFeedback.impactOccurred('light');
+                    updateOptionStyles(\`q-card-\${id}\`);
+                    triggerAutoSave();
+                }));
+
+                tg.HapticFeedback.selectionChanged();
+                triggerAutoSave();
+                return id;
+            }
+
+            function removeQuestion(id) {
+                const el = document.getElementById(\`q-card-\${id}\`);
+                if (el) {
+                    el.style.transform = 'scale(0.9)';
+                    el.style.opacity = '0';
+                    setTimeout(() => {
+                        el.remove();
+                        triggerAutoSave();
+                    }, 200);
+                }
+                tg.HapticFeedback.impactOccurred('medium');
+            }
+
+            function saveState() {
+                const data = {
+                    title: document.getElementById('q-title').value,
+                    desc: document.getElementById('q-desc').value,
+                    time: document.getElementById('q-time').value,
+                    questions: []
+                };
+                
+                document.querySelectorAll('.q-card').forEach(card => {
+                    const textNode = card.querySelector('.q-text');
+                    if (!textNode) return; 
+
+                    const opts = card.querySelectorAll('.opt-val');
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    let ansIndex = 0;
+                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                    
+                    data.questions.push({
+                        text: textNode.value,
+                        opt1: opts[0] ? opts[0].value : '',
+                        opt2: opts[1] ? opts[1].value : '',
+                        opt3: opts[2] ? opts[2].value : '',
+                        opt4: opts[3] ? opts[3].value : '',
+                        ansIndex: ansIndex,
+                        exp: card.querySelector('.q-exp').value,
+                        isRapid: card.querySelector('.q-rapid').checked
+                    });
+                });
+                
+                localStorage.setItem(storageKey, JSON.stringify(data));
+                const indicator = document.getElementById('save-indicator');
+                indicator.classList.add('show');
+                setTimeout(() => indicator.classList.remove('show'), 1500);
+            }
+
+            function triggerAutoSave() {
+                clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(saveState, 400); 
+            }
+
+            function loadState() {
+                const saved = localStorage.getItem(storageKey);
+                if (saved) {
+                    try {
+                        const data = JSON.parse(saved);
+                        document.getElementById('q-title').value = data.title || '';
+                        document.getElementById('q-desc').value = data.desc || '';
+                        document.getElementById('q-time').value = data.time || '15';
+                        
+                        document.getElementById('questions-container').innerHTML = '';
+                        questionCount = 0;
+                        
+                        if (data.questions && data.questions.length > 0) {
+                            data.questions.forEach(q => {
+                                const id = addQuestion();
+                                const card = document.getElementById(\`q-card-\${id}\`);
+                                card.querySelector('.q-text').value = q.text || '';
+                                const opts = card.querySelectorAll('.opt-val');
+                                opts[0].value = q.opt1 || '';
+                                opts[1].value = q.opt2 || '';
+                                opts[2].value = q.opt3 || '';
+                                opts[3].value = q.opt4 || '';
+                                
+                                const radios = card.querySelectorAll('input[type="radio"]');
+                                if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
+                                
+                                card.querySelector('.q-exp').value = q.exp || '';
+                                card.querySelector('.q-rapid').checked = q.isRapid || false;
+                                updateOptionStyles(\`q-card-\${id}\`);
+                            });
+                        } else {
+                            addQuestion();
+                        }
+                    } catch(e) {
+                        addQuestion();
+                    }
+                } else {
+                    addQuestion();
+                }
+            }
+
+            function clearDrafts() {
+                if(confirm("Delete all drafted questions?")) {
+                    tg.HapticFeedback.impactOccurred('heavy');
+                    localStorage.removeItem(storageKey);
+                    location.reload();
+                }
+            }
+
+            document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
+            document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
+
+            async function submitQuiz() {
+                const title = document.getElementById('q-title').value.trim();
+                const desc = document.getElementById('q-desc').value.trim();
+                const time = document.getElementById('q-time').value.trim();
+                
+                if (!title || !desc || !time) {
+                    alert('Please fill out the Quiz Title and Description!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
+                if (cards.length === 0) {
+                    alert('Add at least one question!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const questions = [];
+                let hasError = false;
+
+                cards.forEach(card => {
+                    const text = card.querySelector('.q-text').value.trim();
+                    const optInputs = card.querySelectorAll('.opt-val');
+                    const op1 = optInputs[0].value.trim();
+                    const op2 = optInputs[1].value.trim();
+                    const op3 = optInputs[2].value.trim();
+                    const op4 = optInputs[3].value.trim();
+                    
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    let ansIndex = 0;
+                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                    
+                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+
+                    const options = [op1, op2, op3, op4];
+                    questions.push({
+                        question: text,
+                        options: options,
+                        answer: options[ansIndex],
+                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! 🤕',
+                        is_rapid_fire: card.querySelector('.q-rapid').checked
+                    });
+                });
+
+                if (hasError) {
+                    alert('Please ensure all question boxes and 4 options are completely filled!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const payload = { userId, title, description: desc, time_per_question: parseInt(time), questions };
+
+                document.getElementById('quiz-form').style.display = 'none';
+                document.getElementById('actionBar').classList.remove('visible'); 
+                document.getElementById('loading').style.display = 'block';
+                tg.HapticFeedback.impactOccurred('heavy');
+
+                try {
+                    const res = await fetch('/api/quiz/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        triggerConfetti();
+                        localStorage.removeItem(storageKey);
+                        
+                        const commandText = \`/quizstart <group_id> \${data.quiz_id}\`;
+                        
+                        document.getElementById('loading').innerHTML = \`
+                            <div style="font-size:56px; margin-bottom:12px;">🏆</div>
+                            <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
+                            <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
+                            
+                            <div style="background: rgba(45,10,80,0.6); padding: 18px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(213,0,249,0.3);">
+                                <p style="margin: 0 0 6px 0; color: #fff; font-size: 13px; font-weight: 800; text-transform: uppercase;">📌 Start the Quiz</p>
+                                <p style="margin: 0 0 12px 0; color: rgba(255,255,255,0.6); font-size: 12px; line-height: 1.4;">
+                                    Send this command in your Telegram group:
+                                </p>
+                                <div style="background: rgba(0,0,0,0.6); padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 10px; border: 1px solid rgba(255,255,255,0.08);">
+                                    <code style="color: #ea80fc; font-size: 13px; word-break: break-all; user-select: all;">\${commandText}</code>
+                                    <button onclick="navigator.clipboard.writeText('\${commandText}'); tg.HapticFeedback.impactOccurred('light'); this.innerText='Copied! ✓'; setTimeout(()=> {this.innerText='📋 Copy Command';}, 2000);" style="background: rgba(255,255,255,0.1); border: none; padding: 10px; border-radius: 10px; color: #fff; font-size: 12px; font-weight: bold; cursor: pointer;">📋 Copy Command</button>
+                                </div>
+                            </div>
+                            
+                            <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
+                        \`;
+                    } else {
+                        throw new Error(data.error);
+                    }
+                } catch (e) {
+                    alert('Error creating quiz: ' + e.message);
+                    document.getElementById('quiz-form').style.display = 'block';
+                    document.getElementById('actionBar').classList.add('visible');
+                    document.getElementById('loading').style.display = 'none';
+                }
+            }
+
             loadState();
         </script>
     </body>
