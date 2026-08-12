@@ -10232,7 +10232,87 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
 
 
-                        
+// ==========================================
+// UNIFIED MANAGER ENDPOINT (GET, PUT, DELETE)
+// ==========================================
+app.all("/api/quiz/manager/:userId", async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const method = req.method;
+        const quizId = req.query.quizId || req.body.quizId;
+
+        if (method === "GET") {
+            if (quizId) {
+                const oid = new ObjectId(quizId);
+                const metadata = await quizMetadataCollection.findOne({ _id: oid, created_by: userId });
+                if (!metadata) return res.status(404).json({ success: false, error: "Quiz not found." });
+                const questions = await quizCollection.find({ quiz_id: oid, is_active: true }).toArray();
+                return res.json({ success: true, metadata, questions });
+            } else {
+                const quizzes = await quizMetadataCollection.find({ created_by: userId, is_active: true }).sort({ created_at: -1 }).toArray();
+                return res.json({ success: true, quizzes });
+            }
+        }
+
+        if (method === "PUT") {
+            if (!quizId) return res.status(400).json({ success: false, error: "Missing quizId for update." });
+            const { title, description, time_per_question, questions } = req.body;
+            
+            if (!title || !questions || questions.length === 0) {
+                return res.status(400).json({ success: false, error: "Missing required fields or questions." });
+            }
+
+            const oid = new ObjectId(quizId);
+            const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+
+            await quizMetadataCollection.updateOne(
+                { _id: oid, created_by: userId },
+                { 
+                    $set: { 
+                        title, 
+                        description, 
+                        category, 
+                        time_per_question: time_per_question || 15, 
+                        total_questions: questions.length 
+                    } 
+                }
+            );
+
+            await quizCollection.deleteMany({ quiz_id: oid });
+            
+            const questionDocs = questions.map(q => ({
+                quiz_id: oid,
+                category: category,
+                question: q.question,
+                options: q.options,
+                answer: q.answer,
+                explanation: q.explanation,
+                is_active: true,
+                is_rapid_fire: q.is_rapid_fire === true
+            }));
+
+            await quizCollection.insertMany(questionDocs);
+
+            return res.json({ success: true, message: "Quiz updated successfully!" });
+        }
+
+        if (method === "DELETE") {
+            if (!quizId) return res.status(400).json({ success: false, error: "Missing quizId for deletion." });
+            const oid = new ObjectId(quizId);
+            
+            await quizMetadataCollection.deleteOne({ _id: oid, created_by: userId });
+            await quizCollection.deleteMany({ quiz_id: oid });
+
+            return res.json({ success: true, message: "Quiz deleted successfully." });
+        }
+
+        return res.status(405).json({ success: false, error: "Method Not Allowed" });
+    } catch (e) {
+        console.error("Quiz Manager Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error." });
+    }
+});
+                      
 
 // ========================
 // HOME & FALLBACK ROUTE
