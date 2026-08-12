@@ -1062,6 +1062,21 @@ app.post("/api/claim-scratch", async (req, res) => {
 });
 
 // ==========================================
+// 1. ADD THIS: SCRATCH CARD HISTORY API
+// (Place this right after your existing "/api/claim-scratch" route)
+// ==========================================
+app.get("/api/scratch/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        // Fetch all scratch cards for the user, newest first
+        const cards = await scratchCollection.find({ user_id: uid }).sort({ _id: -1 }).toArray();
+        res.json({ success: true, cards });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
 // SPIN & WIN (Web Version) – NEW
 // ==========================================
 
@@ -2566,7 +2581,7 @@ app.post("/api/payment/chat/mark-read", async (req, res) => {
 // Send a chat message
 app.post("/api/payment/chat/message", async (req, res) => {
     try {
-        const { senderId, receiverId, message } = req.body;
+        const { senderId, receiverId, message, senderName } = req.body;
         if (!senderId || !receiverId || !message) {
             return res.status(400).json({ success: false, error: "Missing fields." });
         }
@@ -2584,6 +2599,35 @@ app.post("/api/payment/chat/message", async (req, res) => {
             deletedFor: [],
             messageId: messageId
         });
+
+        // 🚀 ADVANCED TELEGRAM NOTIFICATION (Node.js equivalent of your Pyrogram code)
+        // Ensure you have BOT_TOKEN in your Koyeb/environment variables!
+        const botToken = process.env.BOT_TOKEN;
+        if (botToken) {
+            const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiverId}`;
+            const sName = senderName || "a user";
+            
+            // Fire and forget Telegram API call
+            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: receiverId,
+                    text: `📩 You have a new message from **${sName}**!`,
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "📱 Open MythoApp",
+                                    web_app: { url: dashboardUrl }
+                                }
+                            ]
+                        ]
+                    }
+                })
+            }).catch(e => console.error("Telegram Notify Error:", e));
+        }
         
         res.json({ success: true, messageId: messageId });
     } catch (e) {
@@ -5933,17 +5977,28 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
-    <!-- ========== SCRATCH CARD BANNER ========== -->
-    <a href="https://t.me/MythoSerialBot?start=scratchcard" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')">
-      <div class="scratch-btn-content">
-        <div class="scratch-icon-wrap">🎟️</div>
-        <div>
-          <div class="scratch-text-main">Daily Scratch Card</div>
-          <div class="scratch-text-sub">Win Mythopoints every day!</div>
+    <!-- ========== SCRATCH CARD BANNER & HISTORY BUTTON ========== -->
+    <div style="display: flex; gap: 12px; margin: 0 16px 16px 16px;">
+      <!-- Daily Scratch Banner -->
+      <a href="https://t.me/MythoSerialBot?start=scratchcard" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')" style="flex: 1; margin: 0;">
+        <div class="scratch-btn-content">
+          <div class="scratch-icon-wrap">🎟️</div>
+          <div>
+            <div class="scratch-text-main">Daily Scratch Card</div>
+            <div class="scratch-text-sub">Win Mythopoints every day!</div>
+          </div>
         </div>
-      </div>
-      <div class="scratch-arrow">➔</div>
-    </a>
+        <div class="scratch-arrow">➔</div>
+      </a>
+      
+      <!-- NEW: Small Square Scratch History Button -->
+      <button onclick="openScratchHistory()" style="width: 58px; height: auto; border-radius: 20px; background: linear-gradient(135deg, #2d0a50, #1c0a2b); border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 0;">
+        <svg viewBox="0 0 24 24" style="width: 28px; height: 28px; fill: #ea80fc;">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 9h-2V7h-2v5H6v-2H4v6h16v-6h-2v2h-2v-5h-2v5z"/>
+          <circle cx="12" cy="12" r="2" fill="#ffd60a"/>
+        </svg>
+      </button>
+    </div>
 
     <!-- ========== SPIN & WIN SECTION (Enhanced) ========== -->
     <div class="glass" style="margin: 12px 16px 8px;">
@@ -6495,6 +6550,17 @@ app.get("/mini/:userId", (req, res) => {
             <div class="spinner"></div>
         </div>
         <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('refLeaderboardModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
+  <!-- ========== SCRATCH HISTORY MODAL (Add before closing </body> tag) ========== -->
+  <div class="confirm-overlay" id="scratchHistoryModal">
+    <div class="confirm-box" style="text-align:left; max-width:340px; padding: 24px 16px; max-height: 80vh; display: flex; flex-direction: column;">
+        <h3 style="margin:0 0 16px 0; color:#ea80fc; text-align:center; font-size:18px;">🎟️ Scratch Cards</h3>
+        <div id="scratch-list-content" style="overflow-y:auto; flex:1; margin-bottom:16px; min-height:220px; padding-right: 4px;">
+            <div class="spinner"></div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('scratchHistoryModal').classList.remove('open')">Close</button>
     </div>
   </div>
 
@@ -8262,24 +8328,18 @@ app.get("/mini/:userId", (req, res) => {
               const res = await fetch('/api/payment/chat/message', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ senderId: userId, receiverId: selectedReceiver, message: inputVal })
+                  body: JSON.stringify({ 
+                      senderId: userId, 
+                      receiverId: selectedReceiver, 
+                      message: inputVal,
+                      senderName: tgUser?.first_name || 'User'
+                  })
               });
               const data = await res.json();
               if (data.success) {
                   document.getElementById('payAmountInput').value = '';
                   document.getElementById('payStatus').innerHTML = '';
                   loadPayChat(selectedReceiver);
-                  // Send notification to bot
-                  try {
-                    await fetch('https://t.me/MythoSerialBot', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ 
-                        chat_id: selectedReceiver, 
-                        text: \`📩 New message from \${tgUser?.first_name || 'User'}\` 
-                      })
-                    });
-                  } catch(e) {}
               }
           } catch(e) {
               console.error(e);
@@ -8822,6 +8882,57 @@ app.get("/mini/:userId", (req, res) => {
             }
         } catch (e) {
             content.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load leaderboard.</div>';
+        }
+    }
+
+    // ─── SCRATCH CARD HISTORY LOGIC ───
+    async function openScratchHistory() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('scratchHistoryModal').classList.add('open');
+        const content = document.getElementById('scratch-list-content');
+        content.innerHTML = '<div class="spinner"></div>';
+        
+        try {
+            const res = await fetch('/api/scratch/history/' + userId);
+            const data = await res.json();
+            
+            if (data.success && data.cards.length > 0) {
+                let html = '';
+                data.cards.forEach(card => {
+                    if (card.scratched) {
+                        html += \`
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); border-radius:12px; margin-bottom:8px; border:1px solid rgba(48,209,88,0.2);">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="font-size:24px;">🎉</div>
+                                    <div>
+                                        <div style="font-size:14px; font-weight:600; color:#fff;">Claimed Card</div>
+                                        <div style="font-size:11px; color:rgba(255,255,255,0.4);">Token: \${card.token.substring(0,6)}...</div>
+                                    </div>
+                                </div>
+                                <div style="font-weight:700; color:#30d158; font-size:15px;">+\${card.reward || 0} pts</div>
+                            </div>
+                        \`;
+                    } else {
+                        html += \`
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:linear-gradient(135deg, rgba(213,0,249,0.1), rgba(255,159,28,0.1)); border-radius:12px; margin-bottom:8px; border:1px solid rgba(213,0,249,0.3);">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="font-size:24px;">🎁</div>
+                                    <div>
+                                        <div style="font-size:14px; font-weight:600; color:#fff;">Unscratched</div>
+                                        <div style="font-size:11px; color:#ea80fc;">Ready to reveal!</div>
+                                    </div>
+                                </div>
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=scratch_\${card.token}')" style="background: linear-gradient(135deg, #ff9f1c, #d500f9); border:none; padding:6px 12px; border-radius:12px; color:#fff; font-weight:600; font-size:12px; cursor:pointer; box-shadow: 0 4px 10px rgba(213,0,249,0.3);">Scratch</button>
+                            </div>
+                        \`;
+                    }
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="empty" style="padding:20px;">No scratch cards found. Claim your daily card in the bot!</div>';
+            }
+        } catch (e) {
+            content.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load cards.</div>';
         }
     }
 
