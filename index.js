@@ -5663,7 +5663,12 @@ app.get("/mini/:userId", (req, res) => {
       transform: translate(-50%, -50%);
       width: 90px;
       height: 90px;
-      background: radial-gradient(circle, #2a0033 0%, #050011 100%);
+  
+      /* 👇 Yahan Image Add Ki Gayi Hai 👇 */
+      background: url('https://i.ibb.co/60BpvH8p/photo-2026-02-28-12-56-54-7611899641675644932.jpg') center center no-repeat;
+      background-size: cover;
+      /* 👆 Yahan Tak 👆 */
+  
       border: 4px solid #FFD700;
       border-radius: 50%;
       display: flex;
@@ -5679,6 +5684,7 @@ app.get("/mini/:userId", (req, res) => {
       text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
       letter-spacing: 1px;
     }
+
     .spin-center:active { transform: translate(-50%, -50%) scale(0.92); }
     .spin-center.disabled { 
       opacity: 0.8; 
