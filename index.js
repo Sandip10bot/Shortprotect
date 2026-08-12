@@ -5665,7 +5665,7 @@ app.get("/mini/:userId", (req, res) => {
       height: 90px;
   
       /* 👇 Yahan Image Add Ki Gayi Hai 👇 */
-      background: url('https://i.ibb.co/60BpvH8p/photo-2026-02-28-12-56-54-7611899641675644932.jpg') center center no-repeat;
+      background: url('https://i.ibb.co/S4ytTbQk/photo-2026-08-12-05-24-36-7673011816502394908.jpg') center center no-repeat;
       background-size: cover;
       /* 👆 Yahan Tak 👆 */
   
