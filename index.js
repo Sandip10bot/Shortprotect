@@ -32,6 +32,8 @@ let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
 let userSettingsCollection;
 let userShortenersCollection;
 let userSessionsCollection; // For online status tracking
+let quizCollection;
+let quizMetadataCollection;
 
 async function connectDB() {
   try {
@@ -59,6 +61,8 @@ async function connectDB() {
     userSettingsCollection = db.collection("user_settings");
     userShortenersCollection = db.collection("user_shorteners");
     userSessionsCollection = db.collection("user_sessions");
+    quizCollection = db.collection("quizdata");
+    quizMetadataCollection = db.collection("quiz_metadata");
     
     // Create indexes for performance
     await paymentChatCollection.createIndex({ senderId: 1, receiverId: 1, timestamp: -1 });
@@ -3902,6 +3906,77 @@ app.get("/api/serials", (req, res) => {
 app.get("/AntiBypassError", (req, res) => {
     renderBypassError(res);
 });
+
+// ==========================================
+// REST API TO RECEIVE MINI-APP QUIZZES
+// ==========================================
+app.post("/api/quiz/create", async (req, res) => {
+    try {
+        const { userId, title, description, time_per_question, questions } = req.body;
+        
+        if (!title || !questions || questions.length === 0) {
+            return res.status(400).json({ success: false, error: "Missing required fields or questions." });
+        }
+
+        // Auto-generate a clean category string from the title
+        const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+
+        // 1. Build & Insert Metadata
+        const metadata = {
+            title: title,
+            description: description,
+            category: category,
+            difficulty: "medium",
+            time_per_question: time_per_question || 15,
+            total_questions: questions.length,
+            created_by: parseInt(userId),
+            created_at: new Date(),
+            is_active: true
+        };
+
+        const metaResult = await quizMetadataCollection.insertOne(metadata);
+        const quizId = metaResult.insertedId;
+
+        // 2. Build & Insert all Question Documents
+        const questionDocs = questions.map(q => ({
+            quiz_id: quizId,
+            category: category,
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation,
+            is_active: true,
+            is_rapid_fire: false // Defaults to normal
+        }));
+
+        await quizCollection.insertMany(questionDocs);
+
+        // 3. Optional: Send a confirmation message to the admin directly on Telegram via node-fetch
+        const botToken = process.env.BOT_TOKEN; // Ensure your .env has BOT_TOKEN
+        if (botToken) {
+            const startCommand = `/quizstart <group_id> ${quizId.toString()}`;
+            const msgText = `✅ **Quiz Created Successfully via Mini App!**\n\n📚 **Title:** ${title}\n🏷️ **Category:** \`${category}\`\n🆔 **Quiz ID:** \`${quizId.toString()}\`\n❓ **Questions:** ${questions.length}\n\n**To start this quiz in a group, use:**\n\`${startCommand}\``;
+            
+            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: userId,
+                    text: msgText,
+                    parse_mode: 'Markdown'
+                })
+            }).catch(e => console.error("Telegram Webhook Notification Error:", e));
+        }
+
+        // 4. Return success back to the Mini App
+        res.json({ success: true, quiz_id: quizId.toString(), category: category });
+
+    } catch (e) {
+        console.error("Quiz Creation Server Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error." });
+    }
+});
+
 
 
 // ==========================================
@@ -9192,6 +9267,221 @@ app.get("/api/tv/schedule", async (req, res) => {
             details: error.message
         });
     }
+});
+
+// ==========================================
+// QUIZ CREATOR MINI APP UI
+// ==========================================
+app.get("/create-quiz-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>Quiz Creator</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        ${THEME_CSS}
+        <style>
+            body { padding-bottom: 50px; overflow-y: auto; align-items: flex-start; }
+            .container { max-width: 600px; width: 95%; margin: 20px auto; animation: none; padding: 25px 20px; }
+            .form-group { margin-bottom: 16px; text-align: left; }
+            .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.5px;}
+            .form-control { width: 100%; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 15px; outline: none; transition: border 0.3s; }
+            .form-control:focus { border-color: #d500f9; }
+            .q-card { background: rgba(45,10,80,0.25); border: 1px solid rgba(255,255,255,0.05); padding: 18px; border-radius: 18px; margin-bottom: 16px; position: relative; }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: bold; color: #ea80fc; }
+            .btn-remove { background: rgba(255,69,58,0.15); color: #ff453a; border: 1px solid rgba(255,69,58,0.3); padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+            .btn-add { background: rgba(48,209,88,0.15); color: #30d158; border: 1px dashed rgba(48,209,88,0.4); width: 100%; padding: 14px; border-radius: 16px; font-weight: bold; font-size: 15px; margin-bottom: 24px; cursor: pointer; transition: transform 0.2s; }
+            .btn-add:active { transform: scale(0.98); }
+            select.form-control { appearance: none; background-color: rgba(255,255,255,0.08); }
+            option { background: #1c1c1e; color: #fff; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div style="font-size:48px; margin-bottom:12px;">📝</div>
+            <h2>Create New Quiz</h2>
+            <p style="margin-bottom: 24px;">Build your questions and publish directly to the bot database.</p>
+            
+            <div id="quiz-form">
+                <div class="form-group">
+                    <label>Quiz Title</label>
+                    <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description of the quiz" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Time Per Question (Seconds)</label>
+                    <input type="number" id="q-time" class="form-control" value="15" required>
+                </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 25px 0;">
+                <h3 style="text-align: left; margin-bottom: 15px; color: #ea80fc;">Add Questions</h3>
+
+                <div id="questions-container"></div>
+
+                <button type="button" class="btn-add" onclick="addQuestion()">+ Add Question</button>
+
+                <button class="btn" id="submit-btn" onclick="submitQuiz()">🚀 Publish Quiz to Bot</button>
+            </div>
+            
+            <div id="loading" style="display:none; margin-top:30px;">
+                <div class="loader"></div>
+                <p>Generating and saving to database...</p>
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.setHeaderColor('#000000');
+            
+            let questionCount = 0;
+
+            function addQuestion() {
+                questionCount++;
+                const container = document.getElementById('questions-container');
+                const qDiv = document.createElement('div');
+                qDiv.className = 'q-card';
+                qDiv.id = \`q-card-\${questionCount}\`;
+
+                qDiv.innerHTML = \`
+                    <div class="q-header">
+                        <span>Question \${questionCount}</span>
+                        <button class="btn-remove" onclick="removeQuestion(\${questionCount})">Remove</button>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" class="form-control q-text" placeholder="Enter Question text..." required>
+                    </div>
+                    <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <input type="text" class="form-control opt-1" placeholder="Option 1" required>
+                        <input type="text" class="form-control opt-2" placeholder="Option 2" required>
+                        <input type="text" class="form-control opt-3" placeholder="Option 3" required>
+                        <input type="text" class="form-control opt-4" placeholder="Option 4" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Select Correct Answer</label>
+                        <select class="form-control q-answer">
+                            <option value="1">Option 1</option>
+                            <option value="2">Option 2</option>
+                            <option value="3">Option 3</option>
+                            <option value="4">Option 4</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+                    </div>
+                \`;
+                container.appendChild(qDiv);
+                tg.HapticFeedback.selectionChanged();
+            }
+
+            function removeQuestion(id) {
+                const el = document.getElementById(\`q-card-\${id}\`);
+                if (el) el.remove();
+                tg.HapticFeedback.impactOccurred('light');
+            }
+
+            // Start with one default question
+            addQuestion();
+
+            async function submitQuiz() {
+                const title = document.getElementById('q-title').value.trim();
+                const desc = document.getElementById('q-desc').value.trim();
+                const time = document.getElementById('q-time').value.trim();
+                
+                if (!title || !desc || !time) {
+                    alert('Please fill all basic quiz details!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const cards = document.querySelectorAll('.q-card');
+                if (cards.length === 0) {
+                    alert('Add at least one question!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const questions = [];
+                let hasError = false;
+
+                cards.forEach(card => {
+                    const text = card.querySelector('.q-text').value.trim();
+                    const op1 = card.querySelector('.opt-1').value.trim();
+                    const op2 = card.querySelector('.opt-2').value.trim();
+                    const op3 = card.querySelector('.opt-3').value.trim();
+                    const op4 = card.querySelector('.opt-4').value.trim();
+                    const ansIndex = card.querySelector('.q-answer').value;
+                    const exp = card.querySelector('.q-exp').value.trim();
+
+                    if (!text || !op1 || !op2 || !op3 || !op4) {
+                        hasError = true;
+                    }
+
+                    const options = [op1, op2, op3, op4];
+                    const answer = options[parseInt(ansIndex) - 1];
+
+                    questions.push({
+                        question: text,
+                        options: options,
+                        answer: answer,
+                        explanation: exp || 'Better luck next time! 🤕'
+                    });
+                });
+
+                if (hasError) {
+                    alert('Please ensure all question texts and 4 options are filled!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
+
+                const payload = {
+                    userId: ${userId},
+                    title: title,
+                    description: desc,
+                    time_per_question: parseInt(time),
+                    questions: questions
+                };
+
+                document.getElementById('quiz-form').style.display = 'none';
+                document.getElementById('loading').style.display = 'block';
+                tg.HapticFeedback.impactOccurred('medium');
+
+                try {
+                    const res = await fetch('/api/quiz/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        
+                        document.getElementById('loading').innerHTML = \`
+                            <div style="font-size:56px; margin-bottom:12px;">✅</div>
+                            <h3 style="color:#30d158; font-size:22px; margin-bottom: 8px;">Quiz Published!</h3>
+                            <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 12px; text-align:left; margin-bottom: 20px;">
+                                <p style="margin: 4px 0;"><strong>Category:</strong> <span style="color:#ea80fc;">\${data.category}</span></p>
+                                <p style="margin: 4px 0;"><strong>Quiz ID:</strong> <span style="color:#ea80fc; font-size: 13px;">\${data.quiz_id}</span></p>
+                            </div>
+                            <button class="btn" style="background: #30d158; box-shadow: 0 8px 20px rgba(48, 209, 88, 0.35);" onclick="tg.close()">Back to Bot</button>
+                        \`;
+                    } else {
+                        throw new Error(data.error);
+                    }
+                } catch (e) {
+                    alert('Error creating quiz: ' + e.message);
+                    document.getElementById('quiz-form').style.display = 'block';
+                    document.getElementById('loading').style.display = 'none';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    `);
 });
 
 
