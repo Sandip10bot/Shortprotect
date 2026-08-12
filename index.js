@@ -9613,20 +9613,31 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             <div style="font-size:56px; margin-bottom:12px;">🏆</div>
                             <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
                             <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
-                            
+    
                             <div style="background: rgba(45,10,80,0.6); padding: 18px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(213,0,249,0.3);">
                                 <p style="margin: 0 0 6px 0; color: #fff; font-size: 13px; font-weight: 800; text-transform: uppercase;">📌 Start the Quiz</p>
                                 <p style="margin: 0 0 12px 0; color: rgba(255,255,255,0.6); font-size: 12px; line-height: 1.4;">
                                     Send this command in your Telegram group:
                                 </p>
+        
                                 <div style="background: rgba(0,0,0,0.6); padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 10px; border: 1px solid rgba(255,255,255,0.08);">
                                     <code style="color: #ea80fc; font-size: 13px; word-break: break-all; user-select: all;">\${commandText}</code>
                                     <button onclick="navigator.clipboard.writeText('\${commandText}'); tg.HapticFeedback.impactOccurred('light'); this.innerText='Copied! ✓'; setTimeout(()=> {this.innerText='📋 Copy Command';}, 2000);" style="background: rgba(255,255,255,0.1); border: none; padding: 10px; border-radius: 10px; color: #fff; font-size: 12px; font-weight: bold; cursor: pointer;">📋 Copy Command</button>
                                 </div>
-                            </div>
-                            
-                            <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
+
+                                <!-- 🔥 NEW: DIRECT START IN GROUP BUTTON -->
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
+                                     style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 12px; border-radius: 10px; color: #000; font-size: 14px; font-weight: 900; cursor: pointer; margin-top: 12px; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                 🚀 Start Directly in Group
+                             </button>
+                         </div>
+    
+                         <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
                         \`;
+
                     } else {
                         throw new Error(data.error);
                     }
@@ -9862,22 +9873,32 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             async function loadQuizzes() {
                 const list = document.getElementById('quiz-list');
                 try {
-                    const res = await fetch(\`/api/quiz/manage/list/\${userId}\`);
+                    const res = await fetch(`/api/quiz/manage/list/${userId}`);
                     const data = await res.json();
-                    
+        
                     if (data.success && data.quizzes.length > 0) {
-                        list.innerHTML = data.quizzes.map(q => \`
-                            <div class="quiz-card" id="card-\${q._id}">
+                        list.innerHTML = data.quizzes.map(q => `
+                            <div class="quiz-card" id="card-${q._id}">
                                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <div class="quiz-card-title">\${q.title}</div>
+                                    <div class="quiz-card-title">${q.title}</div>
                                 </div>
-                                <div class="quiz-card-stats">Questions: \${q.total_questions} • Time: \${q.time_per_question}s</div>
+                                <div class="quiz-card-stats">Questions: ${q.total_questions} • Time: ${q.time_per_question}s</div>
+                    
+                                <!-- 🔥 NEW: START DIRECTLY IN GROUP BUTTON -->
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_${q._id}');" 
+                                        style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 10px; border-radius: 12px; color: #000; font-size: 13px; font-weight: 800; cursor: pointer; margin-top: 10px; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
+                                        onmousedown="this.style.transform='scale(0.95)'" 
+                                        onmouseup="this.style.transform='scale(1)'" 
+                                        onmouseleave="this.style.transform='scale(1)'">
+                                    🚀 Start in Group
+                                </button>
+                    
                                 <div class="btn-group">
-                                    <button class="btn btn-edit" onclick="openEdit('\${q._id}')">✏️ Edit</button>
-                                    <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
+                                    <button class="btn btn-edit" onclick="openEdit('${q._id}')">✏️ Edit</button>
+                                    <button class="btn btn-delete" onclick="deleteQuiz('${q._id}')">🗑️ Delete</button>
                                 </div>
                             </div>
-                        \`).join('');
+                        `).join('');
                     } else {
                         list.innerHTML = '<div class="empty-state">No quizzes found. Create one first!</div>';
                     }
@@ -9885,6 +9906,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     list.innerHTML = '<div class="empty-state">Failed to load quizzes.</div>';
                 }
             }
+
+                              
 
             // Open Edit Form and Fetch Questions
             async function openEdit(quizId) {
