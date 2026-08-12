@@ -5998,12 +5998,15 @@ app.get("/mini/:userId", (req, res) => {
       </a>
       
       <!-- NEW: Small Square Scratch History Button -->
-      <button onclick="openScratchHistory()" style="width: 62px; height: 62px; flex-shrink: 0; border-radius: 18px; background: linear-gradient(135deg, #2d0a50, #1c0a2b); border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 12px; margin: 0;">
-        <svg viewBox="0 0 24 24" style="width: 100%; height: 100%; fill: #ea80fc; filter: drop-shadow(0 2px 4px rgba(213,0,249,0.3));">
-          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 9h-2V7h-2v5H6v-2H4v6h16v-6h-2v2h-2v-5h-2v5z"/>
-          <circle cx="12" cy="12" r="2" fill="#ffd60a"/>
-        </svg>
+      <!-- NEW: Small Square Scratch History Button -->
+      <button onclick="openScratchHistory()" style="width: 62px; height: 62px; flex-shrink: 0; border-radius: 18px; background: transparent; border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 0; margin: 0; overflow: hidden;">
+        
+        <!-- 👇 Yahan SVG Icon hata kar Image add ki gayi hai 👇 -->
+        <img src="https://i.ibb.co/270qsDjw/photo-2026-08-12-06-02-04-7673021475883843620.jpg" style="width: 100%; height: 100%; object-fit: cover; display: block;" alt="History">
+        <!-- 👆 Yahan Tak 👆 -->
+        
       </button>
+      
     </div>
 
     <!-- ========== SPIN & WIN SECTION (Enhanced) ========== -->
