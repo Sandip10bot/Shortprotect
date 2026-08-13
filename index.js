@@ -9173,8 +9173,9 @@ app.get("/mini/:userId", (req, res) => {
 });
                 
     
+
 // ==========================================
-// QUIZ CREATOR MINI APP UI (V6 - Mobile Optimized & Clean CSS)
+// QUIZ CREATOR MINI APP UI
 // ==========================================
 app.get("/create-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -9508,7 +9509,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 opts[0].value = q.opt1 || '';
                                 opts[1].value = q.opt2 || '';
                                 opts[2].value = q.opt3 || '';
-                                opts[3].value = q.opt4 || '';
+                                opts[3].value = q.options ? q.options[3] : (q.opt4 || '');
                                 
                                 const radios = card.querySelectorAll('input[type="radio"]');
                                 if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
@@ -9607,35 +9608,32 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         triggerConfetti();
                         localStorage.removeItem(storageKey);
                         
-                        const commandText = \`/quizstart <group_id> \${data.quiz_id}\`;
-                        
                         document.getElementById('loading').innerHTML = \`
                             <div style="font-size:56px; margin-bottom:12px;">🏆</div>
                             <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
                             <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
     
                             <div style="background: rgba(45,10,80,0.6); padding: 18px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(213,0,249,0.3);">
-                                <p style="margin: 0 0 6px 0; color: #fff; font-size: 13px; font-weight: 800; text-transform: uppercase;">📌 Start the Quiz</p>
-                                <p style="margin: 0 0 12px 0; color: rgba(255,255,255,0.6); font-size: 12px; line-height: 1.4;">
-                                    Send this command in your Telegram group:
-                                </p>
-        
-                                <div style="background: rgba(0,0,0,0.6); padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 10px; border: 1px solid rgba(255,255,255,0.08);">
-                                    <code style="color: #ea80fc; font-size: 13px; word-break: break-all; user-select: all;">\${commandText}</code>
-                                    <button onclick="navigator.clipboard.writeText('\${commandText}'); tg.HapticFeedback.impactOccurred('light'); this.innerText='Copied! ✓'; setTimeout(()=> {this.innerText='📋 Copy Command';}, 2000);" style="background: rgba(255,255,255,0.1); border: none; padding: 10px; border-radius: 10px; color: #fff; font-size: 12px; font-weight: bold; cursor: pointer;">📋 Copy Command</button>
-                                </div>
-
-                                <!-- 🔥 NEW: DIRECT START IN GROUP BUTTON -->
+                                
                                 <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
-                                     style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 12px; border-radius: 10px; color: #000; font-size: 14px; font-weight: 900; cursor: pointer; margin-top: 12px; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
+                                     style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 12px; border-radius: 10px; color: #000; font-size: 14px; font-weight: 900; cursor: pointer; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
                                      onmousedown="this.style.transform='scale(0.95)'" 
                                      onmouseup="this.style.transform='scale(1)'" 
                                      onmouseleave="this.style.transform='scale(1)'">
                                  🚀 Start Directly in Group
-                             </button>
-                         </div>
+                                </button>
+                                
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${data.quiz_id}');" 
+                                     style="background: linear-gradient(135deg, #0a84ff, #0055ff); border: none; padding: 12px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 900; cursor: pointer; margin-top: 8px; width: 100%; box-shadow: 0 4px 15px rgba(10,132,255,0.3); transition: transform 0.2s;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                 🛠️ Test Personally in PM
+                                </button>
+                                
+                            </div>
     
-                         <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
+                            <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
                         \`;
 
                     } else {
@@ -9761,9 +9759,9 @@ app.delete("/api/quiz/manage/delete/:userId/:quizId", async (req, res) => {
     }
 });
 
-// ------------------------------------------------------------
-// 2. FRONTEND MINI APP ROUTE
-// ------------------------------------------------------------
+// ==========================================
+// FRONTEND MINI APP ROUTE: MANAGE QUIZZES
+// ==========================================
 app.get("/manage-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
     res.send(`
@@ -9804,6 +9802,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .form-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; }
             .form-control { width: 100%; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 14px; outline: none; margin-bottom: 12px;}
             .form-control:focus { border-color: #ea80fc; }
+            textarea.form-control { resize: none; font-family: inherit; }
             
             .q-card { background: rgba(45,10,80,0.35); border: 1px solid rgba(213,0,249,0.3); padding: 16px; border-radius: 20px; margin-bottom: 16px; }
             .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 800; color: #ea80fc; font-size: 13px; text-transform: uppercase; }
@@ -9825,95 +9824,125 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; }
             .toggle-switch:checked::after { transform: translateX(20px); }
 
-            .sticky-action-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(15, 5, 25, 0.9); padding: 16px; display: flex; gap: 10px; z-index: 100; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
-            .btn-save { flex: 1; background: linear-gradient(135deg, #d500f9, #651fff); border: none; padding: 14px; border-radius: 14px; color: #fff; font-weight: 800; font-size: 15px; box-shadow: 0 6px 20px rgba(213,0,249,0.4); cursor: pointer; }
+            .sticky-action-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(15, 5, 25, 0.9); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 100; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
+            .btn-save { flex: 2; background: linear-gradient(135deg, #30d158, #248a3d); border: none; padding: 14px; border-radius: 14px; color: #fff; font-weight: 800; font-size: 15px; cursor: pointer; }
+            .btn-cancel { flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 14px; color: #fff; font-weight: 700; cursor: pointer; }
             
-            .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+            .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #ea80fc; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 20px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            .empty-state { text-align: center; color: rgba(255,255,255,0.4); margin-top: 40px; font-size: 14px; }
+            .empty { text-align: center; color: rgba(255,255,255,0.5); margin-top: 40px; font-size: 14px; }
         </style>
     </head>
     <body>
-        <!-- View 1: List All Quizzes -->
-        <div class="container" id="list-view">
-            <div class="header-title">📊 Manage Quizzes</div>
-            <div id="quiz-list"><div class="loader"></div></div>
-        </div>
-
-        <!-- View 2: Edit Single Quiz -->
-        <div class="container" id="edit-view">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
-                <button onclick="closeEdit()" style="background:none; border:none; color:#ea80fc; font-weight:700; font-size:16px;">← Back</button>
-                <div class="header-title" style="margin:0;">Edit Quiz</div>
-            </div>
+        <div class="container">
             
-            <input type="hidden" id="edit-quiz-id">
-            <div class="q-card" style="border-color:rgba(255,255,255,0.1); background:rgba(28,28,30,0.65);">
-                <div class="form-group"><label>Quiz Title</label><input type="text" id="q-title" class="form-control" required></div>
-                <div class="form-group"><label>Description</label><textarea id="q-desc" class="form-control" rows="2" required></textarea></div>
-                <div class="form-group"><label>Time Per Question (Sec)</label><input type="number" id="q-time" class="form-control" required></div>
+            <!-- List View -->
+            <div id="list-view">
+                <div class="header-title">📊 Manage Quizzes</div>
+                <div id="quiz-list">
+                    <div class="loader"></div>
+                </div>
             </div>
 
-            <div id="questions-container"></div>
-            <button class="btn-add" onclick="addBlankQuestion()">+ Add New Question</button>
+            <!-- Edit View -->
+            <div id="edit-view">
+                <div class="header-title">✏️ Edit Quiz</div>
+                <input type="hidden" id="edit-quiz-id">
+                
+                <div class="q-card" style="background: rgba(28,28,30,0.65); border-color: rgba(255,255,255,0.1);">
+                    <div class="form-group">
+                        <label>Quiz Title</label>
+                        <input type="text" id="q-title" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="q-desc" class="form-control" rows="2" required></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Time Per Question (Sec)</label>
+                        <input type="number" id="q-time" class="form-control" required>
+                    </div>
+                </div>
 
-            <div class="sticky-action-bar">
-                <button class="btn-save" id="btn-save" onclick="saveEdits()">💾 Save Changes</button>
+                <div id="questions-container"></div>
+                <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
+
+                <div class="sticky-action-bar">
+                    <button class="btn-cancel" onclick="cancelEdit()">Cancel</button>
+                    <button class="btn-save" id="btn-save-quiz" onclick="saveQuiz()">💾 Save Changes</button>
+                </div>
             </div>
         </div>
 
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            tg.setHeaderColor('#1c0a2b');
-            
-            // Fixed: Use standard quotes here so it doesn't conflict with res.send
-            const userId = "${userId}"; 
+            const userId = '${userId}';
             let questionCount = 0;
 
-            // Load all user quizzes
             async function loadQuizzes() {
-                const list = document.getElementById('quiz-list');
+                const listDiv = document.getElementById('quiz-list');
+                listDiv.innerHTML = '<div class="loader"></div>';
                 try {
-                    // Fixed: Use string concatenation to avoid backtick conflicts
                     const res = await fetch('/api/quiz/manage/list/' + userId);
                     const data = await res.json();
-        
-                    if (data.success && data.quizzes.length > 0) {
-                        // Fixed: Escaped the backticks (\`) and dollar signs (\$) 
-                        // so Node.js leaves them alone for the browser to render
-                        list.innerHTML = data.quizzes.map(q => \`
-                            <div class="quiz-card" id="card-\${q._id}">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    if (data.success) {
+                        if (data.quizzes.length === 0) {
+                            listDiv.innerHTML = '<div class="empty">You haven\\'t created any quizzes yet.</div>';
+                            return;
+                        }
+                        let html = '';
+                        data.quizzes.forEach(q => {
+                            const date = new Date(q.created_at).toLocaleDateString();
+                            html += \`
+                                <div class="quiz-card">
                                     <div class="quiz-card-title">\${q.title}</div>
+                                    <div class="quiz-card-stats" style="margin-bottom: 8px;">
+                                        ❓ \${q.total_questions} Questions • ⏱️ \${q.time_per_question}s/q • 📅 \${date}
+                                    </div>
+                                    
+                                    <!-- 🔥 NEW: Play & Test Buttons -->
+                                    <div class="btn-group" style="margin-bottom: 6px;">
+                                        <button class="btn" style="background: linear-gradient(135deg, #00e676, #00b359); color: #000; box-shadow: 0 4px 10px rgba(0,230,118,0.2);" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}')">🚀 Play in Group</button>
+                                        <button class="btn" style="background: linear-gradient(135deg, #0a84ff, #0055ff); color: #fff; box-shadow: 0 4px 10px rgba(10,132,255,0.2);" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}')">🛠️ Test in PM</button>
+                                    </div>
+                                    
+                                    <!-- Edit & Delete Buttons -->
+                                    <div class="btn-group">
+                                        <button class="btn btn-edit" onclick="editQuiz('\${q._id}')">✏️ Edit</button>
+                                        <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
+                                    </div>
                                 </div>
-                                <div class="quiz-card-stats">Questions: \${q.total_questions} • Time: \${q.time_per_question}s</div>
-                    
-                                <!-- 🔥 NEW: START DIRECTLY IN GROUP BUTTON -->
-                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}');" 
-                                        style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 10px; border-radius: 12px; color: #000; font-size: 13px; font-weight: 800; cursor: pointer; margin-top: 10px; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
-                                        onmousedown="this.style.transform='scale(0.95)'" 
-                                        onmouseup="this.style.transform='scale(1)'" 
-                                        onmouseleave="this.style.transform='scale(1)'">
-                                    🚀 Start in Group
-                                </button>
-                    
-                                <div class="btn-group">
-                                    <button class="btn btn-edit" onclick="openEdit('\${q._id}')">✏️ Edit</button>
-                                    <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
-                                </div>
-                            </div>
-                        \`).join('');
+                            \`;
+                        });
+                        listDiv.innerHTML = html;
                     } else {
-                        list.innerHTML = '<div class="empty-state">No quizzes found. Create one first!</div>';
+                        listDiv.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load quizzes.</div>';
                     }
-                } catch(e) {
-                    list.innerHTML = '<div class="empty-state">Failed to load quizzes.</div>';
+                } catch (e) {
+                    listDiv.innerHTML = '<div class="empty" style="color:#ff453a;">Network error.</div>';
                 }
             }
 
-            // Open Edit Form and Fetch Questions
-            async function openEdit(quizId) {
+            async function deleteQuiz(quizId) {
+                if (!confirm("Are you sure you want to delete this quiz permanently?")) return;
+                tg.HapticFeedback.impactOccurred('heavy');
+                
+                try {
+                    const res = await fetch(\`/api/quiz/manage/delete/\${userId}/\${quizId}\`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.success) {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        loadQuizzes();
+                    } else {
+                        alert(data.error);
+                    }
+                } catch (e) {
+                    alert("Error deleting quiz.");
+                }
+            }
+
+            async function editQuiz(quizId) {
                 tg.HapticFeedback.impactOccurred('light');
                 document.getElementById('list-view').style.display = 'none';
                 document.getElementById('edit-view').style.display = 'block';
@@ -9922,35 +9951,53 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 try {
                     const res = await fetch(\`/api/quiz/manage/detail/\${userId}/\${quizId}\`);
                     const data = await res.json();
-                    if(data.success) {
-                        document.getElementById('edit-quiz-id').value = data.metadata._id;
+                    
+                    if (data.success) {
+                        document.getElementById('edit-quiz-id').value = quizId;
                         document.getElementById('q-title').value = data.metadata.title;
-                        document.getElementById('q-desc').value = data.metadata.description;
-                        document.getElementById('q-time').value = data.metadata.time_per_question;
+                        document.getElementById('q-desc').value = data.metadata.description || '';
+                        document.getElementById('q-time').value = data.metadata.time_per_question || 15;
                         
                         document.getElementById('questions-container').innerHTML = '';
                         questionCount = 0;
-
-                        if(data.questions && data.questions.length > 0) {
-                            data.questions.forEach(q => renderQuestionHTML(q));
-                        } else {
-                            addBlankQuestion();
-                        }
+                        
+                        data.questions.forEach((q, idx) => {
+                            const id = addQuestion();
+                            const card = document.getElementById(\`q-card-\${id}\`);
+                            
+                            card.querySelector('.q-text').value = q.question || '';
+                            const opts = card.querySelectorAll('.opt-val');
+                            opts[0].value = q.options[0] || '';
+                            opts[1].value = q.options[1] || '';
+                            opts[2].value = q.options[2] || '';
+                            opts[3].value = q.options[3] || '';
+                            
+                            const radios = card.querySelectorAll('input[type="radio"]');
+                            const ansIndex = q.options.indexOf(q.answer);
+                            if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
+                            
+                            card.querySelector('.q-exp').value = q.explanation || '';
+                            card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
+                            updateOptionStyles(\`q-card-\${id}\`);
+                        });
                     }
-                } catch(e) {
-                    alert('Error loading quiz details.');
-                    closeEdit();
+                } catch (e) {
+                    alert("Failed to load quiz details.");
+                    cancelEdit();
                 }
             }
 
-            function closeEdit() {
-                tg.HapticFeedback.impactOccurred('light');
-                document.getElementById('edit-view').style.display = 'none';
-                document.getElementById('list-view').style.display = 'block';
+            function updateOptionStyles(cardId) {
+                const card = document.getElementById(cardId);
+                if (!card) return;
+                card.querySelectorAll('.option-card').forEach(oc => {
+                    const radio = oc.querySelector('input[type="radio"]');
+                    if (radio && radio.checked) oc.classList.add('selected');
+                    else oc.classList.remove('selected');
+                });
             }
 
-            // Render existing question logic
-            function renderQuestionHTML(qData = null) {
+            function addQuestion() {
                 questionCount++;
                 const id = questionCount;
                 const container = document.getElementById('questions-container');
@@ -9958,75 +10005,80 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 qDiv.className = 'q-card';
                 qDiv.id = \`q-card-\${id}\`;
 
-                // Handle pre-filled data if exists
-                const text = qData ? qData.question : '';
-                const opts = qData && qData.options ? qData.options : ['', '', '', ''];
-                const ans = qData ? qData.answer : '';
-                const exp = qData ? qData.explanation : '';
-                const isRapid = qData ? qData.is_rapid_fire : false;
-                
-                let selectedIndex = 0;
-                if(qData && qData.options) {
-                    selectedIndex = qData.options.indexOf(ans);
-                    if(selectedIndex === -1) selectedIndex = 0;
-                }
-
                 qDiv.innerHTML = \`
                     <div class="q-header">
                         <span>Question \${id}</span>
-                        <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
+                        <button type="button" class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
                     </div>
-                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required>\${text}</textarea>
-                    
+                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
                     <div class="options-group">
-                        \${opts.map((opt, i) => \`
-                            <label class="option-card \${i === selectedIndex ? 'selected' : ''}">
-                                <input type="radio" name="q-\${id}-ans" value="\${i}" \${i === selectedIndex ? 'checked' : ''}>
-                                <span class="radio-custom"></span>
-                                <input type="text" class="opt-val" placeholder="Option \${i+1}" value="\${opt}" required>
-                            </label>
-                        \`).join('')}
+                        <label class="option-card selected">
+                            <input type="radio" name="q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        </label>
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        </label>
                     </div>
-
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)" value="\${exp}">
-                    
+                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
                     <div class="setting-item">
                         <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
-                        <input type="checkbox" class="toggle-switch q-rapid" \${isRapid ? 'checked' : ''}>
+                        <input type="checkbox" class="toggle-switch q-rapid">
                     </div>
                 \`;
                 
                 container.appendChild(qDiv);
-                
-                // Attach radio listeners for styling
                 qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                     tg.HapticFeedback.impactOccurred('light');
-                    qDiv.querySelectorAll('.option-card').forEach(oc => oc.classList.remove('selected'));
-                    r.closest('.option-card').classList.add('selected');
+                    updateOptionStyles(\`q-card-\${id}\`);
                 }));
-            }
-
-            function addBlankQuestion() {
-                tg.HapticFeedback.selectionChanged();
-                renderQuestionHTML(null);
+                return id;
             }
 
             function removeQuestion(id) {
                 const el = document.getElementById(\`q-card-\${id}\`);
-                if (el) el.remove();
+                if (el) {
+                    el.style.transform = 'scale(0.9)';
+                    el.style.opacity = '0';
+                    setTimeout(() => el.remove(), 200);
+                }
                 tg.HapticFeedback.impactOccurred('medium');
             }
 
-            // Save Edits to DB
-            async function saveEdits() {
+            function cancelEdit() {
+                document.getElementById('edit-view').style.display = 'none';
+                document.getElementById('list-view').style.display = 'block';
+            }
+
+            async function saveQuiz() {
                 const quizId = document.getElementById('edit-quiz-id').value;
                 const title = document.getElementById('q-title').value.trim();
                 const desc = document.getElementById('q-desc').value.trim();
                 const time = document.getElementById('q-time').value.trim();
-                const btnSave = document.getElementById('btn-save');
+                
+                if (!title || !desc || !time) {
+                    alert('Please fill out Title and Description!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
 
                 const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
-                if (cards.length === 0) return alert('Add at least one question!');
+                if (cards.length === 0) {
+                    alert('Add at least one question!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
 
                 const questions = [];
                 let hasError = false;
@@ -10050,57 +10102,47 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         question: text,
                         options: options,
                         answer: options[ansIndex],
-                        explanation: card.querySelector('.q-exp').value.trim(),
+                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! 🤕',
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
                 });
 
-                if (hasError) return alert('Fill all questions and options fully!');
+                if (hasError) {
+                    alert('Please ensure all fields and options are filled!');
+                    return tg.HapticFeedback.notificationOccurred('error');
+                }
 
-                btnSave.innerText = "Saving...";
-                tg.HapticFeedback.impactOccurred('heavy');
+                const btnSave = document.getElementById('btn-save-quiz');
+                btnSave.innerText = '⏳ Saving...';
+                btnSave.disabled = true;
+
+                const payload = { title, description: desc, time_per_question: parseInt(time), questions };
 
                 try {
                     const res = await fetch(\`/api/quiz/manage/edit/\${userId}/\${quizId}\`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ title, description: desc, time_per_question: parseInt(time), questions })
+                        body: JSON.stringify(payload)
                     });
                     const data = await res.json();
                     
                     if (data.success) {
                         tg.HapticFeedback.notificationOccurred('success');
-                        closeEdit();
+                        alert("Quiz updated successfully!");
+                        cancelEdit();
                         loadQuizzes();
                     } else {
-                        alert(data.error);
+                        alert("Error updating quiz: " + data.error);
                     }
-                } catch(e) {
-                    alert('Error updating quiz.');
+                } catch (e) {
+                    alert("Network error.");
                 } finally {
-                    btnSave.innerText = "💾 Save Changes";
+                    btnSave.innerText = '💾 Save Changes';
+                    btnSave.disabled = false;
                 }
             }
 
-            // Delete a quiz
-            async function deleteQuiz(quizId) {
-                if(confirm("Are you sure you want to permanently delete this quiz?")) {
-                    tg.HapticFeedback.impactOccurred('heavy');
-                    try {
-                        const res = await fetch(\`/api/quiz/manage/delete/\${userId}/\${quizId}\`, { method: 'DELETE' });
-                        const data = await res.json();
-                        if(data.success) {
-                            document.getElementById(\`card-\${quizId}\`).remove();
-                            tg.HapticFeedback.notificationOccurred('success');
-                        } else {
-                            alert(data.error);
-                        }
-                    } catch(e) {
-                        alert('Error deleting quiz.');
-                    }
-                }
-            }
-
+            // Initialization
             loadQuizzes();
         </script>
     </body>
@@ -10108,7 +10150,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     `);
 });
 
-                      
 
 // ========================
 // HOME & FALLBACK ROUTE
