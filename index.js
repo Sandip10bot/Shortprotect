@@ -9418,12 +9418,27 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         </label>
                     </div>
 
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)" style="margin-bottom: 10px;">
                     
+                    <div style="display:flex; gap:10px; margin-bottom: 10px;">
+                        <input type="url" class="form-control q-media-url" placeholder="Media URL (Optional)">
+                        <select class="form-control q-media-type" style="width:100px; padding: 0 10px; cursor: pointer;">
+                            <option value="photo">Photo</option>
+                            <option value="video">Video</option>
+                            <option value="document">Doc</option>
+                        </select>
+                    </div>
+
+                    <div style="display:flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.06);">
+                        <span style="font-size:12px; font-weight:800; color:#00e676;">⏱ Custom Timer (Secs)</span>
+                        <input type="number" class="form-control q-custom-time" placeholder="Default" style="width: 80px; padding: 8px; text-align: center; margin: 0;">
+                    </div>
+
                     <div class="setting-item">
                         <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
                         <input type="checkbox" class="toggle-switch q-rapid">
                     </div>
+
                 \`;
                 
                 container.appendChild(qDiv);
