@@ -9600,14 +9600,22 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     
                     if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
 
+                    const customTimeVal = card.querySelector('.q-custom-time')?.value;
+                    const mediaUrlVal = card.querySelector('.q-media-url')?.value.trim();
+                    const mediaTypeVal = card.querySelector('.q-media-type')?.value;
+
                     const options = [op1, op2, op3, op4];
                     questions.push({
                         question: text,
                         options: options,
                         answer: options[ansIndex],
                         explanation: card.querySelector('.q-exp').value.trim() || 'Good job! 🤕',
+                        media_url: mediaUrlVal ? mediaUrlVal : null,
+                        media_type: mediaUrlVal ? mediaTypeVal : null,
+                        time_limit: customTimeVal ? parseInt(customTimeVal) : null,
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
+
                 });
 
                 if (hasError) {
