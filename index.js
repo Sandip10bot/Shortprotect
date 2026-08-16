@@ -9492,8 +9492,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         opt4: opts[3] ? opts[3].value : '',
                         ansIndex: ansIndex,
                         exp: card.querySelector('.q-exp').value,
+                        mediaUrl: card.querySelector('.q-media-url')?.value || '',
+                        mediaType: card.querySelector('.q-media-type')?.value || 'photo',
+                        customTime: card.querySelector('.q-custom-time')?.value || '',
                         isRapid: card.querySelector('.q-rapid').checked
                     });
+
                 });
                 
                 localStorage.setItem(storageKey, JSON.stringify(data));
