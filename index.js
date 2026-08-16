@@ -9815,8 +9815,6 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     }
 });
 
-
-
 // ==========================================
 // FRONTEND MINI APP ROUTE: MANAGE QUIZZES
 // ==========================================
@@ -9832,74 +9830,121 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            
             * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+            
+            /* Apple Glass Deep Background */
             body { 
                 font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
-                background: linear-gradient(-45deg, #1c0a2b, #3b0d66, #0a0014, #1a0033); 
-                background-size: 400% 400%; animation: gradientMesh 12s ease infinite;
+                background-color: #000000;
+                background-image: 
+                    radial-gradient(circle at 15% 40%, rgba(88, 86, 214, 0.35), transparent 40%),
+                    radial-gradient(circle at 85% 20%, rgba(10, 132, 255, 0.35), transparent 40%),
+                    radial-gradient(circle at 50% 80%, rgba(191, 90, 242, 0.25), transparent 50%);
+                background-attachment: fixed;
                 margin: 0; padding: 0 0 110px 0; color: #ffffff; min-height: 100vh;
+                -webkit-font-smoothing: antialiased;
             }
-            @keyframes gradientMesh { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
             
-            .container { padding: 20px 16px; max-width: 500px; margin: 0 auto; }
-            .header-title { font-weight: 800; font-size: 22px; text-align: center; margin-bottom: 20px; color: #ea80fc; }
+            .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
+            .header-title { font-weight: 800; font-size: 28px; text-align: left; margin: 10px 0 24px 4px; color: #fff; letter-spacing: 0.5px; }
             
-            /* List View Styles */
-            #list-view { animation: fadeIn 0.3s ease; }
-            .quiz-card { background: rgba(28,28,30,0.65); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 20px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
-            .quiz-card-title { font-size: 16px; font-weight: 700; color: #fff; }
-            .quiz-card-stats { font-size: 12px; color: rgba(255,255,255,0.5); }
-            .btn-group { display: flex; gap: 8px; margin-top: 8px; }
-            .btn { flex: 1; padding: 10px 6px; border-radius: 12px; border: none; font-weight: 700; font-size: 12px; cursor: pointer; transition: transform 0.2s; text-align: center; }
-            .btn:active { transform: scale(0.95); }
-            .btn-edit { background: rgba(48,209,88,0.15); color: #30d158; border: 1px solid rgba(48,209,88,0.3); }
-            .btn-clone { background: rgba(10,132,255,0.15); color: #0a84ff; border: 1px solid rgba(10,132,255,0.3); }
-            .btn-delete { background: rgba(255,69,58,0.15); color: #ff453a; border: 1px solid rgba(255,69,58,0.3); }
+            /* Glassmorphism Quiz Cards */
+            #list-view { animation: fadeIn 0.4s ease; }
+            .quiz-card { 
+                background: rgba(255, 255, 255, 0.05); 
+                backdrop-filter: blur(30px) saturate(150%); 
+                -webkit-backdrop-filter: blur(30px) saturate(150%);
+                border: 1px solid rgba(255, 255, 255, 0.1); 
+                padding: 20px; 
+                border-radius: 24px; 
+                margin-bottom: 20px; 
+                display: flex; flex-direction: column; 
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05);
+                transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+            .quiz-card:active { transform: scale(0.98); }
+            
+            /* Enhanced Data Display */
+            .quiz-card-title { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 6px; letter-spacing: 0.2px; }
+            .quiz-card-desc { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 16px; line-height: 1.4; }
+            .quiz-date { font-size: 11px; color: rgba(255,255,255,0.4); margin-bottom: 16px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+            
+            /* Apple UI Tags */
+            .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+            .tag-glass {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+                display: flex; align-items: center; gap: 4px;
+                letter-spacing: 0.3px;
+            }
+
+            /* 2x2 Button Grid */
+            .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+            .btn { 
+                padding: 12px 8px; border-radius: 14px; border: none; font-weight: 700; font-size: 13px; 
+                cursor: pointer; transition: transform 0.2s, opacity 0.2s; text-align: center; 
+                display: flex; align-items: center; justify-content: center; gap: 6px;
+            }
+            .btn:active { transform: scale(0.94); opacity: 0.8; }
+            
+            /* iOS Pastel Colors */
+            .btn-start-grp { background: rgba(48, 209, 88, 0.15); color: #30d158; }
+            .btn-start-pm  { background: rgba(10, 132, 255, 0.15); color: #0a84ff; }
+            .btn-clone     { background: rgba(191, 90, 242, 0.15); color: #bf5af2; }
+            .btn-delete    { background: rgba(255, 69, 58, 0.15); color: #ff453a; }
 
             /* Loading Spinner */
-            .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+            .loader { border: 3px solid rgba(255,255,255,0.05); border-top: 3px solid #bf5af2; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-            /* CLONE MODAL STYLES (Google Search Style) */
+            /* CLONE MODAL STYLES (Apple Glass Search) */
             .clone-modal {
                 display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.85); backdrop-filter: blur(15px); z-index: 200;
-                flex-direction: column; padding: 20px; padding-top: max(20px, env(safe-area-inset-top));
+                background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
+                animation: fadeIn 0.3s ease;
             }
-            .clone-modal.open { display: flex; animation: fadeIn 0.3s ease; }
+            .clone-modal.open { display: flex; }
             
-            .search-header { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
-            .search-header h3 { margin: 0; color: #fff; font-size: 18px; }
-            .close-search-btn { background: none; border: none; color: #ff453a; font-size: 24px; cursor: pointer; padding: 0 10px; }
+            .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+            .search-header h3 { margin: 0; color: #fff; font-size: 22px; font-weight: 700; }
+            .close-search-btn { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
             
             .search-input-box {
-                display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.06); 
-                border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 12px 16px;
-                transition: border 0.3s;
+                display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.08); 
+                border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 14px 16px;
+                transition: border 0.3s, background 0.3s;
             }
-            .search-input-box:focus-within { border-color: #0a84ff; }
-            .search-input-box input { flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; }
+            .search-input-box:focus-within { border-color: #0a84ff; background: rgba(255,255,255,0.12); }
+            .search-input-box input { flex: 1; background: transparent; border: none; color: #fff; font-size: 16px; outline: none; }
             .search-input-box input::placeholder { color: rgba(255,255,255,0.4); }
             
-            .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
+            .search-results { flex: 1; overflow-y: auto; margin-top: 20px; }
             .user-result { 
-                display: flex; align-items: center; gap: 14px; padding: 12px 16px; 
-                border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; 
-                border-radius: 14px; transition: background 0.2s;
+                display: flex; align-items: center; gap: 14px; padding: 14px 16px; 
+                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+                margin-bottom: 10px; border-radius: 18px; cursor: pointer; 
+                transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
             }
-            .user-result:active { transform: scale(0.98); background: rgba(255,255,255,0.05); }
-            .user-result.selected { background: rgba(10,132,255,0.2); border: 1px solid rgba(10,132,255,0.4); }
-            .user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #651fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; object-fit: cover; }
+            .user-result:active { transform: scale(0.96); }
+            .user-result.selected { background: rgba(10,132,255,0.15); border: 1px solid rgba(10,132,255,0.3); }
+            .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #5856D6, #bf5af2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
             
             .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
             .btn-confirm-clone { 
-                width: 100%; background: linear-gradient(135deg, #0a84ff, #0055ff); 
-                border: none; padding: 16px; border-radius: 16px; color: #fff; 
-                font-weight: 800; font-size: 15px; cursor: pointer; 
-                opacity: 0.5; transition: opacity 0.3s, transform 0.2s; pointer-events: none;
+                width: 100%; background: linear-gradient(135deg, #0a84ff, #5856D6); 
+                border: none; padding: 18px; border-radius: 18px; color: #fff; 
+                font-weight: 800; font-size: 16px; cursor: pointer; 
+                opacity: 0.4; transition: all 0.3s; pointer-events: none;
             }
-            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 6px 20px rgba(10,132,255,0.4); }
+            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 8px 25px rgba(10,132,255,0.4); }
             .btn-confirm-clone.active:active { transform: scale(0.96); }
 
         </style>
@@ -9907,31 +9952,31 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     <body>
         
         <div class="container" id="main-content">
-            <h2 class="header-title">📚 My Quizzes</h2>
+            <h2 class="header-title">My Quizzes</h2>
             
             <!-- Quiz List View -->
             <div id="list-view">
                 <div id="quiz-list-container">
                     <div class="loader"></div>
                 </div>
-                <button onclick="tg.close()" style="width:100%; padding:14px; margin-top:20px; border-radius:14px; background:rgba(255,255,255,0.1); border:none; color:#fff; font-weight:700;">Close App</button>
+                <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:18px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.05); color:#fff; font-weight:700; font-size:15px; cursor:pointer; backdrop-filter:blur(10px);">Close Mini App</button>
             </div>
         </div>
 
         <!-- Clone Quiz Search Modal -->
         <div class="clone-modal" id="cloneModal">
             <div class="search-header">
-                <h3>🔍 Find User to Clone</h3>
+                <h3>Find User</h3>
                 <button class="close-search-btn" onclick="closeCloneModal()">&times;</button>
             </div>
             
             <div class="search-input-box">
-                <span style="font-size: 18px;">🔎</span>
+                <span style="font-size: 18px; opacity: 0.6;">🔍</span>
                 <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
             </div>
 
             <div class="search-results" id="cloneSearchResults">
-                <p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>
+                <p style="text-align:center; color:rgba(255,255,255,0.3); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
             </div>
 
             <div class="clone-footer">
@@ -9942,7 +9987,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            tg.setHeaderColor('#1c0a2b');
+            
+            // Set header color to match the top of the background gradient
+            tg.setHeaderColor('#110526');
             
             const userId = ${userId};
             let quizzes = [];
@@ -9962,11 +10009,32 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         quizzes = data.quizzes;
                         let html = '';
                         quizzes.forEach(q => {
+                            
+                            // Format Date securely
+                            const dateObj = q.created_at ? new Date(q.created_at) : new Date();
+                            const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                            
+                            const desc = q.description ? q.description : 'No description provided for this quiz.';
+                            const difficulty = q.difficulty ? (q.difficulty.charAt(0).toUpperCase() + q.difficulty.slice(1)) : 'Medium';
+
                             html += \`
                                 <div class="quiz-card" id="card-\${q._id}">
                                     <div class="quiz-card-title">\${q.title}</div>
-                                    <div class="quiz-card-stats">\${q.total_questions} Questions • \${q.time_per_question}s/Q<br>Category: \${q.category}</div>
+                                    <div class="quiz-card-desc">\${desc}</div>
+                                    
+                                    <div class="quiz-tags">
+                                        <div class="tag-glass">📁 \${q.category}</div>
+                                        <div class="tag-glass">❓ \${q.total_questions} Qs</div>
+                                        <div class="tag-glass">⏱️ \${q.time_per_question}s</div>
+                                        <div class="tag-glass">🔥 \${difficulty}</div>
+                                    </div>
+                                    
+                                    <div class="quiz-date">Created on \${dateStr}</div>
+                                    
+                                    <!-- 2x2 Action Button Grid -->
                                     <div class="btn-group">
+                                        <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}')">🚀 Start Group</button>
+                                        <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}')">🛠️ PM Test</button>
                                         <button class="btn btn-clone" onclick="openCloneModal('\${q._id}')">👯 Clone</button>
                                         <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
                                     </div>
@@ -9976,14 +10044,14 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         container.innerHTML = html;
                     } else {
                         container.innerHTML = \`
-                            <div style="text-align:center; padding: 40px 20px;">
-                                <div style="font-size:40px; margin-bottom:10px;">📭</div>
-                                <p style="color:rgba(255,255,255,0.5);">You haven't created any quizzes yet.</p>
+                            <div style="text-align:center; padding: 50px 20px;">
+                                <div style="font-size:48px; margin-bottom:12px; filter: grayscale(1) opacity(0.5);">📭</div>
+                                <p style="color:rgba(255,255,255,0.6); font-size:15px;">You haven't created any quizzes yet.</p>
                             </div>
                         \`;
                     }
                 } catch (e) {
-                    container.innerHTML = '<p style="color:#ff453a; text-align:center;">Failed to load quizzes.</p>';
+                    container.innerHTML = '<p style="color:#ff453a; text-align:center; margin-top:40px;">Failed to load quizzes.</p>';
                 }
             }
 
@@ -10007,14 +10075,14 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             }
 
             // ==========================================
-            // CLONE UI LOGIC (Google Search Style)
+            // CLONE UI LOGIC (Apple Glass Search Style)
             // ==========================================
             function openCloneModal(quizId) {
                 targetQuizId = quizId;
                 targetUserId = null;
                 
                 document.getElementById('cloneSearchInput').value = '';
-                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>';
+                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
                 
                 const confirmBtn = document.getElementById('btnConfirmClone');
                 confirmBtn.classList.remove('active');
@@ -10034,7 +10102,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 const resultsDiv = document.getElementById('cloneSearchResults');
                 
                 if (query.length < 2) {
-                    resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>';
+                    resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
                     return;
                 }
 
@@ -10050,15 +10118,15 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                                 <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
                                     \${avatar}
                                     <div>
-                                        <div style="font-weight:600; font-size:14px; color:#fff;">\${u.name}</div>
-                                        <div style="font-size:11px; color:rgba(255,255,255,0.5);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
+                                        <div style="font-weight:600; font-size:15px; color:#fff; margin-bottom:2px;">\${u.name}</div>
+                                        <div style="font-size:12px; color:rgba(255,255,255,0.5);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
                                     </div>
                                 </div>
                             \`;
                         });
                         resultsDiv.innerHTML = html;
                     } else {
-                        resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">No users found.</p>';
+                        resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">No users found.</p>';
                     }
                 } catch(e) {
                     console.error("Search error:", e);
@@ -10085,7 +10153,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 if (!targetQuizId || !targetUserId) return;
                 
                 const btn = document.getElementById('btnConfirmClone');
-                btn.innerText = "Cloning Please wait...";
+                btn.innerText = "Cloning, Please wait...";
                 btn.classList.remove('active');
                 
                 try {
@@ -10120,7 +10188,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     </html>
     `);
 });
-
 
 
 
