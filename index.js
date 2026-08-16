@@ -4067,9 +4067,13 @@ app.post("/api/quiz/create", async (req, res) => {
             options: q.options,
             answer: q.answer,
             explanation: q.explanation,
+            media_url: q.media_url || null,       // Added Media URL
+            media_type: q.media_type || 'photo',  // Added Media Type
+            time_limit: q.time_limit || null,     // Added Custom Duration
             is_active: true,
             is_rapid_fire: q.is_rapid_fire === true 
         }));
+
 
         await quizCollection.insertMany(questionDocs);
 
