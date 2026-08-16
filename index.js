@@ -9538,8 +9538,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                                 
                                 card.querySelector('.q-exp').value = q.exp || '';
+                                if(card.querySelector('.q-media-url')) card.querySelector('.q-media-url').value = q.mediaUrl || '';
+                                if(card.querySelector('.q-media-type')) card.querySelector('.q-media-type').value = q.mediaType || 'photo';
+                                if(card.querySelector('.q-custom-time')) card.querySelector('.q-custom-time').value = q.customTime || '';
                                 card.querySelector('.q-rapid').checked = q.isRapid || false;
-                                updateOptionStyles(\`q-card-\${id}\`);
+                                updateOptionStyles(`q-card-${id}`);
+
                             });
                         } else {
                             addQuestion();
