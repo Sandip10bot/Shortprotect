@@ -4033,7 +4033,7 @@ app.get("/AntiBypassError", (req, res) => {
 
 
 // ==========================================
-// REST API TO RECEIVE MINI-APP QUIZZES
+// REST API TO RECEIVE MINI-APP QUIZZES (UPDATED with per-question time & photo support)
 // ==========================================
 app.post("/api/quiz/create", async (req, res) => {
     try {
@@ -4045,12 +4045,19 @@ app.post("/api/quiz/create", async (req, res) => {
 
         const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
 
+        // Calculate average time per question if not set globally
+        let avgTime = time_per_question || 15;
+        if (!time_per_question) {
+            const times = questions.map(q => q.time_limit || 15);
+            avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+        }
+
         const metadata = {
             title: title,
-            description: description,
+            description: description || "",
             category: category,
             difficulty: "medium",
-            time_per_question: time_per_question || 15,
+            time_per_question: avgTime, // Global fallback
             total_questions: questions.length,
             created_by: parseInt(userId),
             created_at: new Date(),
@@ -4066,14 +4073,13 @@ app.post("/api/quiz/create", async (req, res) => {
             question: q.question,
             options: q.options,
             answer: q.answer,
-            explanation: q.explanation,
-            media_url: q.media_url || null,       // Added Media URL
-            media_type: q.media_type || 'photo',  // Added Media Type
-            time_limit: q.time_limit || null,     // Added Custom Duration
+            explanation: q.explanation || "Good job! ✨",
+            media_url: q.media_url || null,      // Photo URL support
+            media_type: q.media_type || null,    // "photo" or "video" or null
+            time_limit: q.time_limit || null,     // PER-QUESTION TIME (null = use global)
             is_active: true,
             is_rapid_fire: q.is_rapid_fire === true 
         }));
-
 
         await quizCollection.insertMany(questionDocs);
 
@@ -4084,9 +4090,6 @@ app.post("/api/quiz/create", async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error." });
     }
 });
-        
-
-
 
 // ==========================================
 // USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
@@ -5847,12 +5850,8 @@ app.get("/mini/:userId", (req, res) => {
       transform: translate(-50%, -50%);
       width: 90px;
       height: 90px;
-  
-      /* 👇 Yahan Image Add Ki Gayi Hai 👇 */
       background: url('https://i.ibb.co/S4ytTbQk/photo-2026-08-12-05-24-36-7673011816502394908.jpg') center center no-repeat;
       background-size: cover;
-      /* 👆 Yahan Tak 👆 */
-  
       border: 4px solid #FFD700;
       border-radius: 50%;
       display: flex;
@@ -9179,7 +9178,7 @@ app.get("/mini/:userId", (req, res) => {
     
 
 // ==========================================
-// QUIZ CREATOR MINI APP UI
+// QUIZ CREATOR MINI APP UI (UPDATED with per-question time & photo support)
 // ==========================================
 app.get("/create-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -9379,6 +9378,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 });
             }
 
+            // ==========================================
+            // ADD QUESTION - UPDATED with media & time fields
+            // ==========================================
             function addQuestion() {
                 questionCount++;
                 const id = questionCount;
@@ -9394,6 +9396,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </div>
                     
                     <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+                    
+                    <!-- 👇 NEW: Media URL Field (Photo/Video Support) -->
+                    <input type="text" class="form-control q-media-url" placeholder="Media URL (optional - paste image/video link)" style="margin-top: 8px;">
+                    
+                    <!-- 👇 NEW: Per-Question Time Limit Field -->
+                    <div style="display: flex; gap: 10px; margin-top: 8px;">
+                        <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
+                        <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
+                    </div>
                     
                     <div class="options-group">
                         <label class="option-card selected">
@@ -9418,27 +9429,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         </label>
                     </div>
 
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)" style="margin-bottom: 10px;">
+                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
                     
-                    <div style="display:flex; gap:10px; margin-bottom: 10px;">
-                        <input type="url" class="form-control q-media-url" placeholder="Media URL (Optional)">
-                        <select class="form-control q-media-type" style="width:100px; padding: 0 10px; cursor: pointer;">
-                            <option value="photo">Photo</option>
-                            <option value="video">Video</option>
-                            <option value="document">Doc</option>
-                        </select>
-                    </div>
-
-                    <div style="display:flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.06);">
-                        <span style="font-size:12px; font-weight:800; color:#00e676;">⏱ Custom Timer (Secs)</span>
-                        <input type="number" class="form-control q-custom-time" placeholder="Default" style="width: 80px; padding: 8px; text-align: center; margin: 0;">
-                    </div>
-
                     <div class="setting-item">
                         <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
                         <input type="checkbox" class="toggle-switch q-rapid">
                     </div>
-
                 \`;
                 
                 container.appendChild(qDiv);
@@ -9448,6 +9444,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     updateOptionStyles(\`q-card-\${id}\`);
                     triggerAutoSave();
                 }));
+
+                // Also trigger save on media and time inputs
+                qDiv.querySelectorAll('.q-media-url, .q-time-limit').forEach(el => {
+                    el.addEventListener('input', triggerAutoSave);
+                });
 
                 tg.HapticFeedback.selectionChanged();
                 triggerAutoSave();
@@ -9467,6 +9468,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 tg.HapticFeedback.impactOccurred('medium');
             }
 
+            // ==========================================
+            // SAVE STATE - UPDATED with media & time fields
+            // ==========================================
             function saveState() {
                 const data = {
                     title: document.getElementById('q-title').value,
@@ -9484,6 +9488,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     let ansIndex = 0;
                     radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
                     
+                    const timeInput = card.querySelector('.q-time-limit');
+                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                    
+                    const mediaInput = card.querySelector('.q-media-url');
+                    const mediaUrl = mediaInput ? mediaInput.value.trim() || null : null;
+                    
                     data.questions.push({
                         text: textNode.value,
                         opt1: opts[0] ? opts[0].value : '',
@@ -9492,12 +9502,10 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         opt4: opts[3] ? opts[3].value : '',
                         ansIndex: ansIndex,
                         exp: card.querySelector('.q-exp').value,
-                        mediaUrl: card.querySelector('.q-media-url')?.value || '',
-                        mediaType: card.querySelector('.q-media-type')?.value || 'photo',
-                        customTime: card.querySelector('.q-custom-time')?.value || '',
-                        isRapid: card.querySelector('.q-rapid').checked
+                        isRapid: card.querySelector('.q-rapid').checked,
+                        timeLimit: timeLimit,
+                        mediaUrl: mediaUrl
                     });
-
                 });
                 
                 localStorage.setItem(storageKey, JSON.stringify(data));
@@ -9511,6 +9519,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 saveTimeout = setTimeout(saveState, 400); 
             }
 
+            // ==========================================
+            // LOAD STATE - UPDATED with media & time fields
+            // ==========================================
             function loadState() {
                 const saved = localStorage.getItem(storageKey);
                 if (saved) {
@@ -9532,18 +9543,22 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 opts[0].value = q.opt1 || '';
                                 opts[1].value = q.opt2 || '';
                                 opts[2].value = q.opt3 || '';
-                                opts[3].value = q.options ? q.options[3] : (q.opt4 || '');
+                                opts[3].value = q.opt4 || '';
                                 
                                 const radios = card.querySelectorAll('input[type="radio"]');
                                 if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                                 
                                 card.querySelector('.q-exp').value = q.exp || '';
-                                if(card.querySelector('.q-media-url')) card.querySelector('.q-media-url').value = q.mediaUrl || '';
-                                if(card.querySelector('.q-media-type')) card.querySelector('.q-media-type').value = q.mediaType || 'photo';
-                                if(card.querySelector('.q-custom-time')) card.querySelector('.q-custom-time').value = q.customTime || '';
                                 card.querySelector('.q-rapid').checked = q.isRapid || false;
-                                updateOptionStyles(`q-card-${id}`);
-
+                                
+                                // Restore time limit and media URL
+                                const timeInput = card.querySelector('.q-time-limit');
+                                if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
+                                
+                                const mediaInput = card.querySelector('.q-media-url');
+                                if (mediaInput && q.mediaUrl) mediaInput.value = q.mediaUrl;
+                                
+                                updateOptionStyles(\`q-card-\${id}\`);
                             });
                         } else {
                             addQuestion();
@@ -9567,6 +9582,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
             document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
 
+            // ==========================================
+            // SUBMIT QUIZ - UPDATED with media & time fields
+            // ==========================================
             async function submitQuiz() {
                 const title = document.getElementById('q-title').value.trim();
                 const desc = document.getElementById('q-desc').value.trim();
@@ -9600,22 +9618,27 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     
                     if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
 
-                    const customTimeVal = card.querySelector('.q-custom-time')?.value;
-                    const mediaUrlVal = card.querySelector('.q-media-url')?.value.trim();
-                    const mediaTypeVal = card.querySelector('.q-media-type')?.value;
-
                     const options = [op1, op2, op3, op4];
+                    
+                    // Get per-question time limit from input (if exists)
+                    const timeInput = card.querySelector('.q-time-limit');
+                    const timeLimit = timeInput ? parseInt(timeInput.value) : null;
+                    
+                    // Get media URL from input (if exists)
+                    const mediaInput = card.querySelector('.q-media-url');
+                    const mediaUrl = mediaInput ? mediaInput.value.trim() : null;
+                    const mediaType = mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null;
+                    
                     questions.push({
                         question: text,
                         options: options,
                         answer: options[ansIndex],
-                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! 🤕',
-                        media_url: mediaUrlVal ? mediaUrlVal : null,
-                        media_type: mediaUrlVal ? mediaTypeVal : null,
-                        time_limit: customTimeVal ? parseInt(customTimeVal) : null,
+                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                        media_url: mediaUrl || null,
+                        media_type: mediaType,
+                        time_limit: timeLimit || null,  // null = use global time
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
-
                 });
 
                 if (hasError) {
@@ -9623,7 +9646,13 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     return tg.HapticFeedback.notificationOccurred('error');
                 }
 
-                const payload = { userId, title, description: desc, time_per_question: parseInt(time), questions };
+                const payload = { 
+                    userId, 
+                    title, 
+                    description: desc, 
+                    time_per_question: parseInt(time), 
+                    questions 
+                };
 
                 document.getElementById('quiz-form').style.display = 'none';
                 document.getElementById('actionBar').classList.remove('visible'); 
@@ -9647,7 +9676,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             <div style="font-size:56px; margin-bottom:12px;">🏆</div>
                             <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
                             <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
-    
+
                             <div style="background: rgba(45,10,80,0.6); padding: 18px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(213,0,249,0.3);">
                                 
                                 <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
@@ -9667,7 +9696,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 </button>
                                 
                             </div>
-    
+
                             <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
                         \`;
 
@@ -9689,10 +9718,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
     `);
 });
 
-
-
 // ------------------------------------------------------------
-// 1. BACKEND REST APIs FOR MANAGING QUIZZES
+// 1. BACKEND REST APIs FOR MANAGING QUIZZES (UPDATED)
 // ------------------------------------------------------------
 
 // List all quizzes for a user
@@ -9707,7 +9734,7 @@ app.get("/api/quiz/manage/list/:userId", async (req, res) => {
     }
 });
 
-// Get specific quiz details & questions
+// Get specific quiz details & questions (UPDATED)
 app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
@@ -9717,14 +9744,27 @@ app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
         if (!metadata) return res.status(404).json({ success: false, error: "Quiz not found." });
 
         const questions = await quizCollection.find({ quiz_id: quizId }).toArray();
-        res.json({ success: true, metadata, questions });
+        
+        // Format questions for frontend (include time_limit and media fields)
+        const formattedQuestions = questions.map(q => ({
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation || "",
+            media_url: q.media_url || null,
+            media_type: q.media_type || null,
+            time_limit: q.time_limit || null,  // Per-question time
+            is_rapid_fire: q.is_rapid_fire || false
+        }));
+        
+        res.json({ success: true, metadata, questions: formattedQuestions });
     } catch (e) {
         console.error("Quiz Detail Error:", e);
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 });
 
-// Edit & Save Quiz (Metadata + Questions)
+// Edit & Save Quiz (Metadata + Questions) (UPDATED with per-question time & photo)
 app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
@@ -9740,13 +9780,20 @@ app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
 
         const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
 
+        // Calculate average time per question if not set globally
+        let avgTime = time_per_question || 15;
+        if (!time_per_question) {
+            const times = questions.map(q => q.time_limit || 15);
+            avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+        }
+
         // Update Metadata
         await quizMetadataCollection.updateOne({ _id: quizId }, {
             $set: {
                 title: title,
-                description: description,
+                description: description || "",
                 category: category,
-                time_per_question: time_per_question || 15,
+                time_per_question: avgTime,
                 total_questions: questions.length,
                 updated_at: new Date()
             }
@@ -9761,10 +9808,10 @@ app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
             question: q.question,
             options: q.options,
             answer: q.answer,
-            explanation: q.explanation,
-            media_url: q.media_url || null,       // Added Media URL
-            media_type: q.media_type || 'photo',  // Added Media Type
-            time_limit: q.time_limit || null,     // Added Custom Duration
+            explanation: q.explanation || "Good job! ✨",
+            media_url: q.media_url || null,      // Photo URL support
+            media_type: q.media_type || null,    // "photo" or "video" or null
+            time_limit: q.time_limit || null,     // PER-QUESTION TIME
             is_active: true,
             is_rapid_fire: q.is_rapid_fire === true 
         }));
@@ -9798,7 +9845,7 @@ app.delete("/api/quiz/manage/delete/:userId/:quizId", async (req, res) => {
 });
 
 // ==========================================
-// CLONE QUIZ TO ANOTHER USER API
+// CLONE QUIZ TO ANOTHER USER API (UPDATED)
 // ==========================================
 app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     try {
@@ -9819,10 +9866,10 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
             title: originalMeta.title + " (Shared Copy)",
             description: originalMeta.description,
             category: newCategory,
-            difficulty: originalMeta.difficulty,
-            time_per_question: originalMeta.time_per_question,
+            difficulty: originalMeta.difficulty || "medium",
+            time_per_question: originalMeta.time_per_question || 15,
             total_questions: originalMeta.total_questions,
-            created_by: parseInt(targetUserId), // Assigning to the searched user
+            created_by: parseInt(targetUserId),
             created_at: new Date(),
             is_active: true
         };
@@ -9830,7 +9877,7 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
         const metaResult = await quizMetadataCollection.insertOne(newMetadata);
         const newQuizId = metaResult.insertedId;
 
-        // 3. Duplicate all questions and link to new Quiz ID
+        // 3. Duplicate all questions and link to new Quiz ID (preserve time_limit & media)
         const originalQuestions = await quizCollection.find({ quiz_id: quizId }).toArray();
         if (originalQuestions.length > 0) {
             const newQuestionDocs = originalQuestions.map(q => ({
@@ -9839,9 +9886,12 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
                 question: q.question,
                 options: q.options,
                 answer: q.answer,
-                explanation: q.explanation,
+                explanation: q.explanation || "Good job! ✨",
+                media_url: q.media_url || null,
+                media_type: q.media_type || null,
+                time_limit: q.time_limit || null,  // Preserve per-question time
                 is_active: true,
-                is_rapid_fire: q.is_rapid_fire
+                is_rapid_fire: q.is_rapid_fire || false
             }));
             await quizCollection.insertMany(newQuestionDocs);
         }
@@ -9854,7 +9904,7 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
 });
 
 // ==========================================
-// FRONTEND MINI APP ROUTE: MANAGE QUIZZES
+// FRONTEND MINI APP ROUTE: MANAGE QUIZZES (UPDATED with media & time fields)
 // ==========================================
 app.get("/manage-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -10027,7 +10077,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:18px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.05); color:#fff; font-weight:700; font-size:15px; cursor:pointer; backdrop-filter:blur(10px);">Close Mini App</button>
             </div>
 
-            <!-- Quiz Edit View -->
+            <!-- Quiz Edit View (UPDATED with media & time fields) -->
             <div id="edit-view" style="display: none;">
                 <div class="search-header">
                     <h3>✏️ Edit Quiz</h3>
@@ -10157,7 +10207,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             }
 
             // ==========================================
-            // EDIT QUIZ LOGIC
+            // EDIT QUIZ LOGIC (UPDATED with media & time fields)
             // ==========================================
             async function editQuiz(quizId) {
                 tg.HapticFeedback.impactOccurred('light');
@@ -10194,6 +10244,14 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                             
                             card.querySelector('.q-exp').value = q.explanation || '';
                             card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
+                            
+                            // 👇 NEW: Restore time limit and media URL in edit view
+                            const timeInput = card.querySelector('.q-time-limit');
+                            if (timeInput && q.time_limit) timeInput.value = q.time_limit;
+                            
+                            const mediaInput = card.querySelector('.q-media-url');
+                            if (mediaInput && q.media_url) mediaInput.value = q.media_url;
+                            
                             updateOptionStyles(\`edit-q-card-\${id}\`);
                         });
                     } else {
@@ -10212,6 +10270,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 currentEditQuizId = null;
             }
 
+            // ==========================================
+            // ADD EDIT QUESTION (UPDATED with media & time fields)
+            // ==========================================
             function addEditQuestion() {
                 editQuestionCount++;
                 const id = editQuestionCount;
@@ -10226,6 +10287,16 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         <button class="btn-remove" onclick="removeEditQuestion(\${id})">✕ Remove</button>
                     </div>
                     <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+                    
+                    <!-- 👇 NEW: Media URL Field -->
+                    <input type="text" class="form-control q-media-url" placeholder="Media URL (optional - paste image/video link)" style="margin-top: 8px;">
+                    
+                    <!-- 👇 NEW: Per-Question Time Limit Field -->
+                    <div style="display: flex; gap: 10px; margin-top: 8px;">
+                        <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
+                        <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
+                    </div>
+                    
                     <div class="options-group">
                         <label class="option-card selected">
                             <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
@@ -10285,6 +10356,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 });
             }
 
+            // ==========================================
+            // SUBMIT EDIT QUIZ (UPDATED with media & time fields)
+            // ==========================================
             async function submitEditQuiz() {
                 const title = document.getElementById('edit-q-title').value.trim();
                 const desc = document.getElementById('edit-q-desc').value.trim();
@@ -10313,18 +10387,36 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
 
                     const options = [op1, op2, op3, op4];
+                    
+                    // Get per-question time limit
+                    const timeInput = card.querySelector('.q-time-limit');
+                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                    
+                    // Get media URL
+                    const mediaInput = card.querySelector('.q-media-url');
+                    const mediaUrl = mediaInput ? mediaInput.value.trim() || null : null;
+                    const mediaType = mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null;
+                    
                     questions.push({
                         question: text,
                         options: options,
                         answer: options[ansIndex],
                         explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                        media_url: mediaUrl || null,
+                        media_type: mediaType,
+                        time_limit: timeLimit || null,
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
                 });
 
                 if (hasError) return alert('Please ensure all questions and 4 options are completely filled!');
 
-                const payload = { title, description: desc, time_per_question: parseInt(time), questions };
+                const payload = { 
+                    title, 
+                    description: desc, 
+                    time_per_question: parseInt(time), 
+                    questions 
+                };
 
                 tg.HapticFeedback.impactOccurred('heavy');
                 
@@ -10348,7 +10440,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     alert('Update Error: ' + e.message);
                 }
             }
-
 
             // Delete Quiz Logic
             async function deleteQuiz(quizId) {
@@ -10482,7 +10573,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     `);
 });
                                     
-
 
 // ========================
 // HOME & FALLBACK ROUTE
