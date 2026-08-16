@@ -9760,6 +9760,64 @@ app.delete("/api/quiz/manage/delete/:userId/:quizId", async (req, res) => {
 });
 
 // ==========================================
+// CLONE QUIZ TO ANOTHER USER API
+// ==========================================
+app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
+    try {
+        const quizId = new ObjectId(req.params.quizId);
+        const { sourceUserId, targetUserId } = req.body;
+
+        if (!sourceUserId || !targetUserId) {
+            return res.status(400).json({ success: false, error: "Missing user IDs." });
+        }
+
+        // 1. Fetch original Metadata
+        const originalMeta = await quizMetadataCollection.findOne({ _id: quizId, created_by: parseInt(sourceUserId) });
+        if (!originalMeta) return res.status(404).json({ success: false, error: "Quiz not found or unauthorized." });
+
+        // 2. Create New Category and Metadata for the Target User
+        const newCategory = originalMeta.category + "_clone_" + Date.now().toString().slice(-4);
+        const newMetadata = {
+            title: originalMeta.title + " (Shared Copy)",
+            description: originalMeta.description,
+            category: newCategory,
+            difficulty: originalMeta.difficulty,
+            time_per_question: originalMeta.time_per_question,
+            total_questions: originalMeta.total_questions,
+            created_by: parseInt(targetUserId), // Assigning to the searched user
+            created_at: new Date(),
+            is_active: true
+        };
+
+        const metaResult = await quizMetadataCollection.insertOne(newMetadata);
+        const newQuizId = metaResult.insertedId;
+
+        // 3. Duplicate all questions and link to new Quiz ID
+        const originalQuestions = await quizCollection.find({ quiz_id: quizId }).toArray();
+        if (originalQuestions.length > 0) {
+            const newQuestionDocs = originalQuestions.map(q => ({
+                quiz_id: newQuizId,
+                category: newCategory,
+                question: q.question,
+                options: q.options,
+                answer: q.answer,
+                explanation: q.explanation,
+                is_active: true,
+                is_rapid_fire: q.is_rapid_fire
+            }));
+            await quizCollection.insertMany(newQuestionDocs);
+        }
+
+        res.json({ success: true, message: "Quiz successfully copied to their account!" });
+    } catch (e) {
+        console.error("Clone Quiz Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+
+
+// ==========================================
 // FRONTEND MINI APP ROUTE: MANAGE QUIZZES
 // ==========================================
 app.get("/manage-quiz-app/:userId", (req, res) => {
@@ -9787,368 +9845,283 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .header-title { font-weight: 800; font-size: 22px; text-align: center; margin-bottom: 20px; color: #ea80fc; }
             
             /* List View Styles */
+            #list-view { animation: fadeIn 0.3s ease; }
             .quiz-card { background: rgba(28,28,30,0.65); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 20px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
             .quiz-card-title { font-size: 16px; font-weight: 700; color: #fff; }
             .quiz-card-stats { font-size: 12px; color: rgba(255,255,255,0.5); }
-            .btn-group { display: flex; gap: 10px; margin-top: 8px; }
-            .btn { flex: 1; padding: 10px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: transform 0.2s; }
+            .btn-group { display: flex; gap: 8px; margin-top: 8px; }
+            .btn { flex: 1; padding: 10px 6px; border-radius: 12px; border: none; font-weight: 700; font-size: 12px; cursor: pointer; transition: transform 0.2s; text-align: center; }
             .btn:active { transform: scale(0.95); }
             .btn-edit { background: rgba(48,209,88,0.15); color: #30d158; border: 1px solid rgba(48,209,88,0.3); }
+            .btn-clone { background: rgba(10,132,255,0.15); color: #0a84ff; border: 1px solid rgba(10,132,255,0.3); }
             .btn-delete { background: rgba(255,69,58,0.15); color: #ff453a; border: 1px solid rgba(255,69,58,0.3); }
 
-            /* Edit View Styles */
-            #edit-view { display: none; }
-            .form-group { margin-bottom: 14px; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; }
-            .form-control { width: 100%; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 14px; outline: none; margin-bottom: 12px;}
-            .form-control:focus { border-color: #ea80fc; }
-            textarea.form-control { resize: none; font-family: inherit; }
-            
-            .q-card { background: rgba(45,10,80,0.35); border: 1px solid rgba(213,0,249,0.3); padding: 16px; border-radius: 20px; margin-bottom: 16px; }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 800; color: #ea80fc; font-size: 13px; text-transform: uppercase; }
-            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
-            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.3); width: 100%; padding: 16px; border-radius: 16px; font-weight: 800; font-size: 14px; margin-bottom: 24px; cursor: pointer; }
-            
-            .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-            .option-card { display: flex; align-items: center; padding: 4px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; cursor: pointer; }
-            .option-card input[type="radio"] { display: none; }
-            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); margin-right: 10px; position: relative; }
-            .option-card.selected { border-color: #30d158; background: rgba(48,209,88,0.12); }
-            .option-card.selected .radio-custom { border-color: #30d158; background: #30d158; }
-            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #000; font-size: 13px; font-weight: 900; }
-            .option-card .opt-val { flex: 1; background: transparent; border: none; color: #fff; font-size: 14px; outline: none; padding: 10px 0; }
-
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; }
-            .toggle-switch:checked { background: #d500f9; }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; }
-            .toggle-switch:checked::after { transform: translateX(20px); }
-
-            .sticky-action-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: rgba(15, 5, 25, 0.9); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 100; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
-            .btn-save { flex: 2; background: linear-gradient(135deg, #30d158, #248a3d); border: none; padding: 14px; border-radius: 14px; color: #fff; font-weight: 800; font-size: 15px; cursor: pointer; }
-            .btn-cancel { flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 14px; color: #fff; font-weight: 700; cursor: pointer; }
-            
-            .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #ea80fc; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+            /* Loading Spinner */
+            .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 20px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            .empty { text-align: center; color: rgba(255,255,255,0.5); margin-top: 40px; font-size: 14px; }
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+            /* CLONE MODAL STYLES (Google Search Style) */
+            .clone-modal {
+                display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.85); backdrop-filter: blur(15px); z-index: 200;
+                flex-direction: column; padding: 20px; padding-top: max(20px, env(safe-area-inset-top));
+            }
+            .clone-modal.open { display: flex; animation: fadeIn 0.3s ease; }
+            
+            .search-header { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+            .search-header h3 { margin: 0; color: #fff; font-size: 18px; }
+            .close-search-btn { background: none; border: none; color: #ff453a; font-size: 24px; cursor: pointer; padding: 0 10px; }
+            
+            .search-input-box {
+                display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.06); 
+                border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 12px 16px;
+                transition: border 0.3s;
+            }
+            .search-input-box:focus-within { border-color: #0a84ff; }
+            .search-input-box input { flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; }
+            .search-input-box input::placeholder { color: rgba(255,255,255,0.4); }
+            
+            .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
+            .user-result { 
+                display: flex; align-items: center; gap: 14px; padding: 12px 16px; 
+                border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; 
+                border-radius: 14px; transition: background 0.2s;
+            }
+            .user-result:active { transform: scale(0.98); background: rgba(255,255,255,0.05); }
+            .user-result.selected { background: rgba(10,132,255,0.2); border: 1px solid rgba(10,132,255,0.4); }
+            .user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #651fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; object-fit: cover; }
+            
+            .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
+            .btn-confirm-clone { 
+                width: 100%; background: linear-gradient(135deg, #0a84ff, #0055ff); 
+                border: none; padding: 16px; border-radius: 16px; color: #fff; 
+                font-weight: 800; font-size: 15px; cursor: pointer; 
+                opacity: 0.5; transition: opacity 0.3s, transform 0.2s; pointer-events: none;
+            }
+            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 6px 20px rgba(10,132,255,0.4); }
+            .btn-confirm-clone.active:active { transform: scale(0.96); }
+
         </style>
     </head>
     <body>
-        <div class="container">
+        
+        <div class="container" id="main-content">
+            <h2 class="header-title">📚 My Quizzes</h2>
             
-            <!-- List View -->
+            <!-- Quiz List View -->
             <div id="list-view">
-                <div class="header-title">📊 Manage Quizzes</div>
-                <div id="quiz-list">
+                <div id="quiz-list-container">
                     <div class="loader"></div>
                 </div>
+                <button onclick="tg.close()" style="width:100%; padding:14px; margin-top:20px; border-radius:14px; background:rgba(255,255,255,0.1); border:none; color:#fff; font-weight:700;">Close App</button>
+            </div>
+        </div>
+
+        <!-- Clone Quiz Search Modal -->
+        <div class="clone-modal" id="cloneModal">
+            <div class="search-header">
+                <h3>🔍 Find User to Clone</h3>
+                <button class="close-search-btn" onclick="closeCloneModal()">&times;</button>
+            </div>
+            
+            <div class="search-input-box">
+                <span style="font-size: 18px;">🔎</span>
+                <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
             </div>
 
-            <!-- Edit View -->
-            <div id="edit-view">
-                <div class="header-title">✏️ Edit Quiz</div>
-                <input type="hidden" id="edit-quiz-id">
-                
-                <div class="q-card" style="background: rgba(28,28,30,0.65); border-color: rgba(255,255,255,0.1);">
-                    <div class="form-group">
-                        <label>Quiz Title</label>
-                        <input type="text" id="q-title" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Description</label>
-                        <textarea id="q-desc" class="form-control" rows="2" required></textarea>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label>Time Per Question (Sec)</label>
-                        <input type="number" id="q-time" class="form-control" required>
-                    </div>
-                </div>
+            <div class="search-results" id="cloneSearchResults">
+                <p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>
+            </div>
 
-                <div id="questions-container"></div>
-                <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
-
-                <div class="sticky-action-bar">
-                    <button class="btn-cancel" onclick="cancelEdit()">Cancel</button>
-                    <button class="btn-save" id="btn-save-quiz" onclick="saveQuiz()">💾 Save Changes</button>
-                </div>
+            <div class="clone-footer">
+                <button class="btn-confirm-clone" id="btnConfirmClone" onclick="executeClone()">Clone to User</button>
             </div>
         </div>
 
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            const userId = '${userId}';
-            let questionCount = 0;
+            tg.setHeaderColor('#1c0a2b');
+            
+            const userId = ${userId};
+            let quizzes = [];
+            
+            // --- State Variables for Cloning ---
+            let targetQuizId = null;
+            let targetUserId = null;
 
+            // Load all quizzes on startup
             async function loadQuizzes() {
-                const listDiv = document.getElementById('quiz-list');
-                listDiv.innerHTML = '<div class="loader"></div>';
+                const container = document.getElementById('quiz-list-container');
                 try {
                     const res = await fetch('/api/quiz/manage/list/' + userId);
                     const data = await res.json();
-                    if (data.success) {
-                        if (data.quizzes.length === 0) {
-                            listDiv.innerHTML = '<div class="empty">You haven\\'t created any quizzes yet.</div>';
-                            return;
-                        }
+                    
+                    if (data.success && data.quizzes.length > 0) {
+                        quizzes = data.quizzes;
                         let html = '';
-                        data.quizzes.forEach(q => {
-                            const date = new Date(q.created_at).toLocaleDateString();
+                        quizzes.forEach(q => {
                             html += \`
-                                <div class="quiz-card">
+                                <div class="quiz-card" id="card-\${q._id}">
                                     <div class="quiz-card-title">\${q.title}</div>
-                                    <div class="quiz-card-stats" style="margin-bottom: 8px;">
-                                        ❓ \${q.total_questions} Questions • ⏱️ \${q.time_per_question}s/q • 📅 \${date}
-                                    </div>
-                                    
-                                    <!-- 🔥 NEW: Play & Test Buttons -->
-                                    <div class="btn-group" style="margin-bottom: 6px;">
-                                        <button class="btn" style="background: linear-gradient(135deg, #00e676, #00b359); color: #000; box-shadow: 0 4px 10px rgba(0,230,118,0.2);" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}')">🚀 Play in Group</button>
-                                        <button class="btn" style="background: linear-gradient(135deg, #0a84ff, #0055ff); color: #fff; box-shadow: 0 4px 10px rgba(10,132,255,0.2);" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}')">🛠️ Test in PM</button>
-                                    </div>
-                                    
-                                    <!-- Edit & Delete Buttons -->
+                                    <div class="quiz-card-stats">\${q.total_questions} Questions • \${q.time_per_question}s/Q<br>Category: \${q.category}</div>
                                     <div class="btn-group">
-                                        <button class="btn btn-edit" onclick="editQuiz('\${q._id}')">✏️ Edit</button>
+                                        <button class="btn btn-clone" onclick="openCloneModal('\${q._id}')">👯 Clone</button>
                                         <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
                                     </div>
                                 </div>
                             \`;
                         });
-                        listDiv.innerHTML = html;
+                        container.innerHTML = html;
                     } else {
-                        listDiv.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load quizzes.</div>';
+                        container.innerHTML = \`
+                            <div style="text-align:center; padding: 40px 20px;">
+                                <div style="font-size:40px; margin-bottom:10px;">📭</div>
+                                <p style="color:rgba(255,255,255,0.5);">You haven't created any quizzes yet.</p>
+                            </div>
+                        \`;
                     }
                 } catch (e) {
-                    listDiv.innerHTML = '<div class="empty" style="color:#ff453a;">Network error.</div>';
+                    container.innerHTML = '<p style="color:#ff453a; text-align:center;">Failed to load quizzes.</p>';
                 }
             }
 
+            // Delete Quiz Logic
             async function deleteQuiz(quizId) {
-                if (!confirm("Are you sure you want to delete this quiz permanently?")) return;
-                tg.HapticFeedback.impactOccurred('heavy');
-                
-                try {
-                    const res = await fetch(\`/api/quiz/manage/delete/\${userId}/\${quizId}\`, { method: 'DELETE' });
-                    const data = await res.json();
-                    if (data.success) {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        loadQuizzes();
-                    } else {
-                        alert(data.error);
+                if(confirm("Are you sure you want to permanently delete this quiz?")) {
+                    tg.HapticFeedback.impactOccurred('heavy');
+                    try {
+                        const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
+                        const data = await res.json();
+                        if(data.success) {
+                            document.getElementById('card-' + quizId).style.display = 'none';
+                            tg.HapticFeedback.notificationOccurred('success');
+                        } else {
+                            alert("Error: " + data.error);
+                        }
+                    } catch(e) {
+                        alert("Network Error");
                     }
-                } catch (e) {
-                    alert("Error deleting quiz.");
                 }
             }
 
-            async function editQuiz(quizId) {
-                tg.HapticFeedback.impactOccurred('light');
-                document.getElementById('list-view').style.display = 'none';
-                document.getElementById('edit-view').style.display = 'block';
-                document.getElementById('questions-container').innerHTML = '<div class="loader"></div>';
+            // ==========================================
+            // CLONE UI LOGIC (Google Search Style)
+            // ==========================================
+            function openCloneModal(quizId) {
+                targetQuizId = quizId;
+                targetUserId = null;
                 
+                document.getElementById('cloneSearchInput').value = '';
+                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>';
+                
+                const confirmBtn = document.getElementById('btnConfirmClone');
+                confirmBtn.classList.remove('active');
+                confirmBtn.innerText = "Select User First";
+                
+                document.getElementById('cloneModal').classList.add('open');
+                setTimeout(() => document.getElementById('cloneSearchInput').focus(), 200);
+            }
+
+            function closeCloneModal() {
+                document.getElementById('cloneModal').classList.remove('open');
+            }
+
+            // Search User Event Listener
+            document.getElementById('cloneSearchInput').addEventListener('input', async function(e) {
+                const query = e.target.value.trim();
+                const resultsDiv = document.getElementById('cloneSearchResults');
+                
+                if (query.length < 2) {
+                    resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">Type a username or ID to search</p>';
+                    return;
+                }
+
                 try {
-                    const res = await fetch(\`/api/quiz/manage/detail/\${userId}/\${quizId}\`);
+                    const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
                     const data = await res.json();
                     
-                    if (data.success) {
-                        document.getElementById('edit-quiz-id').value = quizId;
-                        document.getElementById('q-title').value = data.metadata.title;
-                        document.getElementById('q-desc').value = data.metadata.description || '';
-                        document.getElementById('q-time').value = data.metadata.time_per_question || 15;
-                        
-                        document.getElementById('questions-container').innerHTML = '';
-                        questionCount = 0;
-                        
-                        data.questions.forEach((q, idx) => {
-                            const id = addQuestion();
-                            const card = document.getElementById(\`q-card-\${id}\`);
-                            
-                            card.querySelector('.q-text').value = q.question || '';
-                            const opts = card.querySelectorAll('.opt-val');
-                            opts[0].value = q.options[0] || '';
-                            opts[1].value = q.options[1] || '';
-                            opts[2].value = q.options[2] || '';
-                            opts[3].value = q.options[3] || '';
-                            
-                            const radios = card.querySelectorAll('input[type="radio"]');
-                            const ansIndex = q.options.indexOf(q.answer);
-                            if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
-                            
-                            card.querySelector('.q-exp').value = q.explanation || '';
-                            card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
-                            updateOptionStyles(\`q-card-\${id}\`);
+                    if (data.success && data.users.length > 0) {
+                        let html = '';
+                        data.users.forEach(u => {
+                            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` : \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+                            html += \`
+                                <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
+                                    \${avatar}
+                                    <div>
+                                        <div style="font-weight:600; font-size:14px; color:#fff;">\${u.name}</div>
+                                        <div style="font-size:11px; color:rgba(255,255,255,0.5);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
+                                    </div>
+                                </div>
+                            \`;
                         });
+                        resultsDiv.innerHTML = html;
+                    } else {
+                        resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:30px; font-size: 13px;">No users found.</p>';
                     }
-                } catch (e) {
-                    alert("Failed to load quiz details.");
-                    cancelEdit();
+                } catch(e) {
+                    console.error("Search error:", e);
                 }
-            }
+            });
 
-            function updateOptionStyles(cardId) {
-                const card = document.getElementById(cardId);
-                if (!card) return;
-                card.querySelectorAll('.option-card').forEach(oc => {
-                    const radio = oc.querySelector('input[type="radio"]');
-                    if (radio && radio.checked) oc.classList.add('selected');
-                    else oc.classList.remove('selected');
-                });
-            }
-
-            function addQuestion() {
-                questionCount++;
-                const id = questionCount;
-                const container = document.getElementById('questions-container');
-                const qDiv = document.createElement('div');
-                qDiv.className = 'q-card';
-                qDiv.id = \`q-card-\${id}\`;
-
-                qDiv.innerHTML = \`
-                    <div class="q-header">
-                        <span>Question \${id}</span>
-                        <button type="button" class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
-                    </div>
-                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
-                    <div class="options-group">
-                        <label class="option-card selected">
-                            <input type="radio" name="q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4" required>
-                        </label>
-                    </div>
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
-                    <div class="setting-item">
-                        <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
-                        <input type="checkbox" class="toggle-switch q-rapid">
-                    </div>
-                \`;
+            // Select user from list
+            function selectUserForClone(id, name) {
+                targetUserId = id;
+                tg.HapticFeedback.selectionChanged();
                 
-                container.appendChild(qDiv);
-                qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
-                    tg.HapticFeedback.impactOccurred('light');
-                    updateOptionStyles(\`q-card-\${id}\`);
-                }));
-                return id;
-            }
-
-            function removeQuestion(id) {
-                const el = document.getElementById(\`q-card-\${id}\`);
-                if (el) {
-                    el.style.transform = 'scale(0.9)';
-                    el.style.opacity = '0';
-                    setTimeout(() => el.remove(), 200);
-                }
-                tg.HapticFeedback.impactOccurred('medium');
-            }
-
-            function cancelEdit() {
-                document.getElementById('edit-view').style.display = 'none';
-                document.getElementById('list-view').style.display = 'block';
-            }
-
-            async function saveQuiz() {
-                const quizId = document.getElementById('edit-quiz-id').value;
-                const title = document.getElementById('q-title').value.trim();
-                const desc = document.getElementById('q-desc').value.trim();
-                const time = document.getElementById('q-time').value.trim();
+                // Highlight selection
+                document.querySelectorAll('.user-result').forEach(el => el.classList.remove('selected'));
+                document.getElementById('ur-' + id).classList.add('selected');
                 
-                if (!title || !desc || !time) {
-                    alert('Please fill out Title and Description!');
-                    return tg.HapticFeedback.notificationOccurred('error');
-                }
+                // Activate Button
+                const confirmBtn = document.getElementById('btnConfirmClone');
+                confirmBtn.classList.add('active');
+                confirmBtn.innerText = \`Clone to \${name}\`;
+            }
 
-                const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
-                if (cards.length === 0) {
-                    alert('Add at least one question!');
-                    return tg.HapticFeedback.notificationOccurred('error');
-                }
-
-                const questions = [];
-                let hasError = false;
-
-                cards.forEach(card => {
-                    const text = card.querySelector('.q-text').value.trim();
-                    const optInputs = card.querySelectorAll('.opt-val');
-                    const op1 = optInputs[0].value.trim();
-                    const op2 = optInputs[1].value.trim();
-                    const op3 = optInputs[2].value.trim();
-                    const op4 = optInputs[3].value.trim();
-                    
-                    const radios = card.querySelectorAll('input[type="radio"]');
-                    let ansIndex = 0;
-                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
-                    
-                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
-
-                    const options = [op1, op2, op3, op4];
-                    questions.push({
-                        question: text,
-                        options: options,
-                        answer: options[ansIndex],
-                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! 🤕',
-                        is_rapid_fire: card.querySelector('.q-rapid').checked
-                    });
-                });
-
-                if (hasError) {
-                    alert('Please ensure all fields and options are filled!');
-                    return tg.HapticFeedback.notificationOccurred('error');
-                }
-
-                const btnSave = document.getElementById('btn-save-quiz');
-                btnSave.innerText = '⏳ Saving...';
-                btnSave.disabled = true;
-
-                const payload = { title, description: desc, time_per_question: parseInt(time), questions };
-
+            // Execute Clone API Call
+            async function executeClone() {
+                if (!targetQuizId || !targetUserId) return;
+                
+                const btn = document.getElementById('btnConfirmClone');
+                btn.innerText = "Cloning Please wait...";
+                btn.classList.remove('active');
+                
                 try {
-                    const res = await fetch(\`/api/quiz/manage/edit/\${userId}/\${quizId}\`, {
-                        method: 'PUT',
+                    const res = await fetch('/api/quiz/manage/clone/' + targetQuizId, {
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
                     });
+                    
                     const data = await res.json();
                     
                     if (data.success) {
                         tg.HapticFeedback.notificationOccurred('success');
-                        alert("Quiz updated successfully!");
-                        cancelEdit();
-                        loadQuizzes();
+                        alert("✅ " + data.message);
+                        closeCloneModal();
                     } else {
-                        alert("Error updating quiz: " + data.error);
+                        alert("❌ Error: " + data.error);
+                        btn.innerText = "Try Again";
+                        btn.classList.add('active');
                     }
                 } catch (e) {
-                    alert("Network error.");
-                } finally {
-                    btnSave.innerText = '💾 Save Changes';
-                    btnSave.disabled = false;
+                    alert("Network Error");
+                    btn.innerText = "Try Again";
+                    btn.classList.add('active');
                 }
             }
 
-            // Initialization
+            // Init Load
             loadQuizzes();
         </script>
     </body>
     </html>
     `);
 });
+
+
 
 
 // ========================
