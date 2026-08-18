@@ -10060,8 +10060,11 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     }
 });
 
+
+                
+                
 // ==========================================
-// FRONTEND MINI APP ROUTE: MANAGE QUIZZES (UPDATED with media & time fields)
+// FRONTEND MINI APP ROUTE: MANAGE QUIZZES (FIXED)
 // ==========================================
 app.get("/manage-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
@@ -10423,7 +10426,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             }
 
             // ==========================================
-            // EDIT QUIZ LOGIC (UPDATED with media & time fields)
+            // EDIT QUIZ LOGIC (FIXED: options display & answer detection)
             // ==========================================
             async function editQuiz(quizId) {
                 tg.HapticFeedback.impactOccurred('light');
@@ -10449,14 +10452,20 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                             const card = document.getElementById(\`edit-q-card-\${id}\`);
                             card.querySelector('.q-text').value = q.question;
                             const opts = card.querySelectorAll('.opt-val');
-                            opts[0].value = q.options[0] || '';
-                            opts[1].value = q.options[1] || '';
-                            opts[2].value = q.options[2] || '';
-                            opts[3].value = q.options[3] || '';
                             
-                            const ansIndex = q.options.indexOf(q.answer);
+                            // ✅ Extract option text (support both string and object)
+                            opts[0].value = typeof q.options[0] === 'object' ? (q.options[0].text || '') : (q.options[0] || '');
+                            opts[1].value = typeof q.options[1] === 'object' ? (q.options[1].text || '') : (q.options[1] || '');
+                            opts[2].value = typeof q.options[2] === 'object' ? (q.options[2].text || '') : (q.options[2] || '');
+                            opts[3].value = typeof q.options[3] === 'object' ? (q.options[3].text || '') : (q.options[3] || '');
+                            
+                            // ✅ Find answer index by matching text (not object reference)
+                            const ansIndex = q.options.findIndex(opt => {
+                                const optText = typeof opt === 'object' ? opt.text : opt;
+                                return optText === q.answer;
+                            });
                             const radios = card.querySelectorAll('input[type="radio"]');
-                            if(ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
+                            if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
                             
                             card.querySelector('.q-exp').value = q.explanation || '';
                             card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
@@ -10465,7 +10474,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                             const timeInput = card.querySelector('.q-time-limit');
                             if (timeInput && q.time_limit) timeInput.value = q.time_limit;
                             
-                            // Restore media: we have media_url or media_file_id
                             const mediaInput = card.querySelector('.q-media-input');
                             if (mediaInput) {
                                 if (q.media_url) mediaInput.value = q.media_url;
@@ -10859,7 +10867,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     </body>
     </html>
     `);
-});
+});                
+
                                     
 
 // ========================
