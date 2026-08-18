@@ -3772,7 +3772,7 @@ const SERIAL_DATA = {
     "Bolo Ambe Maa Ki Jai": {
         command: "maa",
         seasons: { 1: 0 },
-        thumbnail: "https://i.ibb.co/0FjtCNq/photo-2025-06-16-08-25-03-7609344192725896061.jpg",
+        thumbnail: "https://i.ibb.co/0FjtCNq/photo-2025-06-16-08-25-10-7609344192725896061.jpg",
         displayName: "Bolo Ambe Maa Ki Jai"
     },
     "Sriman Rama": {
@@ -4075,6 +4075,7 @@ app.post("/api/quiz/create", async (req, res) => {
             answer: q.answer,
             explanation: q.explanation || "Good job! ✨",
             media_url: q.media_url || null,      // Photo URL support
+            media_file_id: q.media_file_id || null, // NEW: Telegram file ID
             media_type: q.media_type || null,    // "photo" or "video" or null
             time_limit: q.time_limit || null,     // PER-QUESTION TIME (null = use global)
             is_active: true,
@@ -9301,6 +9302,66 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 margin: 0 auto 16px auto;
             }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+            /* ===== NEW: Media Preview ===== */
+            .media-preview {
+                margin: 8px 0 4px;
+                border-radius: 14px;
+                overflow: hidden;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 60px;
+                position: relative;
+            }
+            .media-preview img, .media-preview video {
+                max-width: 100%;
+                max-height: 180px;
+                border-radius: 12px;
+                display: block;
+            }
+            .media-preview .file-id-label {
+                font-size: 11px;
+                color: rgba(255,255,255,0.3);
+                padding: 6px 10px;
+                background: rgba(0,0,0,0.4);
+                border-radius: 8px;
+                position: absolute;
+                bottom: 6px;
+                right: 6px;
+                backdrop-filter: blur(4px);
+                pointer-events: none;
+            }
+            .media-input-row {
+                display: flex;
+                gap: 8px;
+                margin-top: 6px;
+            }
+            .media-input-row input {
+                flex: 1;
+                padding: 8px 12px;
+                border-radius: 12px;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                color: #fff;
+                font-size: 13px;
+                outline: none;
+            }
+            .media-input-row input:focus { border-color: #ea80fc; }
+            .media-input-row .clear-media {
+                background: rgba(255,69,58,0.1);
+                border: 1px solid rgba(255,69,58,0.2);
+                color: #ff453a;
+                border-radius: 12px;
+                padding: 6px 12px;
+                font-weight: 700;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .media-input-row .clear-media:active { transform: scale(0.9); }
         </style>
     </head>
     <body>
@@ -9379,7 +9440,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
 
             // ==========================================
-            // ADD QUESTION - UPDATED with media & time fields
+            // ADD QUESTION - UPDATED with media & time fields + preview
             // ==========================================
             function addQuestion() {
                 questionCount++;
@@ -9397,10 +9458,16 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     
                     <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
                     
-                    <!-- 👇 NEW: Media URL Field (Photo/Video Support) -->
-                    <input type="text" class="form-control q-media-url" placeholder="Media URL (optional - paste image/video link)" style="margin-top: 8px;">
+                    <!-- NEW: Media Input & Preview -->
+                    <div class="media-input-row">
+                        <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                        <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                    </div>
+                    <div class="media-preview" id="preview-\${id}" style="display:none;">
+                        <!-- Preview will be injected here -->
+                    </div>
                     
-                    <!-- 👇 NEW: Per-Question Time Limit Field -->
+                    <!-- Per-Question Time Limit Field -->
                     <div style="display: flex; gap: 10px; margin-top: 8px;">
                         <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
                         <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
@@ -9439,20 +9506,80 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 
                 container.appendChild(qDiv);
                 
+                // Event listeners for media preview
+                const mediaInput = qDiv.querySelector('.q-media-input');
+                mediaInput.addEventListener('input', function() {
+                    updateMediaPreview(id, this.value.trim());
+                    triggerAutoSave();
+                });
+
                 qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                     tg.HapticFeedback.impactOccurred('light');
                     updateOptionStyles(\`q-card-\${id}\`);
                     triggerAutoSave();
                 }));
 
-                // Also trigger save on media and time inputs
-                qDiv.querySelectorAll('.q-media-url, .q-time-limit').forEach(el => {
+                qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
                     el.addEventListener('input', triggerAutoSave);
+                    el.addEventListener('change', triggerAutoSave);
                 });
 
                 tg.HapticFeedback.selectionChanged();
                 triggerAutoSave();
                 return id;
+            }
+
+            // ---- Media Preview Logic ----
+            function updateMediaPreview(qId, mediaValue) {
+                const previewContainer = document.getElementById(\`preview-\${qId}\`);
+                if (!previewContainer) return;
+                
+                if (!mediaValue) {
+                    previewContainer.style.display = 'none';
+                    previewContainer.innerHTML = '';
+                    return;
+                }
+
+                // Determine if it's a URL or file_id
+                const isUrl = mediaValue.match(/^https?:\\/\\//);
+                const isFileId = !isUrl && mediaValue.length > 10; // assume file_id
+
+                let html = '';
+                if (isUrl) {
+                    // Check if it's an image or video
+                    const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                    if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                        html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                    } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                        html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                    } else {
+                        html = \`<div style="padding:12px; color:rgba(255,255,255,0.6);">Unsupported media type</div>\`;
+                    }
+                } else if (isFileId) {
+                    // Show file_id as label
+                    html = \`
+                        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(213,0,249,0.1); border-radius:12px;">
+                            <span style="font-size:24px;">🖼️</span>
+                            <span style="font-size:12px; color:#ea80fc; word-break:break-all;">\${mediaValue}</span>
+                            <span class="file-id-label">file_id</span>
+                        </div>
+                    \`;
+                }
+
+                previewContainer.innerHTML = html;
+                previewContainer.style.display = 'block';
+            }
+
+            function clearMedia(btn) {
+                const card = btn.closest('.q-card');
+                if (!card) return;
+                const input = card.querySelector('.q-media-input');
+                if (input) {
+                    input.value = '';
+                    const qId = card.id.replace('q-card-', '');
+                    updateMediaPreview(qId, '');
+                    triggerAutoSave();
+                }
             }
 
             function removeQuestion(id) {
@@ -9491,8 +9618,18 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     const timeInput = card.querySelector('.q-time-limit');
                     const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                     
-                    const mediaInput = card.querySelector('.q-media-url');
-                    const mediaUrl = mediaInput ? mediaInput.value.trim() || null : null;
+                    const mediaInput = card.querySelector('.q-media-input');
+                    const mediaValue = mediaInput ? mediaInput.value.trim() || null : null;
+                    // We store both media_url and media_file_id from this single field.
+                    // If it looks like a URL, treat as media_url, else as media_file_id.
+                    let mediaUrl = null, mediaFileId = null;
+                    if (mediaValue) {
+                        if (mediaValue.match(/^https?:\\/\\//)) {
+                            mediaUrl = mediaValue;
+                        } else {
+                            mediaFileId = mediaValue;
+                        }
+                    }
                     
                     data.questions.push({
                         text: textNode.value,
@@ -9504,7 +9641,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         exp: card.querySelector('.q-exp').value,
                         isRapid: card.querySelector('.q-rapid').checked,
                         timeLimit: timeLimit,
-                        mediaUrl: mediaUrl
+                        mediaUrl: mediaUrl,
+                        mediaFileId: mediaFileId
                     });
                 });
                 
@@ -9551,12 +9689,18 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 card.querySelector('.q-exp').value = q.exp || '';
                                 card.querySelector('.q-rapid').checked = q.isRapid || false;
                                 
-                                // Restore time limit and media URL
+                                // Restore time limit and media
                                 const timeInput = card.querySelector('.q-time-limit');
                                 if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
                                 
-                                const mediaInput = card.querySelector('.q-media-url');
-                                if (mediaInput && q.mediaUrl) mediaInput.value = q.mediaUrl;
+                                // Restore media: we need to set both fields if present
+                                const mediaInput = card.querySelector('.q-media-input');
+                                if (mediaInput) {
+                                    if (q.mediaUrl) mediaInput.value = q.mediaUrl;
+                                    else if (q.mediaFileId) mediaInput.value = q.mediaFileId;
+                                    // Trigger preview
+                                    updateMediaPreview(id, mediaInput.value.trim());
+                                }
                                 
                                 updateOptionStyles(\`q-card-\${id}\`);
                             });
@@ -9620,14 +9764,23 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
                     const options = [op1, op2, op3, op4];
                     
-                    // Get per-question time limit from input (if exists)
+                    // Get per-question time limit
                     const timeInput = card.querySelector('.q-time-limit');
-                    const timeLimit = timeInput ? parseInt(timeInput.value) : null;
+                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                     
-                    // Get media URL from input (if exists)
-                    const mediaInput = card.querySelector('.q-media-url');
-                    const mediaUrl = mediaInput ? mediaInput.value.trim() : null;
-                    const mediaType = mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null;
+                    // Get media: we stored both mediaUrl and mediaFileId in the draft.
+                    // In the draft we had separate fields; but we saved them as mediaUrl and mediaFileId.
+                    // Now we reconstruct from the input.
+                    const mediaInput = card.querySelector('.q-media-input');
+                    let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                    let mediaUrl = null, mediaFileId = null;
+                    if (mediaValue) {
+                        if (mediaValue.match(/^https?:\\/\\//)) {
+                            mediaUrl = mediaValue;
+                        } else {
+                            mediaFileId = mediaValue;
+                        }
+                    }
                     
                     questions.push({
                         question: text,
@@ -9635,8 +9788,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         answer: options[ansIndex],
                         explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                         media_url: mediaUrl || null,
-                        media_type: mediaType,
-                        time_limit: timeLimit || null,  // null = use global time
+                        media_file_id: mediaFileId || null,
+                        media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                        time_limit: timeLimit || null,
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
                 });
@@ -9734,7 +9888,7 @@ app.get("/api/quiz/manage/list/:userId", async (req, res) => {
     }
 });
 
-// Get specific quiz details & questions (UPDATED)
+// Get specific quiz details & questions (UPDATED to include media_file_id)
 app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
@@ -9745,15 +9899,16 @@ app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
 
         const questions = await quizCollection.find({ quiz_id: quizId }).toArray();
         
-        // Format questions for frontend (include time_limit and media fields)
+        // Format questions for frontend (include media_file_id, media_url, time_limit)
         const formattedQuestions = questions.map(q => ({
             question: q.question,
             options: q.options,
             answer: q.answer,
             explanation: q.explanation || "",
             media_url: q.media_url || null,
+            media_file_id: q.media_file_id || null,   // NEW: include file_id
             media_type: q.media_type || null,
-            time_limit: q.time_limit || null,  // Per-question time
+            time_limit: q.time_limit || null,
             is_rapid_fire: q.is_rapid_fire || false
         }));
         
@@ -9764,7 +9919,7 @@ app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
     }
 });
 
-// Edit & Save Quiz (Metadata + Questions) (UPDATED with per-question time & photo)
+// Edit & Save Quiz (Metadata + Questions) (UPDATED with per-question time & media_file_id)
 app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
@@ -9809,9 +9964,10 @@ app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
             options: q.options,
             answer: q.answer,
             explanation: q.explanation || "Good job! ✨",
-            media_url: q.media_url || null,      // Photo URL support
-            media_type: q.media_type || null,    // "photo" or "video" or null
-            time_limit: q.time_limit || null,     // PER-QUESTION TIME
+            media_url: q.media_url || null,
+            media_file_id: q.media_file_id || null,  // NEW: store file_id
+            media_type: q.media_type || null,
+            time_limit: q.time_limit || null,
             is_active: true,
             is_rapid_fire: q.is_rapid_fire === true 
         }));
@@ -9877,7 +10033,7 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
         const metaResult = await quizMetadataCollection.insertOne(newMetadata);
         const newQuizId = metaResult.insertedId;
 
-        // 3. Duplicate all questions and link to new Quiz ID (preserve time_limit & media)
+        // 3. Duplicate all questions and link to new Quiz ID (preserve time_limit & media fields)
         const originalQuestions = await quizCollection.find({ quiz_id: quizId }).toArray();
         if (originalQuestions.length > 0) {
             const newQuestionDocs = originalQuestions.map(q => ({
@@ -9888,8 +10044,9 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
                 answer: q.answer,
                 explanation: q.explanation || "Good job! ✨",
                 media_url: q.media_url || null,
+                media_file_id: q.media_file_id || null,  // preserve file_id
                 media_type: q.media_type || null,
-                time_limit: q.time_limit || null,  // Preserve per-question time
+                time_limit: q.time_limit || null,
                 is_active: true,
                 is_rapid_fire: q.is_rapid_fire || false
             }));
@@ -10063,6 +10220,65 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 8px 25px rgba(10,132,255,0.4); }
             .btn-confirm-clone.active:active { transform: scale(0.96); }
 
+            /* NEW: Media Preview in edit */
+            .media-preview {
+                margin: 6px 0 8px;
+                border-radius: 14px;
+                overflow: hidden;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 50px;
+                position: relative;
+            }
+            .media-preview img, .media-preview video {
+                max-width: 100%;
+                max-height: 160px;
+                border-radius: 12px;
+                display: block;
+            }
+            .media-preview .file-id-label {
+                font-size: 10px;
+                color: rgba(255,255,255,0.3);
+                padding: 4px 8px;
+                background: rgba(0,0,0,0.4);
+                border-radius: 6px;
+                position: absolute;
+                bottom: 4px;
+                right: 4px;
+                backdrop-filter: blur(4px);
+                pointer-events: none;
+            }
+            .media-input-row {
+                display: flex;
+                gap: 8px;
+                margin-top: 6px;
+            }
+            .media-input-row input {
+                flex: 1;
+                padding: 8px 12px;
+                border-radius: 12px;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                color: #fff;
+                font-size: 13px;
+                outline: none;
+            }
+            .media-input-row input:focus { border-color: #bf5af2; }
+            .media-input-row .clear-media {
+                background: rgba(255,69,58,0.1);
+                border: 1px solid rgba(255,69,58,0.2);
+                color: #ff453a;
+                border-radius: 12px;
+                padding: 6px 12px;
+                font-weight: 700;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .media-input-row .clear-media:active { transform: scale(0.9); }
         </style>
     </head>
     <body>
@@ -10245,12 +10461,17 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                             card.querySelector('.q-exp').value = q.explanation || '';
                             card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
                             
-                            // 👇 NEW: Restore time limit and media URL in edit view
+                            // Restore time limit and media
                             const timeInput = card.querySelector('.q-time-limit');
                             if (timeInput && q.time_limit) timeInput.value = q.time_limit;
                             
-                            const mediaInput = card.querySelector('.q-media-url');
-                            if (mediaInput && q.media_url) mediaInput.value = q.media_url;
+                            // Restore media: we have media_url or media_file_id
+                            const mediaInput = card.querySelector('.q-media-input');
+                            if (mediaInput) {
+                                if (q.media_url) mediaInput.value = q.media_url;
+                                else if (q.media_file_id) mediaInput.value = q.media_file_id;
+                                updateMediaPreview(id, mediaInput.value.trim());
+                            }
                             
                             updateOptionStyles(\`edit-q-card-\${id}\`);
                         });
@@ -10288,10 +10509,16 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </div>
                     <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
                     
-                    <!-- 👇 NEW: Media URL Field -->
-                    <input type="text" class="form-control q-media-url" placeholder="Media URL (optional - paste image/video link)" style="margin-top: 8px;">
+                    <!-- Media Input & Preview -->
+                    <div class="media-input-row">
+                        <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                        <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                    </div>
+                    <div class="media-preview" id="edit-preview-\${id}" style="display:none;">
+                        <!-- Preview will be injected here -->
+                    </div>
                     
-                    <!-- 👇 NEW: Per-Question Time Limit Field -->
+                    <!-- Per-Question Time Limit Field -->
                     <div style="display: flex; gap: 10px; margin-top: 8px;">
                         <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
                         <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
@@ -10328,6 +10555,12 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 
                 container.appendChild(qDiv);
                 
+                // Event listeners for media preview
+                const mediaInput = qDiv.querySelector('.q-media-input');
+                mediaInput.addEventListener('input', function() {
+                    updateMediaPreview(id, this.value.trim());
+                });
+
                 qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                     tg.HapticFeedback.impactOccurred('light');
                     updateOptionStyles(\`edit-q-card-\${id}\`);
@@ -10335,6 +10568,55 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 tg.HapticFeedback.selectionChanged();
                 return id;
+            }
+
+            // ---- Media Preview (same as create) ----
+            function updateMediaPreview(qId, mediaValue) {
+                const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
+                if (!previewContainer) return;
+                
+                if (!mediaValue) {
+                    previewContainer.style.display = 'none';
+                    previewContainer.innerHTML = '';
+                    return;
+                }
+
+                const isUrl = mediaValue.match(/^https?:\\/\\//);
+                const isFileId = !isUrl && mediaValue.length > 10;
+
+                let html = '';
+                if (isUrl) {
+                    const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                    if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                        html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                    } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                        html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                    } else {
+                        html = \`<div style="padding:12px; color:rgba(255,255,255,0.6);">Unsupported media type</div>\`;
+                    }
+                } else if (isFileId) {
+                    html = \`
+                        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(213,0,249,0.1); border-radius:12px;">
+                            <span style="font-size:24px;">🖼️</span>
+                            <span style="font-size:12px; color:#ea80fc; word-break:break-all;">\${mediaValue}</span>
+                            <span class="file-id-label">file_id</span>
+                        </div>
+                    \`;
+                }
+
+                previewContainer.innerHTML = html;
+                previewContainer.style.display = 'block';
+            }
+
+            function clearMedia(btn) {
+                const card = btn.closest('.q-card');
+                if (!card) return;
+                const input = card.querySelector('.q-media-input');
+                if (input) {
+                    input.value = '';
+                    const qId = card.id.replace('edit-q-card-', '');
+                    updateMediaPreview(qId, '');
+                }
             }
 
             function removeEditQuestion(id) {
@@ -10388,14 +10670,19 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                     const options = [op1, op2, op3, op4];
                     
-                    // Get per-question time limit
                     const timeInput = card.querySelector('.q-time-limit');
                     const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                     
-                    // Get media URL
-                    const mediaInput = card.querySelector('.q-media-url');
-                    const mediaUrl = mediaInput ? mediaInput.value.trim() || null : null;
-                    const mediaType = mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null;
+                    const mediaInput = card.querySelector('.q-media-input');
+                    let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                    let mediaUrl = null, mediaFileId = null;
+                    if (mediaValue) {
+                        if (mediaValue.match(/^https?:\\/\\//)) {
+                            mediaUrl = mediaValue;
+                        } else {
+                            mediaFileId = mediaValue;
+                        }
+                    }
                     
                     questions.push({
                         question: text,
@@ -10403,7 +10690,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         answer: options[ansIndex],
                         explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                         media_url: mediaUrl || null,
-                        media_type: mediaType,
+                        media_file_id: mediaFileId || null,
+                        media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
                         time_limit: timeLimit || null,
                         is_rapid_fire: card.querySelector('.q-rapid').checked
                     });
