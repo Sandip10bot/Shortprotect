@@ -9179,700 +9179,1314 @@ app.get("/mini/:userId", (req, res) => {
     
 
 // ==========================================
-// QUIZ CREATOR MINI APP UI (UPDATED with per-question time & photo support)
+// QUIZ CREATOR MINI APP UI – Premium Telegram Style (No Emojis)
 // ==========================================
 app.get("/create-quiz-app/:userId", (req, res) => {
     const userId = req.params.userId;
     res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Quiz Creator</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-            
-            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-            
-            :root {
-                --tg-bg: #ffffff;
-                --tg-secondary-bg: #f4f4f5;
-                --tg-text: #000000;
-                --tg-hint: #707579;
-                --tg-accent: #2AABEE;
-                --tg-accent-dark: #1e96d2;
-                --tg-border: #e7e7e7;
-                --tg-destructive: #e53935;
-                --tg-success: #31b545;
-            }
-            
-            body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
-                background: var(--tg-bg);
-                margin: 0; padding: 0 0 110px 0; 
-                color: var(--tg-text); 
-                min-height: 100vh;
-                -webkit-font-smoothing: antialiased;
-                letter-spacing: -0.01em;
-            }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Quiz Creator</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-            .container { 
-                width: 100%; max-width: 500px; margin: 0 auto; 
-                padding: 20px 16px; 
-                animation: fadeUp 0.35s ease;
-            }
-            @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-            
-            .header-icon { font-size: 40px; margin-bottom: 6px; }
-            
-            .form-group { margin-bottom: 14px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--tg-hint); text-transform: uppercase; letter-spacing: 0.5px;}
-            
-            .form-control { 
-                width: 100%; padding: 14px; border-radius: 12px; 
-                background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); 
-                color: var(--tg-text); font-size: 15px; outline: none; 
-                transition: border-color 0.2s, box-shadow 0.2s; 
-            }
-            .form-control:focus { border-color: var(--tg-accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
-            textarea.form-control { resize: none; font-family: inherit; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-            .q-card { 
-                background: var(--tg-bg); 
-                border: 1px solid var(--tg-border); padding: 16px; border-radius: 16px; 
-                margin-bottom: 16px; position: relative; 
-                box-shadow: 0 1px 3px rgba(0,0,0,0.04); 
-            }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--tg-accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
-            
-            .btn-remove { background: rgba(229,57,53,0.08); color: var(--tg-destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
-            .btn-remove:active { transform: scale(0.95); }
-            
-            .btn-add { background: rgba(42,171,238,0.08); color: var(--tg-accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; }
-            .btn-add:active { transform: scale(0.98); }
+        :root {
+            --bg: #ffffff;
+            --card: #f4f4f5;
+            --text: #000000;
+            --hint: #707579;
+            --accent: #2AABEE;
+            --accent-dark: #1e96d2;
+            --border: #e7e7e7;
+            --destructive: #e53935;
+            --success: #31b545;
+            --warning: #f5a623;
+        }
 
-            .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-            .option-card { 
-                display: flex; align-items: center; padding: 4px 12px; 
-                background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); 
-                border-radius: 12px; cursor: pointer; transition: all 0.2s; 
-            }
-            .option-card input[type="radio"] { display: none; }
-            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
-            
-            .option-card.selected { 
-                border-color: var(--tg-accent); background: rgba(42,171,238,0.08); 
-            }
-            .option-card.selected .radio-custom { border-color: var(--tg-accent); background: var(--tg-accent); }
-            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
-            
-            .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 14px; outline: none; padding: 10px 0; font-weight: 500; }
-            .option-card .opt-val::placeholder { color: #a0a0a0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+            background: var(--bg);
+            margin: 0; padding: 0 0 110px 0;
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.01em;
+        }
 
-            .q-exp { border: none; background: var(--tg-secondary-bg); border-radius: 12px; padding: 12px; }
-            
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tg-border); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
-            .toggle-switch:checked { background: var(--tg-accent); box-shadow: 0 0 8px rgba(42,171,238,0.35); }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-            .toggle-switch:checked::after { transform: translateX(20px); }
+        .container { width: 100%; max-width: 500px; margin: 0 auto; padding: 20px 16px; animation: fadeUp 0.35s ease; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
-            .sticky-action-bar {
-                position: fixed; bottom: 0; left: 0; width: 100%;
-                background: #ffffff; 
-                border-top: 1px solid var(--tg-border);
-                padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-                display: flex; gap: 10px; z-index: 100;
-                box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
-                transform: translateY(100%); transition: transform 0.3s ease;
-            }
-            .sticky-action-bar.visible { transform: translateY(0); }
-            
-            .sticky-action-bar .btn-publish { flex: 2; background: var(--tg-accent); border: none; padding: 14px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(42,171,238,0.3); cursor: pointer; }
-            .sticky-action-bar .btn-publish:active { background: var(--tg-accent-dark); }
-            .sticky-action-bar .btn-clear { flex: 1; background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); border-radius: 12px; color: var(--tg-destructive); font-weight: 700; font-size: 13px; cursor: pointer; }
+        .header-icon { width: 48px; height: 48px; margin: 0 auto 8px; display: block; fill: var(--accent); }
+        .title { font-weight: 800; font-size: 24px; text-align: center; margin: 4px 0; }
+        .subtitle { font-size: 14px; color: var(--hint); text-align: center; margin-bottom: 28px; }
 
-            .top-bar-save { position: fixed; top: 10px; right: 12px; background: #fff; padding: 4px 10px; border-radius: 16px; font-size: 10px; color: var(--tg-success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-            .top-bar-save.show { opacity: 1; }
+        .form-group { margin-bottom: 14px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
 
-            .loader { 
-                border: 3px solid #e8e8e8; border-top: 3px solid var(--tg-accent);
-                border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; 
-                margin: 0 auto 16px auto;
-            }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .form-control {
+            width: 100%; padding: 14px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); font-size: 15px; outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
+        textarea.form-control { resize: none; font-family: inherit; }
 
-            .media-preview {
-                margin: 8px 0 4px;
-                border-radius: 12px;
-                overflow: hidden;
-                background: var(--tg-secondary-bg);
-                border: 1px solid var(--tg-border);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 60px;
-                position: relative;
-            }
-            .media-preview img, .media-preview video {
-                max-width: 100%;
-                max-height: 180px;
-                border-radius: 10px;
-                display: block;
-            }
-            .media-preview .file-id-label {
-                font-size: 11px;
-                color: var(--tg-hint);
-                padding: 6px 10px;
-                background: rgba(255,255,255,0.9);
-                border-radius: 8px;
-                position: absolute;
-                bottom: 6px;
-                right: 6px;
-                pointer-events: none;
-            }
-            .media-input-row {
-                display: flex;
-                gap: 8px;
-                margin-top: 6px;
-            }
-            .media-input-row input {
-                flex: 1;
-                padding: 8px 12px;
-                border-radius: 10px;
-                background: var(--tg-secondary-bg);
-                border: 1px solid var(--tg-border);
-                color: var(--tg-text);
-                font-size: 13px;
-                outline: none;
-            }
-            .media-input-row input:focus { border-color: var(--tg-accent); }
-            .media-input-row .clear-media {
-                background: rgba(229,57,53,0.08);
-                border: 1px solid rgba(229,57,53,0.2);
-                color: var(--tg-destructive);
-                border-radius: 10px;
-                padding: 6px 12px;
-                font-weight: 700;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            .media-input-row .clear-media:active { transform: scale(0.95); }
-            
-            h2 { color: var(--tg-text); }
-            p { color: var(--tg-hint); }
-        </style>
-    </head>
-    <body>
-        <div class="top-bar-save" id="save-indicator">✓ Saved</div>
-        
-        <div class="container" id="main-content">
-            <div style="text-align: center;">
-                <div class="header-icon">✨</div>
-                <h2 style="font-weight: 800; font-size: 22px; margin-bottom: 4px;">Create New Quiz</h2>
-                <p style="margin-bottom: 24px; color: rgba(255,255,255,0.5); font-size: 13px;">Progress autosaves securely.</p>
+        .q-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 16px;
+            margin-bottom: 16px;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
+
+        .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .btn-remove:active { transform: scale(0.95); }
+
+        .btn-add { background: rgba(42,171,238,0.08); color: var(--accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-add:active { transform: scale(0.98); }
+        .btn-add svg { width: 20px; height: 20px; fill: var(--accent); }
+
+        .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+        .option-card {
+            display: flex; align-items: center; padding: 4px 12px;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 12px; cursor: pointer; transition: all 0.2s;
+        }
+        .option-card input[type="radio"] { display: none; }
+        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
+
+        .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
+        .option-card.selected .radio-custom { border-color: var(--accent); background: var(--accent); }
+        .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
+
+        .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
+        .option-card .opt-val::placeholder { color: #a0a0a0; }
+
+        .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
+
+        .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch:checked { background: var(--accent); box-shadow: 0 0 8px rgba(42,171,238,0.35); }
+        .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle-switch:checked::after { transform: translateX(20px); }
+
+        .sticky-action-bar {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: #ffffff;
+            border-top: 1px solid var(--border);
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            display: flex; gap: 10px; z-index: 100;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+            transform: translateY(100%); transition: transform 0.3s ease;
+        }
+        .sticky-action-bar.visible { transform: translateY(0); }
+
+        .sticky-action-bar .btn-publish { flex: 2; background: var(--accent); border: none; padding: 14px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(42,171,238,0.3); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .sticky-action-bar .btn-publish:active { background: var(--accent-dark); }
+        .sticky-action-bar .btn-clear { flex: 1; background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); border-radius: 12px; color: var(--destructive); font-weight: 700; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+        .top-bar-save { position: fixed; top: 10px; right: 12px; background: #fff; padding: 4px 12px; border-radius: 16px; font-size: 10px; color: var(--success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 4px; }
+        .top-bar-save.show { opacity: 1; }
+        .top-bar-save svg { width: 14px; height: 14px; fill: var(--success); }
+
+        .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .media-preview { margin: 8px 0 4px; border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 60px; position: relative; }
+        .media-preview img, .media-preview video { max-width: 100%; max-height: 180px; border-radius: 10px; display: block; }
+        .media-preview .file-id-label { font-size: 11px; color: var(--hint); padding: 6px 10px; background: rgba(255,255,255,0.9); border-radius: 8px; position: absolute; bottom: 6px; right: 6px; pointer-events: none; }
+
+        .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
+        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
+        .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
+
+        .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+        .time-per-q input { flex: 1; }
+        .time-per-q .hint { font-size: 11px; color: var(--hint); }
+
+        .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <div class="top-bar-save" id="save-indicator">
+        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        Saved
+    </div>
+
+    <div class="container" id="main-content">
+        <div style="text-align: center;">
+            <svg class="header-icon" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <div class="title">Create New Quiz</div>
+            <div class="subtitle">Progress autosaves securely.</div>
+        </div>
+
+        <div id="quiz-form">
+            <div class="q-card" style="margin-bottom: 24px; border-color: rgba(42,171,238,0.3); background: rgba(42,171,238,0.04);">
+                <div class="form-group">
+                    <label>Quiz Title</label>
+                    <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description" required></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Time Per Question (Sec)</label>
+                    <input type="number" id="q-time" class="form-control" value="15" required>
+                </div>
             </div>
-            
-            <div id="quiz-form">
-                <div class="q-card" style="margin-bottom: 24px; border-color: rgba(213,0,249,0.3); background: rgba(45,10,80,0.35);">
-                    <div class="form-group">
-                        <label>Quiz Title</label>
-                        <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Description</label>
-                        <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description" required></textarea>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label>Time Per Question (Sec)</label>
-                        <input type="number" id="q-time" class="form-control" value="15" required>
-                    </div>
+
+            <div id="questions-container"></div>
+
+            <button type="button" class="btn-add" onclick="addQuestion()">
+                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                Add New Question
+            </button>
+        </div>
+
+        <div id="loading" style="display:none; margin-top:30px; text-align:center;">
+            <div class="loader"></div>
+            <p style="color: var(--accent); font-weight: 700; font-size: 14px;">Publishing to Database...</p>
+        </div>
+    </div>
+
+    <!-- Sticky Bottom Action Bar -->
+    <div class="sticky-action-bar visible" id="actionBar">
+        <button class="btn-clear" onclick="clearDrafts()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            Clear
+        </button>
+        <button class="btn-publish" id="publish-btn" onclick="submitQuiz()">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            Publish Quiz
+        </button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.setHeaderColor('#ffffff');
+
+        const userId = \`${userId}\`;
+        const storageKey = \`mytho_quiz_draft_\${userId}\`;
+        let questionCount = 0;
+        let saveTimeout;
+
+        function triggerConfetti() {
+            const end = Date.now() + 1500;
+            (function frame() {
+                confetti({ particleCount: 4, angle: 60, spread: 50, origin: { x: 0 }, colors: ['#2AABEE', '#31b545', '#f5a623'] });
+                confetti({ particleCount: 4, angle: 120, spread: 50, origin: { x: 1 }, colors: ['#2AABEE', '#31b545', '#f5a623'] });
+                if (Date.now() < end) requestAnimationFrame(frame);
+            }());
+        }
+
+        function updateOptionStyles(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.querySelectorAll('.option-card').forEach(oc => {
+                const radio = oc.querySelector('input[type="radio"]');
+                if (radio && radio.checked) oc.classList.add('selected');
+                else oc.classList.remove('selected');
+            });
+        }
+
+        function addQuestion() {
+            questionCount++;
+            const id = questionCount;
+            const container = document.getElementById('questions-container');
+            const qDiv = document.createElement('div');
+            qDiv.className = 'q-card';
+            qDiv.id = \`q-card-\${id}\`;
+
+            qDiv.innerHTML = \`
+                <div class="q-header">
+                    <span>Question \${id}</span>
+                    <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
                 </div>
 
-                <div id="questions-container"></div>
+                <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
 
-                <button type="button" class="btn-add" onclick="addQuestion()">+ Add New Question</button>
-            </div>
-            
-            <div id="loading" style="display:none; margin-top:30px; text-align:center;">
-                <div class="loader"></div>
-                <p style="color: #2AABEE; font-weight: 700; font-size: 14px;">Publishing to Database...</p>
-            </div>
-        </div>
+                <div class="media-input-row">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                    <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                </div>
+                <div class="media-preview" id="preview-\${id}" style="display:none;"></div>
 
-        <!-- Sticky Bottom Action Bar -->
-        <div class="sticky-action-bar visible" id="actionBar">
-            <button class="btn-clear" onclick="clearDrafts()">🗑️ Clear</button>
-            <button class="btn-publish" id="publish-btn" onclick="submitQuiz()">🚀 Publish Quiz</button>
-        </div>
+                <div class="time-per-q">
+                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)" style="flex:1; padding: 10px;">
+                    <span class="hint">Optional</span>
+                </div>
 
-        <script>
-            const tg = window.Telegram.WebApp;
-            tg.expand();
-            tg.setHeaderColor('#ffffff');
-            
-            const userId = \`${userId}\`;
-            const storageKey = \`mytho_quiz_draft_\${userId}\`;
-            let questionCount = 0;
-            let saveTimeout;
+                <div class="options-group">
+                    <label class="option-card selected">
+                        <input type="radio" name="q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                    </label>
+                </div>
 
-            function triggerConfetti() {
-                const end = Date.now() + 1500;
-                (function frame() {
-                    confetti({ particleCount: 4, angle: 60, spread: 50, origin: { x: 0 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
-                    confetti({ particleCount: 4, angle: 120, spread: 50, origin: { x: 1 }, colors: ['#ea80fc', '#30d158', '#ffd60a'] });
-                    if (Date.now() < end) requestAnimationFrame(frame);
-                }());
+                <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+
+                <div class="setting-item">
+                    <span style="font-size:12px; font-weight:800; color:var(--warning);">Rapid Fire (7s)</span>
+                    <input type="checkbox" class="toggle-switch q-rapid">
+                </div>
+            \`;
+
+            container.appendChild(qDiv);
+
+            const mediaInput = qDiv.querySelector('.q-media-input');
+            mediaInput.addEventListener('input', function() {
+                updateMediaPreview(id, this.value.trim());
+                triggerAutoSave();
+            });
+
+            qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
+                tg.HapticFeedback.impactOccurred('light');
+                updateOptionStyles(\`q-card-\${id}\`);
+                triggerAutoSave();
+            }));
+
+            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
+                el.addEventListener('input', triggerAutoSave);
+                el.addEventListener('change', triggerAutoSave);
+            });
+
+            tg.HapticFeedback.selectionChanged();
+            triggerAutoSave();
+            return id;
+        }
+
+        function updateMediaPreview(qId, mediaValue) {
+            const previewContainer = document.getElementById(\`preview-\${qId}\`);
+            if (!previewContainer) return;
+            if (!mediaValue) {
+                previewContainer.style.display = 'none';
+                previewContainer.innerHTML = '';
+                return;
             }
-
-            function updateOptionStyles(cardId) {
-                const card = document.getElementById(cardId);
-                if (!card) return;
-                card.querySelectorAll('.option-card').forEach(oc => {
-                    const radio = oc.querySelector('input[type="radio"]');
-                    if (radio && radio.checked) {
-                        oc.classList.add('selected');
-                    } else {
-                        oc.classList.remove('selected');
-                    }
-                });
-            }
-
-            // ==========================================
-            // ADD QUESTION - UPDATED with media & time fields + preview
-            // ==========================================
-            function addQuestion() {
-                questionCount++;
-                const id = questionCount;
-                const container = document.getElementById('questions-container');
-                const qDiv = document.createElement('div');
-                qDiv.className = 'q-card';
-                qDiv.id = \`q-card-\${id}\`;
-
-                qDiv.innerHTML = \`
-                    <div class="q-header">
-                        <span>Question \${id}</span>
-                        <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
-                    </div>
-                    
-                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
-                    
-                    <!-- NEW: Media Input & Preview -->
-                    <div class="media-input-row">
-                        <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
-                        <button class="clear-media" onclick="clearMedia(this)">✕</button>
-                    </div>
-                    <div class="media-preview" id="preview-\${id}" style="display:none;">
-                        <!-- Preview will be injected here -->
-                    </div>
-                    
-                    <!-- Per-Question Time Limit Field -->
-                    <div style="display: flex; gap: 10px; margin-top: 8px;">
-                        <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
-                        <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
-                    </div>
-                    
-                    <div class="options-group">
-                        <label class="option-card selected">
-                            <input type="radio" name="q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4" required>
-                        </label>
-                    </div>
-
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
-                    
-                    <div class="setting-item">
-                        <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
-                        <input type="checkbox" class="toggle-switch q-rapid">
+            const isUrl = mediaValue.match(/^https?:\\/\\//);
+            const isFileId = !isUrl && mediaValue.length > 10;
+            let html = '';
+            if (isUrl) {
+                const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else {
+                    html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
+                }
+            } else if (isFileId) {
+                html = \`
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
+                        <span style="font-size:24px;">🖼️</span>
+                        <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
+                        <span class="file-id-label">file_id</span>
                     </div>
                 \`;
-                
-                container.appendChild(qDiv);
-                
-                // Event listeners for media preview
-                const mediaInput = qDiv.querySelector('.q-media-input');
-                mediaInput.addEventListener('input', function() {
-                    updateMediaPreview(id, this.value.trim());
-                    triggerAutoSave();
-                });
+            }
+            previewContainer.innerHTML = html;
+            previewContainer.style.display = 'block';
+        }
 
-                qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
-                    tg.HapticFeedback.impactOccurred('light');
-                    updateOptionStyles(\`q-card-\${id}\`);
-                    triggerAutoSave();
-                }));
-
-                qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
-                    el.addEventListener('input', triggerAutoSave);
-                    el.addEventListener('change', triggerAutoSave);
-                });
-
-                tg.HapticFeedback.selectionChanged();
+        function clearMedia(btn) {
+            const card = btn.closest('.q-card');
+            if (!card) return;
+            const input = card.querySelector('.q-media-input');
+            if (input) {
+                input.value = '';
+                const qId = card.id.replace('q-card-', '');
+                updateMediaPreview(qId, '');
                 triggerAutoSave();
-                return id;
+            }
+        }
+
+        function removeQuestion(id) {
+            const el = document.getElementById(\`q-card-\${id}\`);
+            if (el) {
+                el.style.transform = 'scale(0.9)';
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.remove();
+                    triggerAutoSave();
+                }, 200);
+            }
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function saveState() {
+            const data = {
+                title: document.getElementById('q-title').value,
+                desc: document.getElementById('q-desc').value,
+                time: document.getElementById('q-time').value,
+                questions: []
+            };
+            document.querySelectorAll('.q-card').forEach(card => {
+                const textNode = card.querySelector('.q-text');
+                if (!textNode) return;
+                const opts = card.querySelectorAll('.opt-val');
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                let mediaValue = mediaInput ? mediaInput.value.trim() || null : null;
+                let mediaUrl = null, mediaFileId = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
+                }
+                data.questions.push({
+                    text: textNode.value,
+                    opt1: opts[0] ? opts[0].value : '',
+                    opt2: opts[1] ? opts[1].value : '',
+                    opt3: opts[2] ? opts[2].value : '',
+                    opt4: opts[3] ? opts[3].value : '',
+                    ansIndex: ansIndex,
+                    exp: card.querySelector('.q-exp').value,
+                    isRapid: card.querySelector('.q-rapid').checked,
+                    timeLimit: timeLimit,
+                    mediaUrl: mediaUrl,
+                    mediaFileId: mediaFileId
+                });
+            });
+            localStorage.setItem(storageKey, JSON.stringify(data));
+            const indicator = document.getElementById('save-indicator');
+            indicator.classList.add('show');
+            setTimeout(() => indicator.classList.remove('show'), 1500);
+        }
+
+        function triggerAutoSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveState, 400);
+        }
+
+        function loadState() {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    document.getElementById('q-title').value = data.title || '';
+                    document.getElementById('q-desc').value = data.desc || '';
+                    document.getElementById('q-time').value = data.time || '15';
+                    document.getElementById('questions-container').innerHTML = '';
+                    questionCount = 0;
+                    if (data.questions && data.questions.length > 0) {
+                        data.questions.forEach(q => {
+                            const id = addQuestion();
+                            const card = document.getElementById(\`q-card-\${id}\`);
+                            card.querySelector('.q-text').value = q.text || '';
+                            const opts = card.querySelectorAll('.opt-val');
+                            opts[0].value = q.opt1 || '';
+                            opts[1].value = q.opt2 || '';
+                            opts[2].value = q.opt3 || '';
+                            opts[3].value = q.opt4 || '';
+                            const radios = card.querySelectorAll('input[type="radio"]');
+                            if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
+                            card.querySelector('.q-exp').value = q.exp || '';
+                            card.querySelector('.q-rapid').checked = q.isRapid || false;
+                            const timeInput = card.querySelector('.q-time-limit');
+                            if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
+                            const mediaInput = card.querySelector('.q-media-input');
+                            if (mediaInput) {
+                                if (q.mediaUrl) mediaInput.value = q.mediaUrl;
+                                else if (q.mediaFileId) mediaInput.value = q.mediaFileId;
+                                updateMediaPreview(id, mediaInput.value.trim());
+                            }
+                            updateOptionStyles(\`q-card-\${id}\`);
+                        });
+                    } else {
+                        addQuestion();
+                    }
+                } catch(e) {
+                    addQuestion();
+                }
+            } else {
+                addQuestion();
+            }
+        }
+
+        function clearDrafts() {
+            if(confirm("Delete all drafted questions?")) {
+                tg.HapticFeedback.impactOccurred('heavy');
+                localStorage.removeItem(storageKey);
+                location.reload();
+            }
+        }
+
+        document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
+        document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
+
+        async function submitQuiz() {
+            const title = document.getElementById('q-title').value.trim();
+            const desc = document.getElementById('q-desc').value.trim();
+            const time = document.getElementById('q-time').value.trim();
+
+            if (!title || !desc || !time) {
+                alert('Please fill out the Quiz Title and Description!');
+                return tg.HapticFeedback.notificationOccurred('error');
             }
 
-            // ---- Media Preview Logic ----
-            function updateMediaPreview(qId, mediaValue) {
-                const previewContainer = document.getElementById(\`preview-\${qId}\`);
-                if (!previewContainer) return;
-                
-                if (!mediaValue) {
-                    previewContainer.style.display = 'none';
-                    previewContainer.innerHTML = '';
-                    return;
+            const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
+            if (cards.length === 0) {
+                alert('Add at least one question!');
+                return tg.HapticFeedback.notificationOccurred('error');
+            }
+
+            const questions = [];
+            let hasError = false;
+
+            cards.forEach(card => {
+                const text = card.querySelector('.q-text').value.trim();
+                const optInputs = card.querySelectorAll('.opt-val');
+                const op1 = optInputs[0].value.trim();
+                const op2 = optInputs[1].value.trim();
+                const op3 = optInputs[2].value.trim();
+                const op4 = optInputs[3].value.trim();
+
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+
+                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+
+                const options = [op1, op2, op3, op4];
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                let mediaUrl = null, mediaFileId = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
                 }
 
-                // Determine if it's a URL or file_id
-                const isUrl = mediaValue.match(/^https?:\\/\\//);
-                const isFileId = !isUrl && mediaValue.length > 10; // assume file_id
+                questions.push({
+                    question: text,
+                    options: options,
+                    answer: options[ansIndex],
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                    media_url: mediaUrl || null,
+                    media_file_id: mediaFileId || null,
+                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    time_limit: timeLimit || null,
+                    is_rapid_fire: card.querySelector('.q-rapid').checked
+                });
+            });
 
-                let html = '';
-                if (isUrl) {
-                    // Check if it's an image or video
-                    const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
-                    if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
-                        html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
-                    } else if (['mp4','webm','mov','avi'].includes(ext)) {
-                        html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
-                    } else {
-                        html = \`<div style="padding:12px; color:rgba(255,255,255,0.6);">Unsupported media type</div>\`;
-                    }
-                } else if (isFileId) {
-                    // Show file_id as label
-                    html = \`
-                        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(213,0,249,0.1); border-radius:12px;">
-                            <span style="font-size:24px;">🖼️</span>
-                            <span style="font-size:12px; color:#ea80fc; word-break:break-all;">\${mediaValue}</span>
-                            <span class="file-id-label">file_id</span>
+            if (hasError) {
+                alert('Please ensure all question boxes and 4 options are completely filled!');
+                return tg.HapticFeedback.notificationOccurred('error');
+            }
+
+            const payload = {
+                userId,
+                title,
+                description: desc,
+                time_per_question: parseInt(time),
+                questions
+            };
+
+            document.getElementById('quiz-form').style.display = 'none';
+            document.getElementById('actionBar').classList.remove('visible');
+            document.getElementById('loading').style.display = 'block';
+            tg.HapticFeedback.impactOccurred('heavy');
+
+            try {
+                const res = await fetch('/api/quiz/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    triggerConfetti();
+                    localStorage.removeItem(storageKey);
+
+                    document.getElementById('loading').innerHTML = \`
+                        <div style="text-align:center;">
+                            <svg viewBox="0 0 24 24" width="56" height="56" fill="#31b545"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                            <h3 style="color:var(--success); font-size:24px; margin:12px 0 4px; font-weight:800;">Quiz is Ready!</h3>
+                            <p style="color:var(--hint); font-size:13px; margin-bottom:20px;">Your quiz has been successfully deployed.</p>
+
+                            <div style="background:var(--card); padding:18px; border-radius:14px; text-align:left; margin-bottom:24px; border:1px solid var(--border);">
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
+                                     style="background: linear-gradient(135deg, #31b545, #248a3d); border: none; padding:12px; border-radius:10px; color:#fff; font-size:14px; font-weight:700; cursor:pointer; width:100%; box-shadow:0 4px 15px rgba(49,181,69,0.3); transition: transform 0.2s; display:flex; align-items:center; justify-content:center; gap:8px;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2z"/></svg>
+                                    Start in Group
+                                </button>
+
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${data.quiz_id}');" 
+                                     style="background: var(--accent); border: none; padding:12px; border-radius:10px; color:#fff; font-size:14px; font-weight:700; cursor:pointer; margin-top:8px; width:100%; box-shadow:0 4px 12px rgba(42,171,238,0.3); transition: transform 0.2s; display:flex; align-items:center; justify-content:center; gap:8px;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+                                    PM Test
+                                </button>
+                            </div>
+
+                            <button class="btn-publish" style="width:100%; background:var(--bg); color:var(--text); padding:16px; border-radius:16px; font-weight:900; font-size:15px; border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="tg.close()">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                                Close App
+                            </button>
+                        </div>
+                    \`;
+
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (e) {
+                alert('Error creating quiz: ' + e.message);
+                document.getElementById('quiz-form').style.display = 'block';
+                document.getElementById('actionBar').classList.add('visible');
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        loadState();
+    </script>
+</body>
+</html>
+    `);
+});
+
+// ==========================================
+// QUIZ MANAGER MINI APP – Premium Telegram Style (No Emojis)
+// ==========================================
+app.get("/manage-quiz-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Manage Quizzes</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        :root {
+            --bg: #ffffff;
+            --card: #f4f4f5;
+            --text: #000000;
+            --hint: #707579;
+            --accent: #2AABEE;
+            --accent-dark: #1e96d2;
+            --border: #e7e7e7;
+            --destructive: #e53935;
+            --success: #31b545;
+            --warning: #f5a623;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+            background: var(--bg);
+            margin: 0; padding: 0 0 100px 0;
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
+        .header-title { font-weight: 800; font-size: 26px; text-align: left; margin: 10px 0 24px 4px; color: var(--text); letter-spacing: -0.3px; }
+
+        #list-view, #edit-view { animation: fadeIn 0.35s ease; }
+        .quiz-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 18px;
+            border-radius: 16px;
+            margin-bottom: 16px;
+            display: flex; flex-direction: column;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        }
+
+        .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+        .quiz-card-desc { font-size: 13px; color: var(--hint); margin-bottom: 14px; line-height: 1.45; }
+        .quiz-date { font-size: 11px; color: #a0a0a0; margin-bottom: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
+
+        .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .tag-glass {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 5px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text);
+            display: flex; align-items: center; gap: 4px;
+        }
+
+        .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+        .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
+
+        .btn {
+            padding: 12px 8px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px;
+            cursor: pointer; transition: transform 0.15s, opacity 0.15s; text-align: center;
+            display: flex; align-items: center; justify-content: center; gap: 4px;
+        }
+        .btn:active { transform: scale(0.96); opacity: 0.85; }
+
+        .btn-start-grp { background: rgba(49,181,69,0.12); color: var(--success); }
+        .btn-start-pm  { background: rgba(42,171,238,0.12); color: var(--accent); }
+        .btn-edit      { background: rgba(245,166,35,0.12); color: var(--warning); font-size: 12px; }
+        .btn-clone     { background: rgba(42,171,238,0.12); color: var(--accent); font-size: 12px; }
+        .btn-delete    { background: rgba(229,57,53,0.1); color: var(--destructive); font-size: 12px; }
+
+        .form-group { margin-bottom: 14px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-control { width: 100%; padding: 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s; }
+        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
+        textarea.form-control { resize: none; font-family: inherit; }
+
+        .q-card { background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
+        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; }
+        .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+        .option-card { display: flex; align-items: center; padding: 4px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .option-card input[type="radio"] { display: none; }
+        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
+        .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
+        .option-card.selected .radio-custom { border-color: var(--accent); background: var(--accent); }
+        .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
+        .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
+        .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
+
+        .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch:checked { background: var(--accent); }
+        .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle-switch:checked::after { transform: translateX(20px); }
+        .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+
+        .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .clone-modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
+            animation: fadeIn 0.25s ease;
+        }
+        .clone-modal.open { display: flex; }
+
+        .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .search-header h3 { margin: 0; color: var(--text); font-size: 20px; font-weight: 700; }
+        .close-search-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+        .search-input-box { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; transition: border 0.2s; }
+        .search-input-box:focus-within { border-color: var(--accent); background: #fff; }
+        .search-input-box input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 16px; outline: none; }
+        .search-input-box input::placeholder { color: #a0a0a0; }
+
+        .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
+        .user-result { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 8px; border-radius: 14px; cursor: pointer; transition: all 0.15s; }
+        .user-result:active { transform: scale(0.98); }
+        .user-result.selected { background: rgba(42,171,238,0.08); border: 1px solid rgba(42,171,238,0.35); }
+        .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #2AABEE, #1e96d2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; }
+
+        .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
+        .btn-confirm-clone { width: 100%; background: var(--accent); border: none; padding: 16px; border-radius: 14px; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; opacity: 0.4; transition: all 0.2s; pointer-events: none; }
+        .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 4px 14px rgba(42,171,238,0.35); }
+        .btn-confirm-clone.active:active { transform: scale(0.98); background: var(--accent-dark); }
+
+        .media-preview { margin: 6px 0 8px; border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 50px; position: relative; }
+        .media-preview img, .media-preview video { max-width: 100%; max-height: 160px; border-radius: 10px; display: block; }
+        .media-preview .file-id-label { font-size: 10px; color: var(--hint); padding: 4px 8px; background: rgba(255,255,255,0.9); border-radius: 6px; position: absolute; bottom: 4px; right: 4px; pointer-events: none; }
+
+        .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
+        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
+        .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
+
+        .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+        .time-per-q input { flex: 1; padding: 10px; }
+        .time-per-q .hint { font-size: 11px; color: var(--hint); }
+
+        .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+    <div class="container" id="main-content">
+        <!-- Quiz List View -->
+        <div id="list-view">
+            <h2 class="header-title">My Quizzes</h2>
+            <div id="quiz-list-container">
+                <div class="loader"></div>
+            </div>
+            <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:14px; background:var(--card); border:1px solid var(--border); color:var(--text); font-weight:700; font-size:15px; cursor:pointer;">
+                Close Mini App
+            </button>
+        </div>
+
+        <!-- Quiz Edit View -->
+        <div id="edit-view" style="display: none;">
+            <div class="search-header">
+                <h3>Edit Quiz</h3>
+                <button class="close-search-btn" onclick="closeEditView()">&times;</button>
+            </div>
+
+            <div class="quiz-card" style="margin-bottom: 24px;">
+                <div class="form-group">
+                    <label>Quiz Title</label>
+                    <input type="text" id="edit-q-title" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="edit-q-desc" class="form-control" rows="2" required></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Time Per Question (Sec)</label>
+                    <input type="number" id="edit-q-time" class="form-control" required>
+                </div>
+            </div>
+
+            <div id="edit-questions-container"></div>
+
+            <button class="btn btn-start-grp" style="width: 100%; margin-bottom: 20px; padding: 16px; justify-content:center; font-size:15px;" onclick="addEditQuestion()">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                Add New Question
+            </button>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 30px;">
+                <button style="flex: 2; background: var(--accent); border:none; padding:16px; border-radius:12px; color:#fff; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 4px 12px rgba(42,171,238,0.3); display:flex; align-items:center; justify-content:center; gap:8px;" onclick="submitEditQuiz()">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Save Changes
+                </button>
+                <button style="flex: 1; background: var(--card); border:1px solid var(--border); border-radius:12px; color:var(--text); font-weight:700; cursor:pointer;" onclick="closeEditView()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clone Quiz Search Modal -->
+    <div class="clone-modal" id="cloneModal">
+        <div class="search-header">
+            <h3>Find User</h3>
+            <button class="close-search-btn" onclick="closeCloneModal()">&times;</button>
+        </div>
+
+        <div class="search-input-box">
+            <span style="font-size: 18px; opacity: 0.6;">🔍</span>
+            <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
+        </div>
+
+        <div class="search-results" id="cloneSearchResults">
+            <p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
+        </div>
+
+        <div class="clone-footer">
+            <button class="btn-confirm-clone" id="btnConfirmClone" onclick="executeClone()">Clone to User</button>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.setHeaderColor('#ffffff');
+
+        const userId = ${userId};
+        let quizzes = [];
+
+        let targetQuizId = null;
+        let targetUserId = null;
+        let currentEditQuizId = null;
+        let editQuestionCount = 0;
+
+        async function loadQuizzes() {
+            const container = document.getElementById('quiz-list-container');
+            try {
+                const res = await fetch('/api/quiz/manage/list/' + userId);
+                const data = await res.json();
+
+                if (data.success && data.quizzes.length > 0) {
+                    quizzes = data.quizzes;
+                    let html = '';
+                    quizzes.forEach(q => {
+                        const dateObj = q.created_at ? new Date(q.created_at) : new Date();
+                        const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                        const desc = q.description ? q.description : 'No description provided for this quiz.';
+                        const difficulty = q.difficulty ? (q.difficulty.charAt(0).toUpperCase() + q.difficulty.slice(1)) : 'Medium';
+
+                        html += \`
+                            <div class="quiz-card" id="card-\${q._id}">
+                                <div class="quiz-card-title">\${q.title}</div>
+                                <div class="quiz-card-desc">\${desc}</div>
+
+                                <div class="quiz-tags">
+                                    <div class="tag-glass">📁 \${q.category}</div>
+                                    <div class="tag-glass">❓ \${q.total_questions} Qs</div>
+                                    <div class="tag-glass">⏱️ \${q.time_per_question}s</div>
+                                    <div class="tag-glass">🔥 \${difficulty}</div>
+                                </div>
+
+                                <div class="quiz-date">Created on \${dateStr}</div>
+
+                                <div class="btn-group-2">
+                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}'); tg.close();">🚀 Start Group</button>
+                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}'); tg.close();">🛠️ PM Test</button>
+                                </div>
+
+                                <div class="btn-group-3">
+                                    <button class="btn btn-edit" onclick="editQuiz('\${q._id}')">✏️ Edit</button>
+                                    <button class="btn btn-clone" onclick="openCloneModal('\${q._id}')">👯 Clone</button>
+                                    <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
+                                </div>
+                            </div>
+                        \`;
+                    });
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = \`
+                        <div style="text-align:center; padding: 50px 20px;">
+                            <div style="font-size:48px; margin-bottom:12px; filter: grayscale(1) opacity(0.5);">📭</div>
+                            <p style="color:var(--hint); font-size:15px;">You haven't created any quizzes yet.</p>
                         </div>
                     \`;
                 }
-
-                previewContainer.innerHTML = html;
-                previewContainer.style.display = 'block';
+            } catch (e) {
+                container.innerHTML = '<p style="color:var(--destructive); text-align:center; margin-top:40px;">Failed to load quizzes.</p>';
             }
+        }
 
-            function clearMedia(btn) {
-                const card = btn.closest('.q-card');
-                if (!card) return;
-                const input = card.querySelector('.q-media-input');
-                if (input) {
-                    input.value = '';
-                    const qId = card.id.replace('q-card-', '');
-                    updateMediaPreview(qId, '');
-                    triggerAutoSave();
-                }
-            }
+        async function editQuiz(quizId) {
+            tg.HapticFeedback.impactOccurred('light');
+            document.getElementById('list-view').style.display = 'none';
+            document.getElementById('edit-view').style.display = 'block';
+            document.getElementById('edit-questions-container').innerHTML = '<div class="loader"></div>';
 
-            function removeQuestion(id) {
-                const el = document.getElementById(\`q-card-\${id}\`);
-                if (el) {
-                    el.style.transform = 'scale(0.9)';
-                    el.style.opacity = '0';
-                    setTimeout(() => {
-                        el.remove();
-                        triggerAutoSave();
-                    }, 200);
-                }
-                tg.HapticFeedback.impactOccurred('medium');
-            }
+            try {
+                const res = await fetch('/api/quiz/manage/detail/' + userId + '/' + quizId);
+                const data = await res.json();
 
-            // ==========================================
-            // SAVE STATE - UPDATED with media & time fields
-            // ==========================================
-            function saveState() {
-                const data = {
-                    title: document.getElementById('q-title').value,
-                    desc: document.getElementById('q-desc').value,
-                    time: document.getElementById('q-time').value,
-                    questions: []
-                };
-                
-                document.querySelectorAll('.q-card').forEach(card => {
-                    const textNode = card.querySelector('.q-text');
-                    if (!textNode) return; 
+                if (data.success) {
+                    currentEditQuizId = quizId;
+                    document.getElementById('edit-q-title').value = data.metadata.title;
+                    document.getElementById('edit-q-desc').value = data.metadata.description;
+                    document.getElementById('edit-q-time').value = data.metadata.time_per_question;
 
-                    const opts = card.querySelectorAll('.opt-val');
-                    const radios = card.querySelectorAll('input[type="radio"]');
-                    let ansIndex = 0;
-                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
-                    
-                    const timeInput = card.querySelector('.q-time-limit');
-                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
-                    
-                    const mediaInput = card.querySelector('.q-media-input');
-                    const mediaValue = mediaInput ? mediaInput.value.trim() || null : null;
-                    // We store both media_url and media_file_id from this single field.
-                    // If it looks like a URL, treat as media_url, else as media_file_id.
-                    let mediaUrl = null, mediaFileId = null;
-                    if (mediaValue) {
-                        if (mediaValue.match(/^https?:\\/\\//)) {
-                            mediaUrl = mediaValue;
-                        } else {
-                            mediaFileId = mediaValue;
+                    document.getElementById('edit-questions-container').innerHTML = '';
+                    editQuestionCount = 0;
+
+                    data.questions.forEach(q => {
+                        const id = addEditQuestion();
+                        const card = document.getElementById(\`edit-q-card-\${id}\`);
+                        card.querySelector('.q-text').value = q.question;
+                        const opts = card.querySelectorAll('.opt-val');
+
+                        opts[0].value = typeof q.options[0] === 'object' ? (q.options[0].text || '') : (q.options[0] || '');
+                        opts[1].value = typeof q.options[1] === 'object' ? (q.options[1].text || '') : (q.options[1] || '');
+                        opts[2].value = typeof q.options[2] === 'object' ? (q.options[2].text || '') : (q.options[2] || '');
+                        opts[3].value = typeof q.options[3] === 'object' ? (q.options[3].text || '') : (q.options[3] || '');
+
+                        const ansIndex = q.options.findIndex(opt => {
+                            const optText = typeof opt === 'object' ? opt.text : opt;
+                            return optText === q.answer;
+                        });
+                        const radios = card.querySelectorAll('input[type="radio"]');
+                        if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
+
+                        card.querySelector('.q-exp').value = q.explanation || '';
+                        card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
+
+                        const timeInput = card.querySelector('.q-time-limit');
+                        if (timeInput && q.time_limit) timeInput.value = q.time_limit;
+
+                        const mediaInput = card.querySelector('.q-media-input');
+                        if (mediaInput) {
+                            if (q.media_url) mediaInput.value = q.media_url;
+                            else if (q.media_file_id) mediaInput.value = q.media_file_id;
+                            updateMediaPreview(id, mediaInput.value.trim());
                         }
-                    }
-                    
-                    data.questions.push({
-                        text: textNode.value,
-                        opt1: opts[0] ? opts[0].value : '',
-                        opt2: opts[1] ? opts[1].value : '',
-                        opt3: opts[2] ? opts[2].value : '',
-                        opt4: opts[3] ? opts[3].value : '',
-                        ansIndex: ansIndex,
-                        exp: card.querySelector('.q-exp').value,
-                        isRapid: card.querySelector('.q-rapid').checked,
-                        timeLimit: timeLimit,
-                        mediaUrl: mediaUrl,
-                        mediaFileId: mediaFileId
+
+                        updateOptionStyles(\`edit-q-card-\${id}\`);
                     });
-                });
-                
-                localStorage.setItem(storageKey, JSON.stringify(data));
-                const indicator = document.getElementById('save-indicator');
-                indicator.classList.add('show');
-                setTimeout(() => indicator.classList.remove('show'), 1500);
-            }
-
-            function triggerAutoSave() {
-                clearTimeout(saveTimeout);
-                saveTimeout = setTimeout(saveState, 400); 
-            }
-
-            // ==========================================
-            // LOAD STATE - UPDATED with media & time fields
-            // ==========================================
-            function loadState() {
-                const saved = localStorage.getItem(storageKey);
-                if (saved) {
-                    try {
-                        const data = JSON.parse(saved);
-                        document.getElementById('q-title').value = data.title || '';
-                        document.getElementById('q-desc').value = data.desc || '';
-                        document.getElementById('q-time').value = data.time || '15';
-                        
-                        document.getElementById('questions-container').innerHTML = '';
-                        questionCount = 0;
-                        
-                        if (data.questions && data.questions.length > 0) {
-                            data.questions.forEach(q => {
-                                const id = addQuestion();
-                                const card = document.getElementById(\`q-card-\${id}\`);
-                                card.querySelector('.q-text').value = q.text || '';
-                                const opts = card.querySelectorAll('.opt-val');
-                                opts[0].value = q.opt1 || '';
-                                opts[1].value = q.opt2 || '';
-                                opts[2].value = q.opt3 || '';
-                                opts[3].value = q.opt4 || '';
-                                
-                                const radios = card.querySelectorAll('input[type="radio"]');
-                                if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
-                                
-                                card.querySelector('.q-exp').value = q.exp || '';
-                                card.querySelector('.q-rapid').checked = q.isRapid || false;
-                                
-                                // Restore time limit and media
-                                const timeInput = card.querySelector('.q-time-limit');
-                                if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
-                                
-                                // Restore media: we need to set both fields if present
-                                const mediaInput = card.querySelector('.q-media-input');
-                                if (mediaInput) {
-                                    if (q.mediaUrl) mediaInput.value = q.mediaUrl;
-                                    else if (q.mediaFileId) mediaInput.value = q.mediaFileId;
-                                    // Trigger preview
-                                    updateMediaPreview(id, mediaInput.value.trim());
-                                }
-                                
-                                updateOptionStyles(\`q-card-\${id}\`);
-                            });
-                        } else {
-                            addQuestion();
-                        }
-                    } catch(e) {
-                        addQuestion();
-                    }
                 } else {
-                    addQuestion();
+                    alert("Failed to load quiz details.");
+                    closeEditView();
                 }
+            } catch(e) {
+                alert("Network Error while loading details.");
+                closeEditView();
             }
+        }
 
-            function clearDrafts() {
-                if(confirm("Delete all drafted questions?")) {
-                    tg.HapticFeedback.impactOccurred('heavy');
-                    localStorage.removeItem(storageKey);
-                    location.reload();
-                }
+        function closeEditView() {
+            document.getElementById('edit-view').style.display = 'none';
+            document.getElementById('list-view').style.display = 'block';
+            currentEditQuizId = null;
+        }
+
+        function addEditQuestion() {
+            editQuestionCount++;
+            const id = editQuestionCount;
+            const container = document.getElementById('edit-questions-container');
+            const qDiv = document.createElement('div');
+            qDiv.className = 'q-card';
+            qDiv.id = \`edit-q-card-\${id}\`;
+
+            qDiv.innerHTML = \`
+                <div class="q-header">
+                    <span>Question \${id}</span>
+                    <button class="btn-remove" onclick="removeEditQuestion(\${id})">✕ Remove</button>
+                </div>
+                <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+
+                <div class="media-input-row">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                    <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                </div>
+                <div class="media-preview" id="edit-preview-\${id}" style="display:none;"></div>
+
+                <div class="time-per-q">
+                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)" style="flex:1; padding: 10px;">
+                    <span class="hint">Optional</span>
+                </div>
+
+                <div class="options-group">
+                    <label class="option-card selected">
+                        <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                    </label>
+                </div>
+                <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+                <div class="setting-item">
+                    <span style="font-size:12px; font-weight:800; color:var(--warning);">Rapid Fire (7s)</span>
+                    <input type="checkbox" class="toggle-switch q-rapid">
+                </div>
+            \`;
+
+            container.appendChild(qDiv);
+
+            const mediaInput = qDiv.querySelector('.q-media-input');
+            mediaInput.addEventListener('input', function() {
+                updateMediaPreview(id, this.value.trim());
+            });
+
+            qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
+                tg.HapticFeedback.impactOccurred('light');
+                updateOptionStyles(\`edit-q-card-\${id}\`);
+            }));
+
+            tg.HapticFeedback.selectionChanged();
+            return id;
+        }
+
+        function updateMediaPreview(qId, mediaValue) {
+            const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
+            if (!previewContainer) return;
+            if (!mediaValue) {
+                previewContainer.style.display = 'none';
+                previewContainer.innerHTML = '';
+                return;
             }
+            const isUrl = mediaValue.match(/^https?:\\/\\//);
+            const isFileId = !isUrl && mediaValue.length > 10;
+            let html = '';
+            if (isUrl) {
+                const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else {
+                    html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
+                }
+            } else if (isFileId) {
+                html = \`
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
+                        <span style="font-size:24px;">🖼️</span>
+                        <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
+                        <span class="file-id-label">file_id</span>
+                    </div>
+                \`;
+            }
+            previewContainer.innerHTML = html;
+            previewContainer.style.display = 'block';
+        }
 
-            document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
-            document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
+        function clearMedia(btn) {
+            const card = btn.closest('.q-card');
+            if (!card) return;
+            const input = card.querySelector('.q-media-input');
+            if (input) {
+                input.value = '';
+                const qId = card.id.replace('edit-q-card-', '');
+                updateMediaPreview(qId, '');
+            }
+        }
 
-            // ==========================================
-            // SUBMIT QUIZ - UPDATED with media & time fields
-            // ==========================================
-            async function submitQuiz() {
-                const title = document.getElementById('q-title').value.trim();
-                const desc = document.getElementById('q-desc').value.trim();
-                const time = document.getElementById('q-time').value.trim();
-                
-                if (!title || !desc || !time) {
-                    alert('Please fill out the Quiz Title and Description!');
-                    return tg.HapticFeedback.notificationOccurred('error');
+        function removeEditQuestion(id) {
+            const el = document.getElementById(\`edit-q-card-\${id}\`);
+            if (el) el.remove();
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function updateOptionStyles(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.querySelectorAll('.option-card').forEach(oc => {
+                const radio = oc.querySelector('input[type="radio"]');
+                if (radio && radio.checked) oc.classList.add('selected');
+                else oc.classList.remove('selected');
+            });
+        }
+
+        async function submitEditQuiz() {
+            const title = document.getElementById('edit-q-title').value.trim();
+            const desc = document.getElementById('edit-q-desc').value.trim();
+            const time = document.getElementById('edit-q-time').value.trim();
+
+            if (!title || !desc || !time) return alert('Please fill title and description!');
+
+            const cards = document.getElementById('edit-questions-container').querySelectorAll('.q-card');
+            if (cards.length === 0) return alert('Please add at least one question!');
+
+            const questions = [];
+            let hasError = false;
+
+            cards.forEach(card => {
+                const text = card.querySelector('.q-text').value.trim();
+                const optInputs = card.querySelectorAll('.opt-val');
+                const op1 = optInputs[0].value.trim();
+                const op2 = optInputs[1].value.trim();
+                const op3 = optInputs[2].value.trim();
+                const op4 = optInputs[3].value.trim();
+
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+
+                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+
+                const options = [op1, op2, op3, op4];
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                let mediaUrl = null, mediaFileId = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
                 }
 
-                const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
-                if (cards.length === 0) {
-                    alert('Add at least one question!');
-                    return tg.HapticFeedback.notificationOccurred('error');
+                questions.push({
+                    question: text,
+                    options: options,
+                    answer: options[ansIndex],
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                    media_url: mediaUrl || null,
+                    media_file_id: mediaFileId || null,
+                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    time_limit: timeLimit || null,
+                    is_rapid_fire: card.querySelector('.q-rapid').checked
+                });
+            });
+
+            if (hasError) return alert('Please ensure all questions and 4 options are completely filled!');
+
+            const payload = {
+                title,
+                description: desc,
+                time_per_question: parseInt(time),
+                questions
+            };
+
+            tg.HapticFeedback.impactOccurred('heavy');
+
+            try {
+                const res = await fetch('/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    alert("✅ Quiz Updated Successfully!");
+                    closeEditView();
+                    loadQuizzes();
+                } else {
+                    alert("Error: " + data.error);
                 }
+            } catch (e) {
+                alert('Update Error: ' + e.message);
+            }
+        }
 
-                const questions = [];
-                let hasError = false;
-
-                cards.forEach(card => {
-                    const text = card.querySelector('.q-text').value.trim();
-                    const optInputs = card.querySelectorAll('.opt-val');
-                    const op1 = optInputs[0].value.trim();
-                    const op2 = optInputs[1].value.trim();
-                    const op3 = optInputs[2].value.trim();
-                    const op4 = optInputs[3].value.trim();
-                    
-                    const radios = card.querySelectorAll('input[type="radio"]');
-                    let ansIndex = 0;
-                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
-                    
-                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
-
-                    const options = [op1, op2, op3, op4];
-                    
-                    // Get per-question time limit
-                    const timeInput = card.querySelector('.q-time-limit');
-                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
-                    
-                    // Get media: we stored both mediaUrl and mediaFileId in the draft.
-                    // In the draft we had separate fields; but we saved them as mediaUrl and mediaFileId.
-                    // Now we reconstruct from the input.
-                    const mediaInput = card.querySelector('.q-media-input');
-                    let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                    let mediaUrl = null, mediaFileId = null;
-                    if (mediaValue) {
-                        if (mediaValue.match(/^https?:\\/\\//)) {
-                            mediaUrl = mediaValue;
-                        } else {
-                            mediaFileId = mediaValue;
-                        }
+        async function deleteQuiz(quizId) {
+            if(confirm("Are you sure you want to permanently delete this quiz?")) {
+                tg.HapticFeedback.impactOccurred('heavy');
+                try {
+                    const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
+                    const data = await res.json();
+                    if(data.success) {
+                        document.getElementById('card-' + quizId).style.display = 'none';
+                        tg.HapticFeedback.notificationOccurred('success');
+                    } else {
+                        alert("Error: " + data.error);
                     }
-                    
-                    questions.push({
-                        question: text,
-                        options: options,
-                        answer: options[ansIndex],
-                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
-                        media_url: mediaUrl || null,
-                        media_file_id: mediaFileId || null,
-                        media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
-                        time_limit: timeLimit || null,
-                        is_rapid_fire: card.querySelector('.q-rapid').checked
+                } catch(e) {
+                    alert("Network Error");
+                }
+            }
+        }
+
+        function openCloneModal(quizId) {
+            targetQuizId = quizId;
+            targetUserId = null;
+            document.getElementById('cloneSearchInput').value = '';
+            document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.remove('active');
+            confirmBtn.innerText = "Select User First";
+            document.getElementById('cloneModal').classList.add('open');
+            setTimeout(() => document.getElementById('cloneSearchInput').focus(), 200);
+        }
+
+        function closeCloneModal() {
+            document.getElementById('cloneModal').classList.remove('open');
+        }
+
+        document.getElementById('cloneSearchInput').addEventListener('input', async function(e) {
+            const query = e.target.value.trim();
+            const resultsDiv = document.getElementById('cloneSearchResults');
+
+            if (query.length < 2) {
+                resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
+                const data = await res.json();
+
+                if (data.success && data.users.length > 0) {
+                    let html = '';
+                    data.users.forEach(u => {
+                        const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` : \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+                        html += \`
+                            <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
+                                \${avatar}
+                                <div>
+                                    <div style="font-weight:600; font-size:15px; color:var(--text); margin-bottom:2px;">\${u.name}</div>
+                                    <div style="font-size:12px; color:var(--hint);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
+                                </div>
+                            </div>
+                        \`;
                     });
+                    resultsDiv.innerHTML = html;
+                } else {
+                    resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">No users found.</p>';
+                }
+            } catch(e) {
+                console.error("Search error:", e);
+            }
+        });
+
+        function selectUserForClone(id, name) {
+            targetUserId = id;
+            tg.HapticFeedback.selectionChanged();
+            document.querySelectorAll('.user-result').forEach(el => el.classList.remove('selected'));
+            document.getElementById('ur-' + id).classList.add('selected');
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.add('active');
+            confirmBtn.innerText = \`Clone to \${name}\`;
+        }
+
+        async function executeClone() {
+            if (!targetQuizId || !targetUserId) return;
+            const btn = document.getElementById('btnConfirmClone');
+            btn.innerText = "Cloning, Please wait...";
+            btn.classList.remove('active');
+
+            try {
+                const res = await fetch('/api/quiz/manage/clone/' + targetQuizId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
                 });
 
-                if (hasError) {
-                    alert('Please ensure all question boxes and 4 options are completely filled!');
-                    return tg.HapticFeedback.notificationOccurred('error');
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    alert("✅ " + data.message);
+                    closeCloneModal();
+                } else {
+                    alert("❌ Error: " + data.error);
+                    btn.innerText = "Try Again";
+                    btn.classList.add('active');
                 }
-
-                const payload = { 
-                    userId, 
-                    title, 
-                    description: desc, 
-                    time_per_question: parseInt(time), 
-                    questions 
-                };
-
-                document.getElementById('quiz-form').style.display = 'none';
-                document.getElementById('actionBar').classList.remove('visible'); 
-                document.getElementById('loading').style.display = 'block';
-                tg.HapticFeedback.impactOccurred('heavy');
-
-                try {
-                    const res = await fetch('/api/quiz/create', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        triggerConfetti();
-                        localStorage.removeItem(storageKey);
-                        
-                        document.getElementById('loading').innerHTML = \`
-                            <div style="font-size:56px; margin-bottom:12px;">🏆</div>
-                            <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
-                            <p style="color: #707579; font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
-
-                            <div style="background: #f4f4f5; padding: 18px; border-radius: 14px; text-align:left; margin-bottom: 24px; border: 1px solid #e7e7e7;">
-                                
-                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
-                                     style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 12px; border-radius: 10px; color: #000; font-size: 14px; font-weight: 900; cursor: pointer; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
-                                     onmousedown="this.style.transform='scale(0.95)'" 
-                                     onmouseup="this.style.transform='scale(1)'" 
-                                     onmouseleave="this.style.transform='scale(1)'">
-                                 🚀 Start Directly in Group
-                                </button>
-                                
-                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${data.quiz_id}');" 
-                                     style="background: #2AABEE; border: none; padding: 12px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; width: 100%; box-shadow: 0 4px 12px rgba(42,171,238,0.3); transition: transform 0.2s;"
-                                     onmousedown="this.style.transform='scale(0.95)'" 
-                                     onmouseup="this.style.transform='scale(1)'" 
-                                     onmouseleave="this.style.transform='scale(1)'">
-                                 🛠️ Test Personally in PM
-                                </button>
-                                
-                            </div>
-
-                            <button class="btn-publish" style="width: 100%; background: #fff; color: #000; padding: 16px; border-radius: 16px; font-weight: 900; font-size: 15px; border: none; cursor: pointer;" onclick="tg.close()">CLOSE APP</button>
-                        \`;
-
-                    } else {
-                        throw new Error(data.error);
-                    }
-                } catch (e) {
-                    alert('Error creating quiz: ' + e.message);
-                    document.getElementById('quiz-form').style.display = 'block';
-                    document.getElementById('actionBar').classList.add('visible');
-                    document.getElementById('loading').style.display = 'none';
-                }
+            } catch (e) {
+                alert("Network Error");
+                btn.innerText = "Try Again";
+                btn.classList.add('active');
             }
+        }
 
-            loadState();
-        </script>
-    </body>
-    </html>
+        loadQuizzes();
+    </script>
+</body>
+</html>
     `);
-});
+});                
 
 // ------------------------------------------------------------
 // 1. BACKEND REST APIs FOR MANAGING QUIZZES (UPDATED)
@@ -10061,809 +10675,6 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 });
-
-
-                
-                
-// ==========================================
-// FRONTEND MINI APP ROUTE: MANAGE QUIZZES (FIXED)
-// ==========================================
-app.get("/manage-quiz-app/:userId", (req, res) => {
-    const userId = req.params.userId;
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Manage Quizzes</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-            
-            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-            
-            :root {
-                --tg-bg: #ffffff;
-                --tg-secondary-bg: #f4f4f5;
-                --tg-text: #000000;
-                --tg-hint: #707579;
-                --tg-accent: #2AABEE;
-                --tg-accent-dark: #1e96d2;
-                --tg-border: #e7e7e7;
-                --tg-destructive: #e53935;
-                --tg-success: #31b545;
-                --tg-warning: #f5a623;
-            }
-            
-            body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
-                background-color: var(--tg-bg);
-                margin: 0; padding: 0 0 110px 0; color: var(--tg-text); min-height: 100vh;
-                -webkit-font-smoothing: antialiased;
-            }
-            
-            .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
-            .header-title { font-weight: 800; font-size: 26px; text-align: left; margin: 10px 0 24px 4px; color: var(--tg-text); letter-spacing: -0.3px; }
-            
-            #list-view, #edit-view { animation: fadeIn 0.35s ease; }
-            .quiz-card { 
-                background: var(--tg-bg); 
-                border: 1px solid var(--tg-border); 
-                padding: 18px; 
-                border-radius: 16px; 
-                margin-bottom: 16px; 
-                display: flex; flex-direction: column; 
-                box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-            }
-            
-            .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--tg-text); margin-bottom: 6px; }
-            .quiz-card-desc { font-size: 13px; color: var(--tg-hint); margin-bottom: 14px; line-height: 1.45; }
-            .quiz-date { font-size: 11px; color: #a0a0a0; margin-bottom: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
-            
-            .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-            .tag-glass {
-                background: var(--tg-secondary-bg);
-                border: 1px solid var(--tg-border);
-                padding: 5px 10px;
-                border-radius: 16px;
-                font-size: 11px;
-                font-weight: 600;
-                color: var(--tg-text);
-                display: flex; align-items: center; gap: 4px;
-            }
-
-            .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
-            .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
-            
-            .btn { 
-                padding: 12px 8px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px; 
-                cursor: pointer; transition: transform 0.15s, opacity 0.15s; text-align: center; 
-                display: flex; align-items: center; justify-content: center; gap: 4px;
-            }
-            .btn:active { transform: scale(0.96); opacity: 0.85; }
-            
-            .btn-start-grp { background: rgba(49,181,69,0.12); color: var(--tg-success); }
-            .btn-start-pm  { background: rgba(42,171,238,0.12); color: var(--tg-accent); }
-            .btn-edit      { background: rgba(245,166,35,0.12); color: var(--tg-warning); font-size: 12px;}
-            .btn-clone     { background: rgba(42,171,238,0.12); color: var(--tg-accent); font-size: 12px;}
-            .btn-delete    { background: rgba(229,57,53,0.1); color: var(--tg-destructive); font-size: 12px;}
-
-            .form-group { margin-bottom: 14px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--tg-hint); text-transform: uppercase; letter-spacing: 0.5px;}
-            .form-control { width: 100%; padding: 14px; border-radius: 12px; background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); color: var(--tg-text); font-size: 15px; outline: none; transition: border-color 0.2s; }
-            .form-control:focus { border-color: var(--tg-accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
-            textarea.form-control { resize: none; font-family: inherit; }
-            
-            .q-card { background: var(--tg-bg); border: 1px solid var(--tg-border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--tg-accent); font-size: 13px; text-transform: uppercase; }
-            .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-            .option-card { display: flex; align-items: center; padding: 4px 12px; background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
-            .option-card input[type="radio"] { display: none; }
-            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
-            .option-card.selected { border-color: var(--tg-accent); background: rgba(42,171,238,0.08); }
-            .option-card.selected .radio-custom { border-color: var(--tg-accent); background: var(--tg-accent); }
-            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
-            .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 14px; outline: none; padding: 10px 0; }
-            .q-exp { border: none; background: var(--tg-secondary-bg); border-radius: 12px; padding: 12px; }
-            
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tg-border); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
-            .toggle-switch:checked { background: var(--tg-accent); }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-            .toggle-switch:checked::after { transform: translateX(20px); }
-            .btn-remove { background: rgba(229,57,53,0.08); color: var(--tg-destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
-
-            .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--tg-accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-            .clone-modal {
-                display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-                z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
-                animation: fadeIn 0.25s ease;
-            }
-            .clone-modal.open { display: flex; }
-            
-            .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .search-header h3 { margin: 0; color: var(--tg-text); font-size: 20px; font-weight: 700; }
-            .close-search-btn { background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); color: var(--tg-text); width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-            
-            .search-input-box {
-                display: flex; align-items: center; gap: 10px; background: var(--tg-secondary-bg); 
-                border: 1px solid var(--tg-border); border-radius: 14px; padding: 12px 14px;
-                transition: border 0.2s;
-            }
-            .search-input-box:focus-within { border-color: var(--tg-accent); background: #fff; }
-            .search-input-box input { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 16px; outline: none; }
-            .search-input-box input::placeholder { color: #a0a0a0; }
-            
-            .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
-            .user-result { 
-                display: flex; align-items: center; gap: 14px; padding: 12px 14px; 
-                background: var(--tg-bg); border: 1px solid var(--tg-border);
-                margin-bottom: 8px; border-radius: 14px; cursor: pointer; 
-                transition: all 0.15s;
-            }
-            .user-result:active { transform: scale(0.98); }
-            .user-result.selected { background: rgba(42,171,238,0.08); border: 1px solid rgba(42,171,238,0.35); }
-            .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #2AABEE, #1e96d2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; }
-            
-            .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
-            .btn-confirm-clone { 
-                width: 100%; background: var(--tg-accent); 
-                border: none; padding: 16px; border-radius: 14px; color: #fff; 
-                font-weight: 700; font-size: 16px; cursor: pointer; 
-                opacity: 0.4; transition: all 0.2s; pointer-events: none;
-            }
-            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 4px 14px rgba(42,171,238,0.35); }
-            .btn-confirm-clone.active:active { transform: scale(0.98); background: var(--tg-accent-dark); }
-
-            .media-preview {
-                margin: 6px 0 8px;
-                border-radius: 12px;
-                overflow: hidden;
-                background: var(--tg-secondary-bg);
-                border: 1px solid var(--tg-border);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 50px;
-                position: relative;
-            }
-            .media-preview img, .media-preview video {
-                max-width: 100%;
-                max-height: 160px;
-                border-radius: 10px;
-                display: block;
-            }
-            .media-preview .file-id-label {
-                font-size: 10px;
-                color: var(--tg-hint);
-                padding: 4px 8px;
-                background: rgba(255,255,255,0.9);
-                border-radius: 6px;
-                position: absolute;
-                bottom: 4px;
-                right: 4px;
-                pointer-events: none;
-            }
-            .media-input-row {
-                display: flex;
-                gap: 8px;
-                margin-top: 6px;
-            }
-            .media-input-row input {
-                flex: 1;
-                padding: 8px 12px;
-                border-radius: 10px;
-                background: var(--tg-secondary-bg);
-                border: 1px solid var(--tg-border);
-                color: var(--tg-text);
-                font-size: 13px;
-                outline: none;
-            }
-            .media-input-row input:focus { border-color: var(--tg-accent); }
-            .media-input-row .clear-media {
-                background: rgba(229,57,53,0.08);
-                border: 1px solid rgba(229,57,53,0.2);
-                color: var(--tg-destructive);
-                border-radius: 10px;
-                padding: 6px 12px;
-                font-weight: 700;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            .media-input-row .clear-media:active { transform: scale(0.95); }
-        </style>
-    </head>
-    <body>
-        
-        <div class="container" id="main-content">
-            <!-- Quiz List View -->
-            <div id="list-view">
-                <h2 class="header-title">My Quizzes</h2>
-                <div id="quiz-list-container">
-                    <div class="loader"></div>
-                </div>
-                <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:14px; background:#f4f4f5; border:1px solid #e7e7e7; color:#000; font-weight:700; font-size:15px; cursor:pointer;">Close Mini App</button>
-            </div>
-
-            <!-- Quiz Edit View (UPDATED with media & time fields) -->
-            <div id="edit-view" style="display: none;">
-                <div class="search-header">
-                    <h3>✏️ Edit Quiz</h3>
-                    <button class="close-search-btn" onclick="closeEditView()">&times;</button>
-                </div>
-                
-                <div class="quiz-card" style="margin-bottom: 24px;">
-                    <div class="form-group">
-                        <label>Quiz Title</label>
-                        <input type="text" id="edit-q-title" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Description</label>
-                        <textarea id="edit-q-desc" class="form-control" rows="2" required></textarea>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label>Time Per Question (Sec)</label>
-                        <input type="number" id="edit-q-time" class="form-control" required>
-                    </div>
-                </div>
-
-                <div id="edit-questions-container"></div>
-                
-                <button class="btn btn-start-grp" style="width: 100%; margin-bottom: 20px; padding: 16px; justify-content:center; font-size:15px;" onclick="addEditQuestion()">+ Add New Question</button>
-                
-                <div style="display: flex; gap: 10px; margin-bottom: 30px;">
-                    <button style="flex: 2; background: #2AABEE; border:none; padding:16px; border-radius:12px; color:#fff; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 4px 12px rgba(42,171,238,0.3);" onclick="submitEditQuiz()">Save Changes</button>
-                    <button style="flex: 1; background: #f4f4f5; border:1px solid #e7e7e7; border-radius:12px; color:#000; font-weight:700; cursor:pointer;" onclick="closeEditView()">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Clone Quiz Search Modal -->
-        <div class="clone-modal" id="cloneModal">
-            <div class="search-header">
-                <h3>Find User</h3>
-                <button class="close-search-btn" onclick="closeCloneModal()">&times;</button>
-            </div>
-            
-            <div class="search-input-box">
-                <span style="font-size: 18px; opacity: 0.6;">🔍</span>
-                <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
-            </div>
-
-            <div class="search-results" id="cloneSearchResults">
-                <p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
-            </div>
-
-            <div class="clone-footer">
-                <button class="btn-confirm-clone" id="btnConfirmClone" onclick="executeClone()">Clone to User</button>
-            </div>
-        </div>
-
-        <script>
-            const tg = window.Telegram.WebApp;
-            tg.expand();
-            tg.setHeaderColor('#ffffff');
-            
-            const userId = ${userId};
-            let quizzes = [];
-            
-            // --- State Variables ---
-            let targetQuizId = null;
-            let targetUserId = null;
-            let currentEditQuizId = null;
-            let editQuestionCount = 0;
-
-            // Load all quizzes
-            async function loadQuizzes() {
-                const container = document.getElementById('quiz-list-container');
-                try {
-                    const res = await fetch('/api/quiz/manage/list/' + userId);
-                    const data = await res.json();
-                    
-                    if (data.success && data.quizzes.length > 0) {
-                        quizzes = data.quizzes;
-                        let html = '';
-                        quizzes.forEach(q => {
-                            
-                            const dateObj = q.created_at ? new Date(q.created_at) : new Date();
-                            const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-                            
-                            const desc = q.description ? q.description : 'No description provided for this quiz.';
-                            const difficulty = q.difficulty ? (q.difficulty.charAt(0).toUpperCase() + q.difficulty.slice(1)) : 'Medium';
-
-                            html += \`
-                                <div class="quiz-card" id="card-\${q._id}">
-                                    <div class="quiz-card-title">\${q.title}</div>
-                                    <div class="quiz-card-desc">\${desc}</div>
-                                    
-                                    <div class="quiz-tags">
-                                        <div class="tag-glass">📁 \${q.category}</div>
-                                        <div class="tag-glass">❓ \${q.total_questions} Qs</div>
-                                        <div class="tag-glass">⏱️ \${q.time_per_question}s</div>
-                                        <div class="tag-glass">🔥 \${difficulty}</div>
-                                    </div>
-                                    
-                                    <div class="quiz-date">Created on \${dateStr}</div>
-                                    
-                                    <!-- START BUTTONS (tg.close() added so chat opens instantly) -->
-                                    <div class="btn-group-2">
-                                        <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}'); tg.close();">🚀 Start Group</button>
-                                        <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}'); tg.close();">🛠️ PM Test</button>
-                                    </div>
-
-                                    <!-- EDIT, CLONE & DELETE BUTTONS -->
-                                    <div class="btn-group-3">
-                                        <button class="btn btn-edit" onclick="editQuiz('\${q._id}')">✏️ Edit</button>
-                                        <button class="btn btn-clone" onclick="openCloneModal('\${q._id}')">👯 Clone</button>
-                                        <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
-                                    </div>
-                                </div>
-                            \`;
-                        });
-                        container.innerHTML = html;
-                    } else {
-                        container.innerHTML = \`
-                            <div style="text-align:center; padding: 50px 20px;">
-                                <div style="font-size:48px; margin-bottom:12px; filter: grayscale(1) opacity(0.5);">📭</div>
-                                <p style="color:#707579; font-size:15px;">You haven't created any quizzes yet.</p>
-                            </div>
-                        \`;
-                    }
-                } catch (e) {
-                    container.innerHTML = '<p style="color:#ff453a; text-align:center; margin-top:40px;">Failed to load quizzes.</p>';
-                }
-            }
-
-            // ==========================================
-            // EDIT QUIZ LOGIC (FIXED: options display & answer detection)
-            // ==========================================
-            async function editQuiz(quizId) {
-                tg.HapticFeedback.impactOccurred('light');
-                document.getElementById('list-view').style.display = 'none';
-                document.getElementById('edit-view').style.display = 'block';
-                document.getElementById('edit-questions-container').innerHTML = '<div class="loader"></div>';
-                
-                try {
-                    const res = await fetch('/api/quiz/manage/detail/' + userId + '/' + quizId);
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        currentEditQuizId = quizId;
-                        document.getElementById('edit-q-title').value = data.metadata.title;
-                        document.getElementById('edit-q-desc').value = data.metadata.description;
-                        document.getElementById('edit-q-time').value = data.metadata.time_per_question;
-                        
-                        document.getElementById('edit-questions-container').innerHTML = '';
-                        editQuestionCount = 0;
-                        
-                        data.questions.forEach(q => {
-                            const id = addEditQuestion();
-                            const card = document.getElementById(\`edit-q-card-\${id}\`);
-                            card.querySelector('.q-text').value = q.question;
-                            const opts = card.querySelectorAll('.opt-val');
-                            
-                            // ✅ Extract option text (support both string and object)
-                            opts[0].value = typeof q.options[0] === 'object' ? (q.options[0].text || '') : (q.options[0] || '');
-                            opts[1].value = typeof q.options[1] === 'object' ? (q.options[1].text || '') : (q.options[1] || '');
-                            opts[2].value = typeof q.options[2] === 'object' ? (q.options[2].text || '') : (q.options[2] || '');
-                            opts[3].value = typeof q.options[3] === 'object' ? (q.options[3].text || '') : (q.options[3] || '');
-                            
-                            // ✅ Find answer index by matching text (not object reference)
-                            const ansIndex = q.options.findIndex(opt => {
-                                const optText = typeof opt === 'object' ? opt.text : opt;
-                                return optText === q.answer;
-                            });
-                            const radios = card.querySelectorAll('input[type="radio"]');
-                            if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
-                            
-                            card.querySelector('.q-exp').value = q.explanation || '';
-                            card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
-                            
-                            // Restore time limit and media
-                            const timeInput = card.querySelector('.q-time-limit');
-                            if (timeInput && q.time_limit) timeInput.value = q.time_limit;
-                            
-                            const mediaInput = card.querySelector('.q-media-input');
-                            if (mediaInput) {
-                                if (q.media_url) mediaInput.value = q.media_url;
-                                else if (q.media_file_id) mediaInput.value = q.media_file_id;
-                                updateMediaPreview(id, mediaInput.value.trim());
-                            }
-                            
-                            updateOptionStyles(\`edit-q-card-\${id}\`);
-                        });
-                    } else {
-                        alert("Failed to load quiz details.");
-                        closeEditView();
-                    }
-                } catch(e) {
-                    alert("Network Error while loading details.");
-                    closeEditView();
-                }
-            }
-
-            function closeEditView() {
-                document.getElementById('edit-view').style.display = 'none';
-                document.getElementById('list-view').style.display = 'block';
-                currentEditQuizId = null;
-            }
-
-            // ==========================================
-            // ADD EDIT QUESTION (UPDATED with media & time fields)
-            // ==========================================
-            function addEditQuestion() {
-                editQuestionCount++;
-                const id = editQuestionCount;
-                const container = document.getElementById('edit-questions-container');
-                const qDiv = document.createElement('div');
-                qDiv.className = 'q-card';
-                qDiv.id = \`edit-q-card-\${id}\`;
-
-                qDiv.innerHTML = \`
-                    <div class="q-header">
-                        <span>Question \${id}</span>
-                        <button class="btn-remove" onclick="removeEditQuestion(\${id})">✕ Remove</button>
-                    </div>
-                    <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
-                    
-                    <!-- Media Input & Preview -->
-                    <div class="media-input-row">
-                        <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
-                        <button class="clear-media" onclick="clearMedia(this)">✕</button>
-                    </div>
-                    <div class="media-preview" id="edit-preview-\${id}" style="display:none;">
-                        <!-- Preview will be injected here -->
-                    </div>
-                    
-                    <!-- Per-Question Time Limit Field -->
-                    <div style="display: flex; gap: 10px; margin-top: 8px;">
-                        <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec, optional)" style="flex: 1; padding: 10px;">
-                        <span style="display: flex; align-items: center; color: rgba(255,255,255,0.3); font-size: 11px; padding: 0 4px;">Leave blank to use global</span>
-                    </div>
-                    
-                    <div class="options-group">
-                        <label class="option-card selected">
-                            <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3" required>
-                        </label>
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4" required>
-                        </label>
-                    </div>
-                    <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
-                    <div class="setting-item">
-                        <span style="font-size:12px; font-weight:800; color:#ffd60a;">⚡ Rapid Fire (7s)</span>
-                        <input type="checkbox" class="toggle-switch q-rapid">
-                    </div>
-                \`;
-                
-                container.appendChild(qDiv);
-                
-                // Event listeners for media preview
-                const mediaInput = qDiv.querySelector('.q-media-input');
-                mediaInput.addEventListener('input', function() {
-                    updateMediaPreview(id, this.value.trim());
-                });
-
-                qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
-                    tg.HapticFeedback.impactOccurred('light');
-                    updateOptionStyles(\`edit-q-card-\${id}\`);
-                }));
-
-                tg.HapticFeedback.selectionChanged();
-                return id;
-            }
-
-            // ---- Media Preview (same as create) ----
-            function updateMediaPreview(qId, mediaValue) {
-                const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
-                if (!previewContainer) return;
-                
-                if (!mediaValue) {
-                    previewContainer.style.display = 'none';
-                    previewContainer.innerHTML = '';
-                    return;
-                }
-
-                const isUrl = mediaValue.match(/^https?:\\/\\//);
-                const isFileId = !isUrl && mediaValue.length > 10;
-
-                let html = '';
-                if (isUrl) {
-                    const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
-                    if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
-                        html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
-                    } else if (['mp4','webm','mov','avi'].includes(ext)) {
-                        html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
-                    } else {
-                        html = \`<div style="padding:12px; color:rgba(255,255,255,0.6);">Unsupported media type</div>\`;
-                    }
-                } else if (isFileId) {
-                    html = \`
-                        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(213,0,249,0.1); border-radius:12px;">
-                            <span style="font-size:24px;">🖼️</span>
-                            <span style="font-size:12px; color:#ea80fc; word-break:break-all;">\${mediaValue}</span>
-                            <span class="file-id-label">file_id</span>
-                        </div>
-                    \`;
-                }
-
-                previewContainer.innerHTML = html;
-                previewContainer.style.display = 'block';
-            }
-
-            function clearMedia(btn) {
-                const card = btn.closest('.q-card');
-                if (!card) return;
-                const input = card.querySelector('.q-media-input');
-                if (input) {
-                    input.value = '';
-                    const qId = card.id.replace('edit-q-card-', '');
-                    updateMediaPreview(qId, '');
-                }
-            }
-
-            function removeEditQuestion(id) {
-                const el = document.getElementById(\`edit-q-card-\${id}\`);
-                if (el) { el.remove(); }
-                tg.HapticFeedback.impactOccurred('medium');
-            }
-
-            function updateOptionStyles(cardId) {
-                const card = document.getElementById(cardId);
-                if (!card) return;
-                card.querySelectorAll('.option-card').forEach(oc => {
-                    const radio = oc.querySelector('input[type="radio"]');
-                    if (radio && radio.checked) {
-                        oc.classList.add('selected');
-                    } else {
-                        oc.classList.remove('selected');
-                    }
-                });
-            }
-
-            // ==========================================
-            // SUBMIT EDIT QUIZ (UPDATED with media & time fields)
-            // ==========================================
-            async function submitEditQuiz() {
-                const title = document.getElementById('edit-q-title').value.trim();
-                const desc = document.getElementById('edit-q-desc').value.trim();
-                const time = document.getElementById('edit-q-time').value.trim();
-                
-                if (!title || !desc || !time) return alert('Please fill title and description!');
-
-                const cards = document.getElementById('edit-questions-container').querySelectorAll('.q-card');
-                if (cards.length === 0) return alert('Please add at least one question!');
-
-                const questions = [];
-                let hasError = false;
-
-                cards.forEach(card => {
-                    const text = card.querySelector('.q-text').value.trim();
-                    const optInputs = card.querySelectorAll('.opt-val');
-                    const op1 = optInputs[0].value.trim();
-                    const op2 = optInputs[1].value.trim();
-                    const op3 = optInputs[2].value.trim();
-                    const op4 = optInputs[3].value.trim();
-                    
-                    const radios = card.querySelectorAll('input[type="radio"]');
-                    let ansIndex = 0;
-                    radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
-                    
-                    if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
-
-                    const options = [op1, op2, op3, op4];
-                    
-                    const timeInput = card.querySelector('.q-time-limit');
-                    const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
-                    
-                    const mediaInput = card.querySelector('.q-media-input');
-                    let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                    let mediaUrl = null, mediaFileId = null;
-                    if (mediaValue) {
-                        if (mediaValue.match(/^https?:\\/\\//)) {
-                            mediaUrl = mediaValue;
-                        } else {
-                            mediaFileId = mediaValue;
-                        }
-                    }
-                    
-                    questions.push({
-                        question: text,
-                        options: options,
-                        answer: options[ansIndex],
-                        explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
-                        media_url: mediaUrl || null,
-                        media_file_id: mediaFileId || null,
-                        media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
-                        time_limit: timeLimit || null,
-                        is_rapid_fire: card.querySelector('.q-rapid').checked
-                    });
-                });
-
-                if (hasError) return alert('Please ensure all questions and 4 options are completely filled!');
-
-                const payload = { 
-                    title, 
-                    description: desc, 
-                    time_per_question: parseInt(time), 
-                    questions 
-                };
-
-                tg.HapticFeedback.impactOccurred('heavy');
-                
-                try {
-                    const res = await fetch('/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        alert("✅ Quiz Updated Successfully!");
-                        closeEditView();
-                        loadQuizzes();
-                    } else {
-                        alert("Error: " + data.error);
-                    }
-                } catch (e) {
-                    alert('Update Error: ' + e.message);
-                }
-            }
-
-            // Delete Quiz Logic
-            async function deleteQuiz(quizId) {
-                if(confirm("Are you sure you want to permanently delete this quiz?")) {
-                    tg.HapticFeedback.impactOccurred('heavy');
-                    try {
-                        const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
-                        const data = await res.json();
-                        if(data.success) {
-                            document.getElementById('card-' + quizId).style.display = 'none';
-                            tg.HapticFeedback.notificationOccurred('success');
-                        } else {
-                            alert("Error: " + data.error);
-                        }
-                    } catch(e) {
-                        alert("Network Error");
-                    }
-                }
-            }
-
-            // ==========================================
-            // CLONE UI LOGIC
-            // ==========================================
-            function openCloneModal(quizId) {
-                targetQuizId = quizId;
-                targetUserId = null;
-                
-                document.getElementById('cloneSearchInput').value = '';
-                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
-                
-                const confirmBtn = document.getElementById('btnConfirmClone');
-                confirmBtn.classList.remove('active');
-                confirmBtn.innerText = "Select User First";
-                
-                document.getElementById('cloneModal').classList.add('open');
-                setTimeout(() => document.getElementById('cloneSearchInput').focus(), 200);
-            }
-
-            function closeCloneModal() {
-                document.getElementById('cloneModal').classList.remove('open');
-            }
-
-            // Search User Event Listener
-            document.getElementById('cloneSearchInput').addEventListener('input', async function(e) {
-                const query = e.target.value.trim();
-                const resultsDiv = document.getElementById('cloneSearchResults');
-                
-                if (query.length < 2) {
-                    resultsDiv.innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
-                    return;
-                }
-
-                try {
-                    const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
-                    const data = await res.json();
-                    
-                    if (data.success && data.users.length > 0) {
-                        let html = '';
-                        data.users.forEach(u => {
-                            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` : \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
-                            html += \`
-                                <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
-                                    \${avatar}
-                                    <div>
-                                        <div style="font-weight:600; font-size:15px; color:#000; margin-bottom:2px;">\${u.name}</div>
-                                        <div style="font-size:12px; color:#707579;">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
-                                    </div>
-                                </div>
-                            \`;
-                        });
-                        resultsDiv.innerHTML = html;
-                    } else {
-                        resultsDiv.innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">No users found.</p>';
-                    }
-                } catch(e) {
-                    console.error("Search error:", e);
-                }
-            });
-
-            // Select user from list
-            function selectUserForClone(id, name) {
-                targetUserId = id;
-                tg.HapticFeedback.selectionChanged();
-                
-                document.querySelectorAll('.user-result').forEach(el => el.classList.remove('selected'));
-                document.getElementById('ur-' + id).classList.add('selected');
-                
-                const confirmBtn = document.getElementById('btnConfirmClone');
-                confirmBtn.classList.add('active');
-                confirmBtn.innerText = \`Clone to \${name}\`;
-            }
-
-            // Execute Clone API Call
-            async function executeClone() {
-                if (!targetQuizId || !targetUserId) return;
-                
-                const btn = document.getElementById('btnConfirmClone');
-                btn.innerText = "Cloning, Please wait...";
-                btn.classList.remove('active');
-                
-                try {
-                    const res = await fetch('/api/quiz/manage/clone/' + targetQuizId, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
-                    });
-                    
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        alert("✅ " + data.message);
-                        closeCloneModal();
-                    } else {
-                        alert("❌ Error: " + data.error);
-                        btn.innerText = "Try Again";
-                        btn.classList.add('active');
-                    }
-                } catch (e) {
-                    alert("Network Error");
-                    btn.innerText = "Try Again";
-                    btn.classList.add('active');
-                }
-            }
-
-            // Init Load
-            loadQuizzes();
-        </script>
-    </body>
-    </html>
-    `);
-});                
-
-                                    
 
 // ========================
 // HOME & FALLBACK ROUTE
