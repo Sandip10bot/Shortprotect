@@ -9197,119 +9197,120 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             
             * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
             
+            :root {
+                --tg-bg: #ffffff;
+                --tg-secondary-bg: #f4f4f5;
+                --tg-text: #000000;
+                --tg-hint: #707579;
+                --tg-accent: #2AABEE;
+                --tg-accent-dark: #1e96d2;
+                --tg-border: #e7e7e7;
+                --tg-destructive: #e53935;
+                --tg-success: #31b545;
+            }
+            
             body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
-                background: linear-gradient(-45deg, #1c0a2b, #3b0d66, #0a0014, #1a0033); 
-                background-size: 400% 400%; 
-                animation: gradientMesh 12s ease infinite;
+                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+                background: var(--tg-bg);
                 margin: 0; padding: 0 0 110px 0; 
-                color: #ffffff; 
+                color: var(--tg-text); 
                 min-height: 100vh;
                 -webkit-font-smoothing: antialiased;
                 letter-spacing: -0.01em;
             }
 
-            @keyframes gradientMesh {
-                0% { background-position: 0% 50%; }
-                50% { background-position: 100% 50%; }
-                100% { background-position: 0% 50%; }
-            }
-
             .container { 
                 width: 100%; max-width: 500px; margin: 0 auto; 
                 padding: 20px 16px; 
-                animation: fadeUp 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+                animation: fadeUp 0.35s ease;
             }
-            @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
             
-            .header-icon { font-size: 44px; margin-bottom: 6px; text-shadow: 0 10px 30px rgba(213,0,249,0.6); }
+            .header-icon { font-size: 40px; margin-bottom: 6px; }
             
             .form-group { margin-bottom: 14px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.8px;}
+            .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--tg-hint); text-transform: uppercase; letter-spacing: 0.5px;}
             
             .form-control { 
-                width: 100%; padding: 14px; border-radius: 14px; 
-                background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); 
-                color: #fff; font-size: 15px; outline: none; 
-                transition: all 0.3s; 
+                width: 100%; padding: 14px; border-radius: 12px; 
+                background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); 
+                color: var(--tg-text); font-size: 15px; outline: none; 
+                transition: border-color 0.2s, box-shadow 0.2s; 
             }
-            .form-control:focus { border-color: #ea80fc; background: rgba(255,255,255,0.08); box-shadow: 0 0 15px rgba(213,0,249,0.2); }
+            .form-control:focus { border-color: var(--tg-accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
             textarea.form-control { resize: none; font-family: inherit; }
 
             .q-card { 
-                background: rgba(28,28,30,0.65); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); 
-                border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 20px; 
-                margin-bottom: 16px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.4); 
+                background: var(--tg-bg); 
+                border: 1px solid var(--tg-border); padding: 16px; border-radius: 16px; 
+                margin-bottom: 16px; position: relative; 
+                box-shadow: 0 1px 3px rgba(0,0,0,0.04); 
             }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 800; color: #ea80fc; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--tg-accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
             
-            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
-            .btn-remove:active { transform: scale(0.9); }
+            .btn-remove { background: rgba(229,57,53,0.08); color: var(--tg-destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+            .btn-remove:active { transform: scale(0.95); }
             
-            .btn-add { background: rgba(48,209,88,0.1); color: #30d158; border: 1px dashed rgba(48,209,88,0.3); width: 100%; padding: 16px; border-radius: 16px; font-weight: 800; font-size: 14px; margin-bottom: 24px; cursor: pointer; }
-            .btn-add:active { transform: scale(0.97); }
+            .btn-add { background: rgba(42,171,238,0.08); color: var(--tg-accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; }
+            .btn-add:active { transform: scale(0.98); }
 
-            /* Interactive Option Cards (QuizBot Style) */
             .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
             .option-card { 
                 display: flex; align-items: center; padding: 4px 12px; 
-                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); 
-                border-radius: 14px; cursor: pointer; transition: all 0.2s; 
+                background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); 
+                border-radius: 12px; cursor: pointer; transition: all 0.2s; 
             }
             .option-card input[type="radio"] { display: none; }
-            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
+            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
             
             .option-card.selected { 
-                border-color: #30d158; background: rgba(48,209,88,0.12); 
-                box-shadow: 0 0 15px rgba(48,209,88,0.2); 
+                border-color: var(--tg-accent); background: rgba(42,171,238,0.08); 
             }
-            .option-card.selected .radio-custom { border-color: #30d158; background: #30d158; }
-            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #000; font-size: 13px; font-weight: 900; }
+            .option-card.selected .radio-custom { border-color: var(--tg-accent); background: var(--tg-accent); }
+            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
             
-            .option-card .opt-val { flex: 1; background: transparent; border: none; color: #fff; font-size: 14px; outline: none; padding: 10px 0; font-weight: 500; }
-            .option-card .opt-val::placeholder { color: rgba(255,255,255,0.3); }
+            .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 14px; outline: none; padding: 10px 0; font-weight: 500; }
+            .option-card .opt-val::placeholder { color: #a0a0a0; }
 
-            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 12px; }
+            .q-exp { border: none; background: var(--tg-secondary-bg); border-radius: 12px; padding: 12px; }
             
-            /* iOS Toggle Switch */
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
-            .toggle-switch:checked { background: #d500f9; box-shadow: 0 0 12px rgba(213,0,249,0.4); }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tg-border); }
+            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+            .toggle-switch:checked { background: var(--tg-accent); box-shadow: 0 0 8px rgba(42,171,238,0.35); }
+            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
             .toggle-switch:checked::after { transform: translateX(20px); }
 
-            /* Sticky Bottom Action Bar */
             .sticky-action-bar {
                 position: fixed; bottom: 0; left: 0; width: 100%;
-                background: rgba(15, 5, 25, 0.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-                border-top: 1px solid rgba(255,255,255,0.08);
+                background: #ffffff; 
+                border-top: 1px solid var(--tg-border);
                 padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
                 display: flex; gap: 10px; z-index: 100;
-                box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+                box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
                 transform: translateY(100%); transition: transform 0.3s ease;
             }
             .sticky-action-bar.visible { transform: translateY(0); }
             
-            .sticky-action-bar .btn-publish { flex: 2; background: linear-gradient(135deg, #d500f9, #651fff); border: none; padding: 14px; border-radius: 14px; color: #fff; font-weight: 800; font-size: 15px; box-shadow: 0 6px 20px rgba(213,0,249,0.4); cursor: pointer; }
-            .sticky-action-bar .btn-clear { flex: 1; background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.2); border-radius: 14px; color: #ff453a; font-weight: 700; font-size: 13px; cursor: pointer; }
+            .sticky-action-bar .btn-publish { flex: 2; background: var(--tg-accent); border: none; padding: 14px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(42,171,238,0.3); cursor: pointer; }
+            .sticky-action-bar .btn-publish:active { background: var(--tg-accent-dark); }
+            .sticky-action-bar .btn-clear { flex: 1; background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); border-radius: 12px; color: var(--tg-destructive); font-weight: 700; font-size: 13px; cursor: pointer; }
 
-            .top-bar-save { position: fixed; top: 10px; right: 12px; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); padding: 4px 10px; border-radius: 16px; font-size: 10px; color: #30d158; font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(48,209,88,0.3); }
+            .top-bar-save { position: fixed; top: 10px; right: 12px; background: #fff; padding: 4px 10px; border-radius: 16px; font-size: 10px; color: var(--tg-success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
             .top-bar-save.show { opacity: 1; }
 
             .loader { 
-                border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9;
+                border: 3px solid #e8e8e8; border-top: 3px solid var(--tg-accent);
                 border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; 
                 margin: 0 auto 16px auto;
             }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-            /* ===== NEW: Media Preview ===== */
             .media-preview {
                 margin: 8px 0 4px;
-                border-radius: 14px;
+                border-radius: 12px;
                 overflow: hidden;
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
+                background: var(--tg-secondary-bg);
+                border: 1px solid var(--tg-border);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -9319,19 +9320,18 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             .media-preview img, .media-preview video {
                 max-width: 100%;
                 max-height: 180px;
-                border-radius: 12px;
+                border-radius: 10px;
                 display: block;
             }
             .media-preview .file-id-label {
                 font-size: 11px;
-                color: rgba(255,255,255,0.3);
+                color: var(--tg-hint);
                 padding: 6px 10px;
-                background: rgba(0,0,0,0.4);
+                background: rgba(255,255,255,0.9);
                 border-radius: 8px;
                 position: absolute;
                 bottom: 6px;
                 right: 6px;
-                backdrop-filter: blur(4px);
                 pointer-events: none;
             }
             .media-input-row {
@@ -9342,26 +9342,28 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             .media-input-row input {
                 flex: 1;
                 padding: 8px 12px;
-                border-radius: 12px;
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
-                color: #fff;
+                border-radius: 10px;
+                background: var(--tg-secondary-bg);
+                border: 1px solid var(--tg-border);
+                color: var(--tg-text);
                 font-size: 13px;
                 outline: none;
             }
-            .media-input-row input:focus { border-color: #ea80fc; }
+            .media-input-row input:focus { border-color: var(--tg-accent); }
             .media-input-row .clear-media {
-                background: rgba(255,69,58,0.1);
-                border: 1px solid rgba(255,69,58,0.2);
-                color: #ff453a;
-                border-radius: 12px;
+                background: rgba(229,57,53,0.08);
+                border: 1px solid rgba(229,57,53,0.2);
+                color: var(--tg-destructive);
+                border-radius: 10px;
                 padding: 6px 12px;
                 font-weight: 700;
                 font-size: 12px;
                 cursor: pointer;
-                transition: all 0.2s;
             }
-            .media-input-row .clear-media:active { transform: scale(0.9); }
+            .media-input-row .clear-media:active { transform: scale(0.95); }
+            
+            h2 { color: var(--tg-text); }
+            p { color: var(--tg-hint); }
         </style>
     </head>
     <body>
@@ -9397,7 +9399,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             
             <div id="loading" style="display:none; margin-top:30px; text-align:center;">
                 <div class="loader"></div>
-                <p style="color: #ea80fc; font-weight: 800; font-size: 14px;">Publishing to Database...</p>
+                <p style="color: #2AABEE; font-weight: 700; font-size: 14px;">Publishing to Database...</p>
             </div>
         </div>
 
@@ -9410,7 +9412,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            tg.setHeaderColor('#1c0a2b');
+            tg.setHeaderColor('#ffffff');
             
             const userId = \`${userId}\`;
             const storageKey = \`mytho_quiz_draft_\${userId}\`;
@@ -9829,9 +9831,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                         document.getElementById('loading').innerHTML = \`
                             <div style="font-size:56px; margin-bottom:12px;">🏆</div>
                             <h3 style="color:#30d158; font-size:24px; margin-bottom: 6px; font-weight: 900;">Quiz is Ready!</h3>
-                            <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
+                            <p style="color: #707579; font-size: 13px; margin-bottom: 20px;">Your quiz has been successfully deployed.</p>
 
-                            <div style="background: rgba(45,10,80,0.6); padding: 18px; border-radius: 16px; text-align:left; margin-bottom: 24px; border: 1px solid rgba(213,0,249,0.3);">
+                            <div style="background: #f4f4f5; padding: 18px; border-radius: 14px; text-align:left; margin-bottom: 24px; border: 1px solid #e7e7e7;">
                                 
                                 <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
                                      style="background: linear-gradient(135deg, #00e676, #00b359); border: none; padding: 12px; border-radius: 10px; color: #000; font-size: 14px; font-weight: 900; cursor: pointer; width: 100%; box-shadow: 0 4px 15px rgba(0,230,118,0.3); transition: transform 0.2s;"
@@ -9842,7 +9844,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                                 </button>
                                 
                                 <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${data.quiz_id}');" 
-                                     style="background: linear-gradient(135deg, #0a84ff, #0055ff); border: none; padding: 12px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 900; cursor: pointer; margin-top: 8px; width: 100%; box-shadow: 0 4px 15px rgba(10,132,255,0.3); transition: transform 0.2s;"
+                                     style="background: #2AABEE; border: none; padding: 12px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; width: 100%; box-shadow: 0 4px 12px rgba(42,171,238,0.3); transition: transform 0.2s;"
                                      onmousedown="this.style.transform='scale(0.95)'" 
                                      onmouseup="this.style.transform='scale(1)'" 
                                      onmouseleave="this.style.transform='scale(1)'">
@@ -10081,155 +10083,149 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             
             * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
             
-            /* Apple Glass Deep Background */
+            :root {
+                --tg-bg: #ffffff;
+                --tg-secondary-bg: #f4f4f5;
+                --tg-text: #000000;
+                --tg-hint: #707579;
+                --tg-accent: #2AABEE;
+                --tg-accent-dark: #1e96d2;
+                --tg-border: #e7e7e7;
+                --tg-destructive: #e53935;
+                --tg-success: #31b545;
+                --tg-warning: #f5a623;
+            }
+            
             body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
-                background-color: #000000;
-                background-image: 
-                    radial-gradient(circle at 15% 40%, rgba(88, 86, 214, 0.35), transparent 40%),
-                    radial-gradient(circle at 85% 20%, rgba(10, 132, 255, 0.35), transparent 40%),
-                    radial-gradient(circle at 50% 80%, rgba(191, 90, 242, 0.25), transparent 50%);
-                background-attachment: fixed;
-                margin: 0; padding: 0 0 110px 0; color: #ffffff; min-height: 100vh;
+                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+                background-color: var(--tg-bg);
+                margin: 0; padding: 0 0 110px 0; color: var(--tg-text); min-height: 100vh;
                 -webkit-font-smoothing: antialiased;
             }
             
             .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
-            .header-title { font-weight: 800; font-size: 28px; text-align: left; margin: 10px 0 24px 4px; color: #fff; letter-spacing: 0.5px; }
+            .header-title { font-weight: 800; font-size: 26px; text-align: left; margin: 10px 0 24px 4px; color: var(--tg-text); letter-spacing: -0.3px; }
             
-            /* Glassmorphism Quiz Cards */
-            #list-view, #edit-view { animation: fadeIn 0.4s ease; }
+            #list-view, #edit-view { animation: fadeIn 0.35s ease; }
             .quiz-card { 
-                background: rgba(255, 255, 255, 0.05); 
-                backdrop-filter: blur(30px) saturate(150%); 
-                -webkit-backdrop-filter: blur(30px) saturate(150%);
-                border: 1px solid rgba(255, 255, 255, 0.1); 
-                padding: 20px; 
-                border-radius: 24px; 
-                margin-bottom: 20px; 
+                background: var(--tg-bg); 
+                border: 1px solid var(--tg-border); 
+                padding: 18px; 
+                border-radius: 16px; 
+                margin-bottom: 16px; 
                 display: flex; flex-direction: column; 
-                box-shadow: 0 10px 40px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05);
-                transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                box-shadow: 0 1px 4px rgba(0,0,0,0.05);
             }
             
-            /* Enhanced Data Display */
-            .quiz-card-title { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 6px; letter-spacing: 0.2px; }
-            .quiz-card-desc { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 16px; line-height: 1.4; }
-            .quiz-date { font-size: 11px; color: rgba(255,255,255,0.4); margin-bottom: 16px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+            .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--tg-text); margin-bottom: 6px; }
+            .quiz-card-desc { font-size: 13px; color: var(--tg-hint); margin-bottom: 14px; line-height: 1.45; }
+            .quiz-date { font-size: 11px; color: #a0a0a0; margin-bottom: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
             
-            /* Apple UI Tags */
-            .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+            .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
             .tag-glass {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.05);
-                padding: 6px 12px;
-                border-radius: 20px;
+                background: var(--tg-secondary-bg);
+                border: 1px solid var(--tg-border);
+                padding: 5px 10px;
+                border-radius: 16px;
                 font-size: 11px;
                 font-weight: 600;
-                color: #fff;
+                color: var(--tg-text);
                 display: flex; align-items: center; gap: 4px;
-                letter-spacing: 0.3px;
             }
 
-            /* Buttons Grid */
             .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
             .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
             
             .btn { 
-                padding: 12px 8px; border-radius: 14px; border: none; font-weight: 700; font-size: 13px; 
-                cursor: pointer; transition: transform 0.2s, opacity 0.2s; text-align: center; 
+                padding: 12px 8px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px; 
+                cursor: pointer; transition: transform 0.15s, opacity 0.15s; text-align: center; 
                 display: flex; align-items: center; justify-content: center; gap: 4px;
             }
-            .btn:active { transform: scale(0.94); opacity: 0.8; }
+            .btn:active { transform: scale(0.96); opacity: 0.85; }
             
-            /* iOS Pastel Colors */
-            .btn-start-grp { background: rgba(48, 209, 88, 0.15); color: #30d158; }
-            .btn-start-pm  { background: rgba(10, 132, 255, 0.15); color: #0a84ff; }
-            .btn-edit      { background: rgba(255, 214, 10, 0.15); color: #ffd60a; font-size: 12px;}
-            .btn-clone     { background: rgba(191, 90, 242, 0.15); color: #bf5af2; font-size: 12px;}
-            .btn-delete    { background: rgba(255, 69, 58, 0.15); color: #ff453a; font-size: 12px;}
+            .btn-start-grp { background: rgba(49,181,69,0.12); color: var(--tg-success); }
+            .btn-start-pm  { background: rgba(42,171,238,0.12); color: var(--tg-accent); }
+            .btn-edit      { background: rgba(245,166,35,0.12); color: var(--tg-warning); font-size: 12px;}
+            .btn-clone     { background: rgba(42,171,238,0.12); color: var(--tg-accent); font-size: 12px;}
+            .btn-delete    { background: rgba(229,57,53,0.1); color: var(--tg-destructive); font-size: 12px;}
 
-            /* Edit View specific forms */
             .form-group { margin-bottom: 14px; text-align: left; }
-            .form-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.8px;}
-            .form-control { width: 100%; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #fff; font-size: 15px; outline: none; transition: all 0.3s; }
-            .form-control:focus { border-color: #bf5af2; background: rgba(255,255,255,0.08); }
+            .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--tg-hint); text-transform: uppercase; letter-spacing: 0.5px;}
+            .form-control { width: 100%; padding: 14px; border-radius: 12px; background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); color: var(--tg-text); font-size: 15px; outline: none; transition: border-color 0.2s; }
+            .form-control:focus { border-color: var(--tg-accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
             textarea.form-control { resize: none; font-family: inherit; }
             
-            .q-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 20px; margin-bottom: 16px; }
-            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 800; color: #bf5af2; font-size: 13px; text-transform: uppercase; }
+            .q-card { background: var(--tg-bg); border: 1px solid var(--tg-border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
+            .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--tg-accent); font-size: 13px; text-transform: uppercase; }
             .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-            .option-card { display: flex; align-items: center; padding: 4px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; cursor: pointer; transition: all 0.2s; }
+            .option-card { display: flex; align-items: center; padding: 4px 12px; background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
             .option-card input[type="radio"] { display: none; }
-            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
-            .option-card.selected { border-color: #30d158; background: rgba(48,209,88,0.12); }
-            .option-card.selected .radio-custom { border-color: #30d158; background: #30d158; }
-            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #000; font-size: 13px; font-weight: 900; }
-            .option-card .opt-val { flex: 1; background: transparent; border: none; color: #fff; font-size: 14px; outline: none; padding: 10px 0; }
-            .q-exp { border: none; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 12px; }
+            .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
+            .option-card.selected { border-color: var(--tg-accent); background: rgba(42,171,238,0.08); }
+            .option-card.selected .radio-custom { border-color: var(--tg-accent); background: var(--tg-accent); }
+            .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
+            .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 14px; outline: none; padding: 10px 0; }
+            .q-exp { border: none; background: var(--tg-secondary-bg); border-radius: 12px; padding: 12px; }
             
-            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
-            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
-            .toggle-switch:checked { background: #bf5af2; }
-            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+            .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--tg-border); }
+            .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+            .toggle-switch:checked { background: var(--tg-accent); }
+            .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
             .toggle-switch:checked::after { transform: translateX(20px); }
-            .btn-remove { background: rgba(255,69,58,0.1); color: #ff453a; border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
+            .btn-remove { background: rgba(229,57,53,0.08); color: var(--tg-destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
 
-            /* Loading Spinner */
-            .loader { border: 3px solid rgba(255,255,255,0.05); border-top: 3px solid #bf5af2; border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
+            .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--tg-accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
             @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-            /* CLONE MODAL STYLES (Apple Glass Search) */
             .clone-modal {
                 display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
                 z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
-                animation: fadeIn 0.3s ease;
+                animation: fadeIn 0.25s ease;
             }
             .clone-modal.open { display: flex; }
             
             .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .search-header h3 { margin: 0; color: #fff; font-size: 22px; font-weight: 700; }
-            .close-search-btn { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+            .search-header h3 { margin: 0; color: var(--tg-text); font-size: 20px; font-weight: 700; }
+            .close-search-btn { background: var(--tg-secondary-bg); border: 1px solid var(--tg-border); color: var(--tg-text); width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
             
             .search-input-box {
-                display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.08); 
-                border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 14px 16px;
-                transition: border 0.3s, background 0.3s;
+                display: flex; align-items: center; gap: 10px; background: var(--tg-secondary-bg); 
+                border: 1px solid var(--tg-border); border-radius: 14px; padding: 12px 14px;
+                transition: border 0.2s;
             }
-            .search-input-box:focus-within { border-color: #0a84ff; background: rgba(255,255,255,0.12); }
-            .search-input-box input { flex: 1; background: transparent; border: none; color: #fff; font-size: 16px; outline: none; }
-            .search-input-box input::placeholder { color: rgba(255,255,255,0.4); }
+            .search-input-box:focus-within { border-color: var(--tg-accent); background: #fff; }
+            .search-input-box input { flex: 1; background: transparent; border: none; color: var(--tg-text); font-size: 16px; outline: none; }
+            .search-input-box input::placeholder { color: #a0a0a0; }
             
-            .search-results { flex: 1; overflow-y: auto; margin-top: 20px; }
+            .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
             .user-result { 
-                display: flex; align-items: center; gap: 14px; padding: 14px 16px; 
-                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
-                margin-bottom: 10px; border-radius: 18px; cursor: pointer; 
-                transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                display: flex; align-items: center; gap: 14px; padding: 12px 14px; 
+                background: var(--tg-bg); border: 1px solid var(--tg-border);
+                margin-bottom: 8px; border-radius: 14px; cursor: pointer; 
+                transition: all 0.15s;
             }
-            .user-result:active { transform: scale(0.96); }
-            .user-result.selected { background: rgba(10,132,255,0.15); border: 1px solid rgba(10,132,255,0.3); }
-            .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #5856D6, #bf5af2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+            .user-result:active { transform: scale(0.98); }
+            .user-result.selected { background: rgba(42,171,238,0.08); border: 1px solid rgba(42,171,238,0.35); }
+            .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #2AABEE, #1e96d2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; }
             
             .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
             .btn-confirm-clone { 
-                width: 100%; background: linear-gradient(135deg, #0a84ff, #5856D6); 
-                border: none; padding: 18px; border-radius: 18px; color: #fff; 
-                font-weight: 800; font-size: 16px; cursor: pointer; 
-                opacity: 0.4; transition: all 0.3s; pointer-events: none;
+                width: 100%; background: var(--tg-accent); 
+                border: none; padding: 16px; border-radius: 14px; color: #fff; 
+                font-weight: 700; font-size: 16px; cursor: pointer; 
+                opacity: 0.4; transition: all 0.2s; pointer-events: none;
             }
-            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 8px 25px rgba(10,132,255,0.4); }
-            .btn-confirm-clone.active:active { transform: scale(0.96); }
+            .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 4px 14px rgba(42,171,238,0.35); }
+            .btn-confirm-clone.active:active { transform: scale(0.98); background: var(--tg-accent-dark); }
 
-            /* NEW: Media Preview in edit */
             .media-preview {
                 margin: 6px 0 8px;
-                border-radius: 14px;
+                border-radius: 12px;
                 overflow: hidden;
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
+                background: var(--tg-secondary-bg);
+                border: 1px solid var(--tg-border);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -10239,19 +10235,18 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .media-preview img, .media-preview video {
                 max-width: 100%;
                 max-height: 160px;
-                border-radius: 12px;
+                border-radius: 10px;
                 display: block;
             }
             .media-preview .file-id-label {
                 font-size: 10px;
-                color: rgba(255,255,255,0.3);
+                color: var(--tg-hint);
                 padding: 4px 8px;
-                background: rgba(0,0,0,0.4);
+                background: rgba(255,255,255,0.9);
                 border-radius: 6px;
                 position: absolute;
                 bottom: 4px;
                 right: 4px;
-                backdrop-filter: blur(4px);
                 pointer-events: none;
             }
             .media-input-row {
@@ -10262,26 +10257,25 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             .media-input-row input {
                 flex: 1;
                 padding: 8px 12px;
-                border-radius: 12px;
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
-                color: #fff;
+                border-radius: 10px;
+                background: var(--tg-secondary-bg);
+                border: 1px solid var(--tg-border);
+                color: var(--tg-text);
                 font-size: 13px;
                 outline: none;
             }
-            .media-input-row input:focus { border-color: #bf5af2; }
+            .media-input-row input:focus { border-color: var(--tg-accent); }
             .media-input-row .clear-media {
-                background: rgba(255,69,58,0.1);
-                border: 1px solid rgba(255,69,58,0.2);
-                color: #ff453a;
-                border-radius: 12px;
+                background: rgba(229,57,53,0.08);
+                border: 1px solid rgba(229,57,53,0.2);
+                color: var(--tg-destructive);
+                border-radius: 10px;
                 padding: 6px 12px;
                 font-weight: 700;
                 font-size: 12px;
                 cursor: pointer;
-                transition: all 0.2s;
             }
-            .media-input-row .clear-media:active { transform: scale(0.9); }
+            .media-input-row .clear-media:active { transform: scale(0.95); }
         </style>
     </head>
     <body>
@@ -10293,7 +10287,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <div id="quiz-list-container">
                     <div class="loader"></div>
                 </div>
-                <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:18px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.05); color:#fff; font-weight:700; font-size:15px; cursor:pointer; backdrop-filter:blur(10px);">Close Mini App</button>
+                <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:14px; background:#f4f4f5; border:1px solid #e7e7e7; color:#000; font-weight:700; font-size:15px; cursor:pointer;">Close Mini App</button>
             </div>
 
             <!-- Quiz Edit View (UPDATED with media & time fields) -->
@@ -10323,8 +10317,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <button class="btn btn-start-grp" style="width: 100%; margin-bottom: 20px; padding: 16px; justify-content:center; font-size:15px;" onclick="addEditQuestion()">+ Add New Question</button>
                 
                 <div style="display: flex; gap: 10px; margin-bottom: 30px;">
-                    <button style="flex: 2; background: linear-gradient(135deg, #30d158, #248a3d); border:none; padding:16px; border-radius:16px; color:#fff; font-weight:800; font-size:15px; cursor:pointer; box-shadow:0 6px 20px rgba(48,209,88,0.4);" onclick="submitEditQuiz()">Save Changes</button>
-                    <button style="flex: 1; background: rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:16px; color:#fff; font-weight:700; cursor:pointer;" onclick="closeEditView()">Cancel</button>
+                    <button style="flex: 2; background: #2AABEE; border:none; padding:16px; border-radius:12px; color:#fff; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 4px 12px rgba(42,171,238,0.3);" onclick="submitEditQuiz()">Save Changes</button>
+                    <button style="flex: 1; background: #f4f4f5; border:1px solid #e7e7e7; border-radius:12px; color:#000; font-weight:700; cursor:pointer;" onclick="closeEditView()">Cancel</button>
                 </div>
             </div>
         </div>
@@ -10342,7 +10336,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             </div>
 
             <div class="search-results" id="cloneSearchResults">
-                <p style="text-align:center; color:rgba(255,255,255,0.3); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
+                <p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
             </div>
 
             <div class="clone-footer">
@@ -10353,7 +10347,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            tg.setHeaderColor('#110526');
+            tg.setHeaderColor('#ffffff');
             
             const userId = ${userId};
             let quizzes = [];
@@ -10416,7 +10410,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         container.innerHTML = \`
                             <div style="text-align:center; padding: 50px 20px;">
                                 <div style="font-size:48px; margin-bottom:12px; filter: grayscale(1) opacity(0.5);">📭</div>
-                                <p style="color:rgba(255,255,255,0.6); font-size:15px;">You haven't created any quizzes yet.</p>
+                                <p style="color:#707579; font-size:15px;">You haven't created any quizzes yet.</p>
                             </div>
                         \`;
                     }
@@ -10764,7 +10758,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 targetUserId = null;
                 
                 document.getElementById('cloneSearchInput').value = '';
-                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+                document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
                 
                 const confirmBtn = document.getElementById('btnConfirmClone');
                 confirmBtn.classList.remove('active');
@@ -10784,7 +10778,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 const resultsDiv = document.getElementById('cloneSearchResults');
                 
                 if (query.length < 2) {
-                    resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+                    resultsDiv.innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
                     return;
                 }
 
@@ -10800,15 +10794,15 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                                 <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
                                     \${avatar}
                                     <div>
-                                        <div style="font-weight:600; font-size:15px; color:#fff; margin-bottom:2px;">\${u.name}</div>
-                                        <div style="font-size:12px; color:rgba(255,255,255,0.5);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
+                                        <div style="font-weight:600; font-size:15px; color:#000; margin-bottom:2px;">\${u.name}</div>
+                                        <div style="font-size:12px; color:#707579;">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
                                     </div>
                                 </div>
                             \`;
                         });
                         resultsDiv.innerHTML = html;
                     } else {
-                        resultsDiv.innerHTML = '<p style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px; font-size: 14px;">No users found.</p>';
+                        resultsDiv.innerHTML = '<p style="text-align:center; color:#a0a0a0; margin-top:40px; font-size: 14px;">No users found.</p>';
                     }
                 } catch(e) {
                     console.error("Search error:", e);
