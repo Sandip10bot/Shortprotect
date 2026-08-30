@@ -9327,6 +9327,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
     <div class="container" id="main-content">
         <div style="text-align: center;">
+            <img src="https://i.ibb.co/mn2kmpv/photo-2026-08-30-16-10-38-7679857848343330852.jpg" 
+                 alt="Quiz Creator Banner" 
+                 style="width: 100%; max-width: 320px; border-radius: 16px; margin-bottom: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);" />
             <svg class="header-icon" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
             <div class="title">Create New Quiz</div>
             <div class="subtitle">Progress autosaves securely.</div>
