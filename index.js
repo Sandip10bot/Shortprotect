@@ -10678,6 +10678,258 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     }
 });
 
+// ==========================================
+// CREATOR STUDIO: ANALYTICS API
+// ==========================================
+app.get("/api/creator-studio/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+
+        // Fetch all quizzes created by this user
+        const quizzes = await quizMetadataCollection.find({ created_by: uid }).sort({ created_at: -1 }).toArray();
+        
+        let totalPlays = 0;
+        let totalCompletions = 0;
+        let totalQuestions = 0;
+        const topQuizzes = [];
+
+        quizzes.forEach(q => {
+            const plays = q.total_plays || 0;
+            const completions = q.completions || 0;
+            totalPlays += plays;
+            totalCompletions += completions;
+            totalQuestions += (q.total_questions || 0);
+
+            topQuizzes.push({
+                title: q.title,
+                plays: plays,
+                completions: completions,
+                completionRate: plays > 0 ? Math.round((completions / plays) * 100) : 0,
+                category: q.category
+            });
+        });
+
+        // Sort to get the top 5 performing quizzes
+        topQuizzes.sort((a, b) => b.plays - a.plays);
+
+        // Fetch questions to find the "Toughest Questions"
+        const quizIds = quizzes.map(q => q._id);
+        const allQuestions = await quizCollection.find({ quiz_id: { $in: quizIds } }).toArray();
+        
+        const toughestQuestions = allQuestions
+            .filter(q => (q.wrong_answers_count || 0) > 0)
+            .map(q => {
+                const totalAnswers = (q.correct_answers_count || 0) + (q.wrong_answers_count || 0);
+                const failRate = totalAnswers > 0 ? Math.round((q.wrong_answers_count / totalAnswers) * 100) : 0;
+                return {
+                    question: q.question,
+                    failRate: failRate,
+                    totalAnswers: totalAnswers,
+                    category: q.category
+                };
+            })
+            .sort((a, b) => b.failRate - a.failRate)
+            .slice(0, 5); // Top 5 hardest questions
+
+        res.json({
+            success: true,
+            overview: {
+                totalQuizzes: quizzes.length,
+                totalPlays,
+                totalQuestions,
+                overallCompletionRate: totalPlays > 0 ? Math.round((totalCompletions / totalPlays) * 100) : 0
+            },
+            topQuizzes: topQuizzes.slice(0, 5),
+            toughestQuestions
+        });
+
+    } catch (error) {
+        console.error("Creator Studio API Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// CREATOR STUDIO: MINI APP UI
+// ==========================================
+app.get("/creator-studio-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Creator Studio</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+            background: #000000;
+            background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.15) 0%, transparent 55%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px 16px 80px 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .title { font-weight: 800; font-size: 28px; letter-spacing: -0.5px; }
+        .subtitle { color: #ea80fc; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        .stat-card {
+            background: rgba(28,28,30,0.65);
+            border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 16px 12px;
+            text-align: center;
+            backdrop-filter: blur(20px);
+        }
+        .stat-value { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 4px; }
+        .stat-label { font-size: 10px; color: rgba(255,255,255,0.5); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+
+        .chart-container {
+            background: rgba(28,28,30,0.65);
+            border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 16px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(20px);
+        }
+        .section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+        .toughest-list { display: flex; flex-direction: column; gap: 10px; }
+        .tough-item {
+            background: rgba(255,69,58,0.1);
+            border: 1px solid rgba(255,69,58,0.2);
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .tough-text { font-size: 13px; font-weight: 500; color: #fff; flex: 1; padding-right: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .fail-badge { background: #ff453a; color: #fff; font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 8px; }
+
+        .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 30px; height: 30px; animation: spin 0.8s linear infinite; margin: 40px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .btn-close { width: 100%; background: rgba(255,255,255,0.1); border: none; padding: 16px; border-radius: 16px; color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; transition: transform 0.2s; }
+        .btn-close:active { transform: scale(0.96); background: rgba(255,255,255,0.15); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <div class="subtitle">Analytics</div>
+            <div class="title">Creator Studio</div>
+        </div>
+        <div style="font-size: 32px;">📈</div>
+    </div>
+
+    <div id="content">
+        <div class="loader"></div>
+    </div>
+
+    <button class="btn-close" onclick="Telegram.WebApp.close()" style="margin-top: 20px;">Return to Bot</button>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.setHeaderColor('#000000');
+
+        async function loadAnalytics() {
+            try {
+                const res = await fetch('/api/creator-studio/${userId}');
+                const data = await res.json();
+
+                if (!data.success) throw new Error("Failed to load data");
+
+                renderDashboard(data);
+            } catch (error) {
+                document.getElementById('content').innerHTML = '<div style="text-align:center; color:#ff453a; margin-top:40px;">Failed to load analytics.</div>';
+            }
+        }
+
+        function renderDashboard(data) {
+            const ov = data.overview;
+            let html = \`
+                <div class="grid-3">
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #0a84ff;">\${ov.totalPlays.toLocaleString()}</div>
+                        <div class="stat-label">Total Plays</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #30d158;">\${ov.overallCompletionRate}%</div>
+                        <div class="stat-label">Completion</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #ea80fc;">\${ov.totalQuizzes}</div>
+                        <div class="stat-label">Quizzes</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="section-title">🚀 Top Performing Quizzes</div>
+                    <canvas id="topQuizzesChart" height="200"></canvas>
+                </div>
+            \`;
+
+            if (data.toughestQuestions.length > 0) {
+                html += \`<div class="section-title" style="margin-top: 24px;">⚠️ Toughest Questions</div><div class="toughest-list">\`;
+                data.toughestQuestions.forEach(q => {
+                    html += \`
+                        <div class="tough-item">
+                            <div class="tough-text">\${q.question}</div>
+                            <div class="fail-badge">\${q.failRate}% Fail</div>
+                        </div>
+                    \`;
+                });
+                html += \`</div>\`;
+            } else {
+                html += \`<div style="text-align:center; color:rgba(255,255,255,0.4); font-size: 13px;">Not enough failure data yet.</div>\`;
+            }
+
+            document.getElementById('content').innerHTML = html;
+
+            // Render Chart.js
+            if (data.topQuizzes.length > 0) {
+                const ctx = document.getElementById('topQuizzesChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.topQuizzes.map(q => q.title.length > 12 ? q.title.substring(0, 12) + '...' : q.title),
+                        datasets: [{
+                            label: 'Total Plays',
+                            data: data.topQuizzes.map(q => q.plays),
+                            backgroundColor: 'rgba(213, 0, 249, 0.8)',
+                            borderRadius: 6,
+                            barPercentage: 0.6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: 'rgba(255,255,255,0.5)' } },
+                            x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.7)', font: { size: 10 } } }
+                        }
+                    }
+                });
+            }
+        }
+
+        loadAnalytics();
+    </script>
+</body>
+</html>
+    `);
+});
+
+
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
