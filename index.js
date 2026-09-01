@@ -10678,69 +10678,115 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     }
 });
 
+
 // ==========================================
-// CREATOR STUDIO: ANALYTICS API
+// 📈 ADVANCED CREATOR STUDIO (API + FRONTEND + INFINITE SCROLL)
 // ==========================================
+
+// 1. BACKEND API ROUTE (PAGINATED)
 app.get("/api/creator-studio/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
 
-        // Fetch all quizzes created by this user
-        const quizzes = await quizMetadataCollection.find({ created_by: uid }).sort({ created_at: -1 }).toArray();
+        // 1. Calculate Channel Overview using Aggregation (Only needed on first page load)
+        let totalChannelPlays = 0;
+        let totalChannelCompletions = 0;
+
+        if (page === 1) {
+            const overviewPipeline = [
+                { $match: { created_by: uid } },
+                { $group: {
+                    _id: null,
+                    totalPlays: { $sum: { $ifNull: ["$total_plays", 0] } },
+                    totalCompletions: { $sum: { $ifNull: ["$completions", 0] } }
+                }}
+            ];
+            const overviewStats = await quizMetadataCollection.aggregate(overviewPipeline).toArray();
+            
+            if (overviewStats.length > 0) {
+                totalChannelPlays = overviewStats[0].totalPlays;
+                totalChannelCompletions = overviewStats[0].totalCompletions;
+            }
+        }
+
+        // 2. Fetch paginated quizzes (Sorted by most plays to show top content first)
+        const quizzes = await quizMetadataCollection.find({ created_by: uid })
+            .sort({ total_plays: -1, created_at: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
         
-        let totalPlays = 0;
-        let totalCompletions = 0;
-        let totalQuestions = 0;
-        const topQuizzes = [];
-
-        quizzes.forEach(q => {
-            const plays = q.total_plays || 0;
-            const completions = q.completions || 0;
-            totalPlays += plays;
-            totalCompletions += completions;
-            totalQuestions += (q.total_questions || 0);
-
-            topQuizzes.push({
-                title: q.title,
-                plays: plays,
-                completions: completions,
-                completionRate: plays > 0 ? Math.round((completions / plays) * 100) : 0,
-                category: q.category
+        if (quizzes.length === 0) {
+            return res.json({ 
+                success: true, 
+                quizzes: [], 
+                hasMore: false,
+                overview: page === 1 ? {
+                    totalPlays: totalChannelPlays,
+                    channelCompletionRate: totalChannelPlays > 0 ? Math.round((totalChannelCompletions / totalChannelPlays) * 100) : 0
+                } : null
             });
-        });
+        }
 
-        // Sort to get the top 5 performing quizzes
-        topQuizzes.sort((a, b) => b.plays - a.plays);
-
-        // Fetch questions to find the "Toughest Questions"
+        // 3. Fetch questions ONLY for this chunk of quizzes to calculate fail rates
         const quizIds = quizzes.map(q => q._id);
         const allQuestions = await quizCollection.find({ quiz_id: { $in: quizIds } }).toArray();
         
-        const toughestQuestions = allQuestions
-            .filter(q => (q.wrong_answers_count || 0) > 0)
-            .map(q => {
-                const totalAnswers = (q.correct_answers_count || 0) + (q.wrong_answers_count || 0);
-                const failRate = totalAnswers > 0 ? Math.round((q.wrong_answers_count / totalAnswers) * 100) : 0;
-                return {
-                    question: q.question,
-                    failRate: failRate,
-                    totalAnswers: totalAnswers,
-                    category: q.category
-                };
-            })
-            .sort((a, b) => b.failRate - a.failRate)
-            .slice(0, 5); // Top 5 hardest questions
+        // Group questions by quiz_id
+        const questionsByQuiz = {};
+        allQuestions.forEach(q => {
+            const qid = q.quiz_id.toString();
+            if (!questionsByQuiz[qid]) questionsByQuiz[qid] = [];
+            questionsByQuiz[qid].push(q);
+        });
+
+        // 4. Build detailed analytics for this specific chunk
+        const detailedQuizzes = quizzes.map(q => {
+            const qid = q._id.toString();
+            const plays = q.total_plays || 0;
+            const completions = q.completions || 0;
+            const completionRate = plays > 0 ? Math.round((completions / plays) * 100) : 0;
+            
+            const qQuestions = questionsByQuiz[qid] || [];
+            
+            // Toughest questions algorithm
+            const toughestQuestions = qQuestions
+                .filter(question => (question.wrong_answers_count || 0) > 0)
+                .map(question => {
+                    const totalAnswers = (question.correct_answers_count || 0) + (question.wrong_answers_count || 0);
+                    const failRate = totalAnswers > 0 ? Math.round((question.wrong_answers_count / totalAnswers) * 100) : 0;
+                    return {
+                        question: question.question,
+                        failRate: failRate,
+                        totalAnswers: totalAnswers
+                    };
+                })
+                .sort((a, b) => b.failRate - a.failRate)
+                .slice(0, 3); // Top 3 hardest per quiz
+
+            return {
+                id: qid,
+                title: q.title,
+                category: q.category,
+                totalQuestions: q.total_questions || 0,
+                plays: plays,
+                completions: completions,
+                completionRate: completionRate,
+                toughestQuestions: toughestQuestions
+            };
+        });
 
         res.json({
             success: true,
-            overview: {
-                totalQuizzes: quizzes.length,
-                totalPlays,
-                totalQuestions,
-                overallCompletionRate: totalPlays > 0 ? Math.round((totalCompletions / totalPlays) * 100) : 0
-            },
-            topQuizzes: topQuizzes.slice(0, 5),
-            toughestQuestions
+            hasMore: quizzes.length === limit,
+            overview: page === 1 ? {
+                totalPlays: totalChannelPlays,
+                channelCompletionRate: totalChannelPlays > 0 ? Math.round((totalChannelCompletions / totalChannelPlays) * 100) : 0
+            } : null,
+            quizzes: detailedQuizzes
         });
 
     } catch (error) {
@@ -10749,9 +10795,8 @@ app.get("/api/creator-studio/:userId", async (req, res) => {
     }
 });
 
-// ==========================================
-// CREATOR STUDIO: MINI APP UI
-// ==========================================
+
+// 2. FRONTEND UI ROUTE (WITH INFINITE SCROLL)
 app.get("/creator-studio-app/:userId", (req, res) => {
     const userId = req.params.userId;
     res.send(`
@@ -10762,7 +10807,6 @@ app.get("/creator-studio-app/:userId", (req, res) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Creator Studio</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
@@ -10781,43 +10825,89 @@ app.get("/creator-studio-app/:userId", (req, res) => {
         .title { font-weight: 800; font-size: 28px; letter-spacing: -0.5px; }
         .subtitle { color: #ea80fc; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
 
+        /* VIEW TOGGLES */
+        #view-list, #view-details { transition: opacity 0.3s ease; animation: fadeSlide 0.4s ease; }
+        .hidden { display: none !important; opacity: 0; }
+
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* OVERVIEW CARD */
+        .channel-overview {
+            background: linear-gradient(135deg, rgba(213,0,249,0.1), rgba(101,31,255,0.1));
+            border: 1px solid rgba(213,0,249,0.3); border-radius: 18px;
+            padding: 16px; margin-bottom: 20px;
+            display: flex; justify-content: space-around; text-align: center;
+        }
+        .channel-stat h4 { font-size: 24px; font-weight: 800; color: #fff; margin-bottom: 2px; }
+        .channel-stat p { font-size: 11px; color: rgba(255,255,255,0.6); text-transform: uppercase; font-weight: 600; }
+
+        /* QUIZ LIST STYLES */
+        .list-header { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.5); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;}
+        .quiz-card {
+            background: rgba(28,28,30,0.65); border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 16px; padding: 16px; margin-bottom: 12px; backdrop-filter: blur(20px);
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; transition: transform 0.2s, background 0.2s;
+        }
+        .quiz-card:active { transform: scale(0.97); background: rgba(213,0,249,0.1); }
+        .quiz-info h3 { font-size: 16px; font-weight: 700; margin-bottom: 4px; color: #fff; }
+        .quiz-info p { font-size: 12px; color: rgba(255,255,255,0.5); }
+        .quiz-plays { text-align: right; }
+        .quiz-plays span { display: block; font-size: 18px; font-weight: 800; color: #0a84ff; }
+        .quiz-plays small { font-size: 10px; color: rgba(255,255,255,0.4); text-transform: uppercase; }
+
+        /* DETAILS STYLES */
+        .back-btn {
+            background: rgba(255,255,255,0.1); border: none; color: #ea80fc;
+            padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 13px;
+            cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 20px;
+        }
+        .back-btn:active { background: rgba(255,255,255,0.2); }
+
         .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
         .stat-card {
-            background: rgba(28,28,30,0.65);
-            border: 0.5px solid rgba(255,255,255,0.1);
-            border-radius: 16px;
-            padding: 16px 12px;
-            text-align: center;
-            backdrop-filter: blur(20px);
+            background: rgba(28,28,30,0.65); border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 16px; padding: 16px 12px; text-align: center;
         }
         .stat-value { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 4px; }
-        .stat-label { font-size: 10px; color: rgba(255,255,255,0.5); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+        .stat-label { font-size: 10px; color: rgba(255,255,255,0.5); text-transform: uppercase; font-weight: 600; }
 
-        .chart-container {
-            background: rgba(28,28,30,0.65);
-            border: 0.5px solid rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 16px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(20px);
+        /* YT STUDIO INSIGHT CARDS */
+        .insight-card {
+            background: rgba(45,10,80,0.3); border: 1px solid rgba(213,0,249,0.2);
+            border-radius: 16px; padding: 16px; display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px;
         }
-        .section-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .insight-icon {
+            font-size: 24px; background: rgba(255,255,255,0.1); 
+            width: 44px; height: 44px; border-radius: 50%; 
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .insight-text h4 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+        .insight-text p { font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.4; }
+        .insight-card.warning { background: rgba(255,69,58,0.1); border-color: rgba(255,69,58,0.2); }
+        .insight-card.warning .insight-text h4 { color: #ff453a; }
+        .insight-card.success { background: rgba(48,209,88,0.1); border-color: rgba(48,209,88,0.2); }
+        .insight-card.success .insight-text h4 { color: #30d158; }
+
+        .section-title { font-size: 16px; font-weight: 700; margin: 24px 0 12px; display: flex; align-items: center; gap: 8px; }
 
         .toughest-list { display: flex; flex-direction: column; gap: 10px; }
         .tough-item {
-            background: rgba(255,69,58,0.1);
-            border: 1px solid rgba(255,69,58,0.2);
-            border-radius: 14px;
-            padding: 12px 14px;
-            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(28,28,30,0.65); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px; padding: 14px; 
         }
-        .tough-text { font-size: 13px; font-weight: 500; color: #fff; flex: 1; padding-right: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .tough-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .fail-badge { background: #ff453a; color: #fff; font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 8px; }
+        .tough-text { font-size: 14px; font-weight: 500; color: #fff; line-height: 1.4; }
+        .tough-advice { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;}
 
-        .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 30px; height: 30px; animation: spin 0.8s linear infinite; margin: 40px auto; }
+        .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d500f9; border-radius: 50%; width: 30px; height: 30px; animation: spin 0.8s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        .btn-close { width: 100%; background: rgba(255,255,255,0.1); border: none; padding: 16px; border-radius: 16px; color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; transition: transform 0.2s; }
+        .btn-close { width: 100%; background: rgba(255,255,255,0.1); border: none; padding: 16px; border-radius: 16px; color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 20px;}
         .btn-close:active { transform: scale(0.96); background: rgba(255,255,255,0.15); }
     </style>
 </head>
@@ -10825,109 +10915,230 @@ app.get("/creator-studio-app/:userId", (req, res) => {
     <div class="header">
         <div>
             <div class="subtitle">Analytics</div>
-            <div class="title">Creator Studio</div>
+            <div class="title" id="page-title">Creator Studio</div>
         </div>
-        <div style="font-size: 32px;">📈</div>
+        <div style="font-size: 32px;">📊</div>
     </div>
 
-    <div id="content">
-        <div class="loader"></div>
+    <!-- LIST VIEW -->
+    <div id="view-list">
+        <div id="overview-content"></div>
+        <div class="list-header" id="list-header-title" style="display:none;">Your Quizzes</div>
+        
+        <!-- Quizzes will be appended here step-by-step -->
+        <div id="quiz-list-container"></div>
+        
+        <!-- Loading spinner for pagination -->
+        <div id="loading-indicator" class="loader hidden"></div>
+        
+        <!-- Invisible element to trigger scroll loading -->
+        <div id="scroll-sentinel" style="height: 20px;"></div>
+        
+        <button class="btn-close" onclick="Telegram.WebApp.close()">Return to Bot</button>
     </div>
 
-    <button class="btn-close" onclick="Telegram.WebApp.close()" style="margin-top: 20px;">Return to Bot</button>
+    <!-- DETAILS VIEW -->
+    <div id="view-details" class="hidden">
+        <button class="back-btn" onclick="showListView()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            Back to Studio
+        </button>
+
+        <div id="details-content"></div>
+    </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
         tg.setHeaderColor('#000000');
 
-        async function loadAnalytics() {
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMore = true;
+        let globalQuizzes = [];
+        let globalOverview = null;
+
+        async function loadAnalytics(page = 1) {
+            if (isLoading || (!hasMore && page > 1)) return;
+            
+            isLoading = true;
+            document.getElementById('loading-indicator').classList.remove('hidden');
+
             try {
-                const res = await fetch('/api/creator-studio/${userId}');
+                const res = await fetch(\`/api/creator-studio/\${userId}?page=\${page}&limit=10\`);
                 const data = await res.json();
 
                 if (!data.success) throw new Error("Failed to load data");
+                
+                if (page === 1) {
+                    globalOverview = data.overview;
+                    renderOverview();
+                }
 
-                renderDashboard(data);
+                hasMore = data.hasMore;
+                
+                if (data.quizzes && data.quizzes.length > 0) {
+                    globalQuizzes = [...globalQuizzes, ...data.quizzes];
+                    document.getElementById('list-header-title').style.display = 'block';
+                    appendQuizzes(data.quizzes);
+                } else if (page === 1) {
+                    document.getElementById('quiz-list-container').innerHTML = '<div style="text-align:center; color:rgba(255,255,255,0.4); margin-top:40px;">You haven\\'t created any quizzes yet.</div>';
+                }
+
             } catch (error) {
-                document.getElementById('content').innerHTML = '<div style="text-align:center; color:#ff453a; margin-top:40px;">Failed to load analytics.</div>';
+                if (page === 1) {
+                    document.getElementById('quiz-list-container').innerHTML = '<div style="text-align:center; color:#ff453a; margin-top:40px;">Failed to load analytics.</div>';
+                }
+            } finally {
+                isLoading = false;
+                document.getElementById('loading-indicator').classList.add('hidden');
             }
         }
 
-        function renderDashboard(data) {
-            const ov = data.overview;
+        // Initialize Intersection Observer to load data step by step when scrolling
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !isLoading && hasMore) {
+                currentPage++;
+                loadAnalytics(currentPage);
+            }
+        }, { rootMargin: '100px' }); // Triggers slightly before the user hits the bottom
+
+        // Observe the invisible sentinel div
+        observer.observe(document.getElementById('scroll-sentinel'));
+
+        function renderOverview() {
+            if (globalOverview) {
+                document.getElementById('overview-content').innerHTML = \`
+                    <div class="channel-overview">
+                        <div class="channel-stat">
+                            <h4>\${globalOverview.totalPlays.toLocaleString()}</h4>
+                            <p>Channel Plays</p>
+                        </div>
+                        <div style="width: 1px; background: rgba(255,255,255,0.2);"></div>
+                        <div class="channel-stat">
+                            <h4>\${globalOverview.channelCompletionRate}%</h4>
+                            <p>Avg Retention</p>
+                        </div>
+                    </div>
+                \`;
+            }
+        }
+
+        function appendQuizzes(newQuizzes) {
+            let html = '';
+            newQuizzes.forEach(quiz => {
+                html += \`
+                    <div class="quiz-card" onclick="showDetailsView('\${quiz.id}')">
+                        <div class="quiz-info">
+                            <h3>\${quiz.title}</h3>
+                            <p>🏷️ \${quiz.category} • \${quiz.totalQuestions} Qs</p>
+                        </div>
+                        <div class="quiz-plays">
+                            <span>\${quiz.plays.toLocaleString()}</span>
+                            <small>Plays</small>
+                        </div>
+                    </div>
+                \`;
+            });
+            document.getElementById('quiz-list-container').insertAdjacentHTML('beforeend', html);
+        }
+
+        function getPerformanceInsight(plays, rate) {
+            if (plays === 0) {
+                return { type: 'normal', icon: '👀', title: 'Awaiting Players', desc: 'Share your quiz in groups to start gathering performance data.' };
+            }
+            if (rate >= 80) {
+                return { type: 'success', icon: '🚀', title: 'Excellent Retention!', desc: \`\${rate}% of players finish this quiz. Your audience loves the length and difficulty level.\` };
+            }
+            if (rate <= 40) {
+                return { type: 'warning', icon: '📉', title: 'High Drop-off Rate', desc: \`Only \${rate}% of players finish. Consider reducing the number of questions or lowering the difficulty.\` };
+            }
+            return { type: 'normal', icon: '👍', title: 'Steady Performance', desc: 'Your quiz is performing at a normal level. Players are engaged.' };
+        }
+
+        function showDetailsView(quizId) {
+            tg.HapticFeedback.selectionChanged();
+            
+            const quiz = globalQuizzes.find(q => q.id === quizId);
+            if (!quiz) return;
+
+            document.getElementById('page-title').innerText = quiz.title.length > 15 ? quiz.title.substring(0, 15) + '...' : quiz.title;
+
+            // 1. STATS GRID
             let html = \`
                 <div class="grid-3">
                     <div class="stat-card">
-                        <div class="stat-value" style="color: #0a84ff;">\${ov.totalPlays.toLocaleString()}</div>
+                        <div class="stat-value" style="color: #0a84ff;">\${quiz.plays.toLocaleString()}</div>
                         <div class="stat-label">Total Plays</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value" style="color: #30d158;">\${ov.overallCompletionRate}%</div>
-                        <div class="stat-label">Completion</div>
+                        <div class="stat-value" style="color: #30d158;">\${quiz.completionRate}%</div>
+                        <div class="stat-label">Retention</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value" style="color: #ea80fc;">\${ov.totalQuizzes}</div>
-                        <div class="stat-label">Quizzes</div>
+                        <div class="stat-value" style="color: #ea80fc;">\${quiz.completions.toLocaleString()}</div>
+                        <div class="stat-label">Finished</div>
                     </div>
-                </div>
-
-                <div class="chart-container">
-                    <div class="section-title">🚀 Top Performing Quizzes</div>
-                    <canvas id="topQuizzesChart" height="200"></canvas>
                 </div>
             \`;
 
-            if (data.toughestQuestions.length > 0) {
-                html += \`<div class="section-title" style="margin-top: 24px;">⚠️ Toughest Questions</div><div class="toughest-list">\`;
-                data.toughestQuestions.forEach(q => {
+            // 2. YT STUDIO PERFORMANCE INSIGHT
+            const insight = getPerformanceInsight(quiz.plays, quiz.completionRate);
+            html += \`
+                <div class="insight-card \${insight.type}">
+                    <div class="insight-icon">\${insight.icon}</div>
+                    <div class="insight-text">
+                        <h4>\${insight.title}</h4>
+                        <p>\${insight.desc}</p>
+                    </div>
+                </div>
+            \`;
+
+            // 3. TOUGHEST QUESTIONS
+            if (quiz.toughestQuestions.length > 0 && quiz.plays > 0) {
+                html += \`<div class="section-title">⚠️ Key Moments (Toughest Questions)</div><div class="toughest-list">\`;
+                quiz.toughestQuestions.forEach(q => {
+                    let advice = "Players are struggling here. Consider adding an explanation media or simplifying the options.";
+                    if (q.failRate > 80) advice = "Critical fail rate! Check if the correct answer is marked properly.";
+                    
                     html += \`
                         <div class="tough-item">
+                            <div class="tough-header">
+                                <span style="font-size: 12px; color: rgba(255,255,255,0.5);">Based on \${q.totalAnswers} answers</span>
+                                <div class="fail-badge">\${q.failRate}% Fail</div>
+                            </div>
                             <div class="tough-text">\${q.question}</div>
-                            <div class="fail-badge">\${q.failRate}% Fail</div>
+                            <div class="tough-advice">💡 \${advice}</div>
                         </div>
                     \`;
                 });
                 html += \`</div>\`;
-            } else {
-                html += \`<div style="text-align:center; color:rgba(255,255,255,0.4); font-size: 13px;">Not enough failure data yet.</div>\`;
+            } else if (quiz.plays > 0) {
+                html += \`<div style="text-align:center; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 16px; margin-top: 20px; color:rgba(255,255,255,0.4); font-size: 13px;">No difficult questions detected yet. Players are breezing through!</div>\`;
             }
 
-            document.getElementById('content').innerHTML = html;
+            document.getElementById('details-content').innerHTML = html;
 
-            // Render Chart.js
-            if (data.topQuizzes.length > 0) {
-                const ctx = document.getElementById('topQuizzesChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: data.topQuizzes.map(q => q.title.length > 12 ? q.title.substring(0, 12) + '...' : q.title),
-                        datasets: [{
-                            label: 'Total Plays',
-                            data: data.topQuizzes.map(q => q.plays),
-                            backgroundColor: 'rgba(213, 0, 249, 0.8)',
-                            borderRadius: 6,
-                            barPercentage: 0.6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: 'rgba(255,255,255,0.5)' } },
-                            x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.7)', font: { size: 10 } } }
-                        }
-                    }
-                });
-            }
+            document.getElementById('view-list').classList.add('hidden');
+            document.getElementById('view-details').classList.remove('hidden');
+            window.scrollTo(0, 0); // Scroll back to top for details
         }
 
-        loadAnalytics();
+        function showListView() {
+            tg.HapticFeedback.selectionChanged();
+            document.getElementById('page-title').innerText = 'Creator Studio';
+            document.getElementById('view-details').classList.add('hidden');
+            document.getElementById('view-list').classList.remove('hidden');
+        }
+
+        // Start by loading the first page
+        loadAnalytics(1);
     </script>
 </body>
 </html>
     `);
 });
+
 
 
 // ========================
