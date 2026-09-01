@@ -10064,8 +10064,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                                 <div class="quiz-date">Created on \${dateStr}</div>
 
                                 <div class="btn-group-2">
-                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${q._id}'); tg.close();">🚀 Start Group</button>
-                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${q._id}'); tg.close();">🛠️ PM Test</button>
+                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/IQuizBot?startgroup=quiz_\${q._id}'); tg.close();">🚀 Start Group</button>
+                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/IQuizBot?start=quiz_\${q._id}'); tg.close();">🛠️ PM Test</button>
                                 </div>
 
                                 <div class="btn-group-3">
