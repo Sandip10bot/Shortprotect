@@ -10679,6 +10679,7 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
 });
 
 
+
 // ==========================================
 // 📈 ADVANCED CREATOR STUDIO (API + FRONTEND + INFINITE SCROLL)
 // ==========================================
@@ -10952,6 +10953,9 @@ app.get("/creator-studio-app/:userId", (req, res) => {
         tg.expand();
         tg.setHeaderColor('#000000');
 
+        // CRUCIAL: Pass the ID into the browser from Express
+        const userId = ${userId};
+
         let currentPage = 1;
         let isLoading = false;
         let hasMore = true;
@@ -11001,7 +11005,7 @@ app.get("/creator-studio-app/:userId", (req, res) => {
                 currentPage++;
                 loadAnalytics(currentPage);
             }
-        }, { rootMargin: '100px' }); // Triggers slightly before the user hits the bottom
+        }, { rootMargin: '100px' });
 
         // Observe the invisible sentinel div
         observer.observe(document.getElementById('scroll-sentinel'));
@@ -11138,6 +11142,7 @@ app.get("/creator-studio-app/:userId", (req, res) => {
 </html>
     `);
 });
+
 
 
 
