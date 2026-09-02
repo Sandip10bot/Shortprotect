@@ -9433,38 +9433,26 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 </div>
 
                 <div class="options-group">
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card selected">
-                            <input type="radio" name="q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 1 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 2 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 3 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 4 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
+                    <label class="option-card selected">
+                        <input type="radio" name="q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                    </label>
                 </div>
 
                 <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
@@ -9489,8 +9477,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 triggerAutoSave();
             }));
 
-            // Added .opt-media to auto-save triggers
-            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .opt-media, .q-exp, .q-rapid').forEach(el => {
+            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
                 el.addEventListener('input', triggerAutoSave);
                 el.addEventListener('change', triggerAutoSave);
             });
@@ -9569,7 +9556,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 const textNode = card.querySelector('.q-text');
                 if (!textNode) return;
                 const opts = card.querySelectorAll('.opt-val');
-                const optMedias = card.querySelectorAll('.opt-media'); // Naya option media fetch
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
@@ -9585,13 +9571,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 data.questions.push({
                     text: textNode.value,
                     opt1: opts[0] ? opts[0].value : '',
-                    opt1Media: optMedias[0] ? optMedias[0].value.trim() : '',
                     opt2: opts[1] ? opts[1].value : '',
-                    opt2Media: optMedias[1] ? optMedias[1].value.trim() : '',
                     opt3: opts[2] ? opts[2].value : '',
-                    opt3Media: optMedias[2] ? optMedias[2].value.trim() : '',
                     opt4: opts[3] ? opts[3].value : '',
-                    opt4Media: optMedias[3] ? optMedias[3].value.trim() : '',
                     ansIndex: ansIndex,
                     exp: card.querySelector('.q-exp').value,
                     isRapid: card.querySelector('.q-rapid').checked,
@@ -9605,7 +9587,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             indicator.classList.add('show');
             setTimeout(() => indicator.classList.remove('show'), 1500);
         }
-
 
         function triggerAutoSave() {
             clearTimeout(saveTimeout);
@@ -9628,20 +9609,10 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             const card = document.getElementById(\`q-card-\${id}\`);
                             card.querySelector('.q-text').value = q.text || '';
                             const opts = card.querySelectorAll('.opt-val');
-                            const optMedias = card.querySelectorAll('.opt-media'); // Naya option media bind
-                            
                             opts[0].value = q.opt1 || '';
                             opts[1].value = q.opt2 || '';
                             opts[2].value = q.opt3 || '';
                             opts[3].value = q.opt4 || '';
-                            
-                            if (optMedias.length === 4) {
-                                optMedias[0].value = q.opt1Media || '';
-                                optMedias[1].value = q.opt2Media || '';
-                                optMedias[2].value = q.opt3Media || '';
-                                optMedias[3].value = q.opt4Media || '';
-                            }
-                            
                             const radios = card.querySelectorAll('input[type="radio"]');
                             if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                             card.querySelector('.q-exp').value = q.exp || '';
@@ -9666,7 +9637,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 addQuestion();
             }
         }
-
 
         function clearDrafts() {
             if(confirm("Delete all drafted questions?")) {
@@ -9701,69 +9671,36 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             cards.forEach(card => {
                 const text = card.querySelector('.q-text').value.trim();
                 const optInputs = card.querySelectorAll('.opt-val');
-                const optMedias = card.querySelectorAll('.opt-media'); // Naya option media select
-                
-                const op1Text = optInputs[0].value.trim();
-                const op2Text = optInputs[1].value.trim();
-                const op3Text = optInputs[2].value.trim();
-                const op4Text = optInputs[3].value.trim();
+                const op1 = optInputs[0].value.trim();
+                const op2 = optInputs[1].value.trim();
+                const op3 = optInputs[2].value.trim();
+                const op4 = optInputs[3].value.trim();
 
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
 
-                if (!text || !op1Text || !op2Text || !op3Text || !op4Text) hasError = true;
+                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
 
-                // NAYA: Build options array with media support
-                const options = [];
-                for(let i=0; i<4; i++) {
-                    const txt = optInputs[i].value.trim();
-                    const mediaVal = optMedias[i] ? optMedias[i].value.trim() : null;
-                    
-                    if (mediaVal) {
-                        const isOptUrl = mediaVal.match(/^https?:\\/\\//);
-                        options.push({
-                            text: txt,
-                            media_id: !isOptUrl ? mediaVal : null,
-                            media_url: isOptUrl ? mediaVal : null,
-                            media_type: 'photo' // Options sirf photo support karte hain
-                        });
-                    } else {
-                        options.push(txt);
-                    }
-                }
-
-                const answer = options[ansIndex].text || options[ansIndex]; // Save correct answer as text
-
+                const options = [op1, op2, op3, op4];
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
-                
-                // Question Media & Audio Fix (SMART DETECT)
                 const mediaInput = card.querySelector('.q-media-input');
                 let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                let mediaUrl = null, mediaFileId = null, determinedMediaType = null;
-                
+                let mediaUrl = null, mediaFileId = null;
                 if (mediaValue) {
-                    if (mediaValue.match(/^https?:\\/\\//)) {
-                        mediaUrl = mediaValue;
-                        if (mediaUrl.match(/\\.(mp4|webm|mov|avi)/i)) determinedMediaType = 'video';
-                        else if (mediaUrl.match(/\\.(mp3|m4a|ogg|wav)/i)) determinedMediaType = 'audio';
-                        else determinedMediaType = 'photo';
-                    } else {
-                        mediaFileId = mediaValue;
-                        // Audio auto-detection based on Telegram file_id patterns
-                        determinedMediaType = (mediaFileId.startsWith('CQ') || mediaFileId.startsWith('Aw')) ? 'audio' : 'photo';
-                    }
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
                 }
 
                 questions.push({
                     question: text,
                     options: options,
-                    answer: answer,
+                    answer: options[ansIndex],
                     explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                     media_url: mediaUrl || null,
                     media_file_id: mediaFileId || null,
-                    media_type: determinedMediaType, // Ab yeh gracefully "audio" detect karega
+                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
                     time_limit: timeLimit || null,
                     is_rapid_fire: card.querySelector('.q-rapid').checked
                 });
@@ -9787,11 +9724,14 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             document.getElementById('loading').style.display = 'block';
             tg.HapticFeedback.impactOccurred('heavy');
 
-            fetch('/api/quiz/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(res => res.json()).then(data => {
+            try {
+                const res = await fetch('/api/quiz/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
                     triggerConfetti();
@@ -9833,15 +9773,13 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 } else {
                     throw new Error(data.error);
                 }
-            }).catch(e => {
+            } catch (e) {
                 alert('Error creating quiz: ' + e.message);
                 document.getElementById('quiz-form').style.display = 'block';
                 document.getElementById('actionBar').classList.add('visible');
                 document.getElementById('loading').style.display = 'none';
-            });
+            }
         }
-
-
 
         loadState();
     </script>
@@ -9850,8 +9788,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
     `);
 });
 
-
-                    
 // ==========================================
 // QUIZ MANAGER MINI APP – Premium Telegram Style (No Emojis)
 // ==========================================
@@ -10176,60 +10112,50 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     data.questions.forEach(q => {
                         const id = addEditQuestion();
                         const card = document.getElementById(\`edit-q-card-\${id}\`);
-                        
-                        card.querySelector('.q-text').value = q.question || '';
-                        
+                        card.querySelector('.q-text').value = q.question;
                         const opts = card.querySelectorAll('.opt-val');
-                        const optMedias = card.querySelectorAll('.opt-media'); // Naya option media bind
 
-                        // Purane quizzes mein options array string tha, naye mein object ho sakta hai
-                        const extractText = (opt) => typeof opt === 'object' && opt !== null ? (opt.text || '') : opt;
-                        const extractMedia = (opt) => typeof opt === 'object' && opt !== null ? (opt.media_url || opt.media_id || '') : '';
+                        opts[0].value = typeof q.options[0] === 'object' ? (q.options[0].text || '') : (q.options[0] || '');
+                        opts[1].value = typeof q.options[1] === 'object' ? (q.options[1].text || '') : (q.options[1] || '');
+                        opts[2].value = typeof q.options[2] === 'object' ? (q.options[2].text || '') : (q.options[2] || '');
+                        opts[3].value = typeof q.options[3] === 'object' ? (q.options[3].text || '') : (q.options[3] || '');
 
-                        opts[0].value = extractText(q.options[0]) || '';
-                        opts[1].value = extractText(q.options[1]) || '';
-                        opts[2].value = extractText(q.options[2]) || '';
-                        opts[3].value = extractText(q.options[3]) || '';
-
-                        if (optMedias.length === 4) {
-                            optMedias[0].value = extractMedia(q.options[0]);
-                            optMedias[1].value = extractMedia(q.options[1]);
-                            optMedias[2].value = extractMedia(q.options[2]);
-                            optMedias[3].value = extractMedia(q.options[3]);
-                        }
-
-                        // Answer set
-                        const answerText = extractText(q.answer);
+                        const ansIndex = q.options.findIndex(opt => {
+                            const optText = typeof opt === 'object' ? opt.text : opt;
+                            return optText === q.answer;
+                        });
                         const radios = card.querySelectorAll('input[type="radio"]');
-                        for(let i=0; i<4; i++) {
-                            if (opts[i].value === answerText) radios[i].checked = true;
-                        }
+                        if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
 
                         card.querySelector('.q-exp').value = q.explanation || '';
                         card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
-                        
+
                         const timeInput = card.querySelector('.q-time-limit');
                         if (timeInput && q.time_limit) timeInput.value = q.time_limit;
-                        
+
                         const mediaInput = card.querySelector('.q-media-input');
                         if (mediaInput) {
                             if (q.media_url) mediaInput.value = q.media_url;
                             else if (q.media_file_id) mediaInput.value = q.media_file_id;
-                            updateEditMediaPreview(id, mediaInput.value.trim());
+                            updateMediaPreview(id, mediaInput.value.trim());
                         }
-                        
-                        updateEditOptionStyles(\`edit-q-card-\${id}\`);
-                    });
 
-                    if (data.questions.length === 0) addEditQuestion();
+                        updateOptionStyles(\`edit-q-card-\${id}\`);
+                    });
                 } else {
-                    alert('Failed to load quiz details.');
+                    alert("Failed to load quiz details.");
                     closeEditView();
                 }
-            } catch (e) {
-                alert('Network error.');
+            } catch(e) {
+                alert("Network Error while loading details.");
                 closeEditView();
             }
+        }
+
+        function closeEditView() {
+            document.getElementById('edit-view').style.display = 'none';
+            document.getElementById('list-view').style.display = 'block';
+            currentEditQuizId = null;
         }
 
         function addEditQuestion() {
@@ -10245,58 +10171,42 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     <span>Question \${id}</span>
                     <button class="btn-remove" onclick="removeEditQuestion(\${id})">✕ Remove</button>
                 </div>
-
                 <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
 
                 <div class="media-input-row">
-                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id">
-                    <button class="clear-media" onclick="clearEditMedia(this)">✕</button>
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                    <button class="clear-media" onclick="clearMedia(this)">✕</button>
                 </div>
                 <div class="media-preview" id="edit-preview-\${id}" style="display:none;"></div>
 
                 <div class="time-per-q">
-                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)">
+                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)" style="flex:1; padding: 10px;">
                     <span class="hint">Optional</span>
                 </div>
 
-                <!-- Naya Options Group (Image support ke sath) -->
                 <div class="options-group">
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card selected">
-                            <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 1 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 2 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 3 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <label class="option-card">
-                            <input type="radio" name="edit-q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4 Text" required>
-                        </label>
-                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 4 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
-                    </div>
+                    <label class="option-card selected">
+                        <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                    </label>
                 </div>
-
                 <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
-
                 <div class="setting-item">
                     <span style="font-size:12px; font-weight:800; color:var(--warning);">Rapid Fire (7s)</span>
                     <input type="checkbox" class="toggle-switch q-rapid">
@@ -10307,175 +10217,19 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             const mediaInput = qDiv.querySelector('.q-media-input');
             mediaInput.addEventListener('input', function() {
-                updateEditMediaPreview(id, this.value.trim());
+                updateMediaPreview(id, this.value.trim());
             });
 
             qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                 tg.HapticFeedback.impactOccurred('light');
-                updateEditOptionStyles(\`edit-q-card-\${id}\`);
+                updateOptionStyles(\`edit-q-card-\${id}\`);
             }));
 
+            tg.HapticFeedback.selectionChanged();
             return id;
         }
 
-        async function submitEditQuiz() {
-            const title = document.getElementById('edit-q-title').value.trim();
-            const desc = document.getElementById('edit-q-desc').value.trim();
-            const time = document.getElementById('edit-q-time').value.trim();
-
-            if (!title || !desc || !time) {
-                alert('Please fill out Title and Time fields!');
-                return tg.HapticFeedback.notificationOccurred('error');
-            }
-
-            const cards = document.getElementById('edit-questions-container').querySelectorAll('.q-card');
-            if (cards.length === 0) {
-                alert('Add at least one question!');
-                return tg.HapticFeedback.notificationOccurred('error');
-            }
-
-            const questions = [];
-            let hasError = false;
-
-            cards.forEach(card => {
-                const text = card.querySelector('.q-text').value.trim();
-                const optInputs = card.querySelectorAll('.opt-val');
-                const optMedias = card.querySelectorAll('.opt-media'); 
-                
-                const op1Text = optInputs[0].value.trim();
-                const op2Text = optInputs[1].value.trim();
-                const op3Text = optInputs[2].value.trim();
-                const op4Text = optInputs[3].value.trim();
-
-                const radios = card.querySelectorAll('input[type="radio"]');
-                let ansIndex = 0;
-                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
-
-                if (!text || !op1Text || !op2Text || !op3Text || !op4Text) hasError = true;
-
-                const options = [];
-                for(let i=0; i<4; i++) {
-                    const txt = optInputs[i].value.trim();
-                    const mediaVal = optMedias[i] ? optMedias[i].value.trim() : null;
-                    
-                    if (mediaVal) {
-                        const isOptUrl = mediaVal.match(/^https?:\/\//);
-                        options.push({
-                            text: txt,
-                            media_id: !isOptUrl ? mediaVal : null,
-                            media_url: isOptUrl ? mediaVal : null,
-                            media_type: 'photo' 
-                        });
-                    } else {
-                        options.push(txt);
-                    }
-                }
-
-                const answer = options[ansIndex].text || options[ansIndex]; 
-
-                const timeInput = card.querySelector('.q-time-limit');
-                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
-                
-                const mediaInput = card.querySelector('.q-media-input');
-                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                let mediaUrl = null, mediaFileId = null, determinedMediaType = null;
-                
-                if (mediaValue) {
-                    if (mediaValue.match(/^https?:\/\//)) {
-                        mediaUrl = mediaValue;
-                        if (mediaUrl.match(/\.(mp4|webm|mov|avi)/i)) determinedMediaType = 'video';
-                        else if (mediaUrl.match(/\.(mp3|m4a|ogg|wav)/i)) determinedMediaType = 'audio';
-                        else determinedMediaType = 'photo';
-                    } else {
-                        mediaFileId = mediaValue;
-                        determinedMediaType = (mediaFileId.startsWith('CQ') || mediaFileId.startsWith('Aw')) ? 'audio' : 'photo';
-                    }
-                }
-
-                questions.push({
-                    question: text,
-                    options: options,
-                    answer: answer,
-                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
-                    media_url: mediaUrl || null,
-                    media_file_id: mediaFileId || null,
-                    media_type: determinedMediaType, 
-                    time_limit: timeLimit || null,
-                    is_rapid_fire: card.querySelector('.q-rapid').checked
-                });
-            });
-
-            if (hasError) {
-                alert('Please ensure all question boxes and 4 options are completely filled!');
-                return tg.HapticFeedback.notificationOccurred('error');
-            }
-
-            // Naya Payload Backend ke naye rule ke hisaab se
-            const payload = {
-                title: title,
-                description: desc,
-                time_per_question: parseInt(time),
-                questions: questions
-            };
-
-            tg.HapticFeedback.impactOccurred('heavy');
-            
-            try {
-                // Sahi URL format (Jisme URL params mein hi userId aur quizId ja raha hai)
-                const endpointUrl = '/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId;
-
-                
-                const res = await fetch(endpointUrl, {
-                    method: 'PUT', // POST ki jagah PUT
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                
-                const data = await res.json();
-
-                if (data.success) {
-                    tg.HapticFeedback.notificationOccurred('success');
-                    alert('Quiz saved successfully!');
-                    closeEditView();
-                    loadQuizzes();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (e) {
-                alert('Error saving quiz: ' + e.message);
-            }
-        }
-
-
-        // ================= Utility Functions =================
-        function removeEditQuestion(id) {
-            const el = document.getElementById(\`edit-q-card-\${id}\`);
-            if (el) el.remove();
-            tg.HapticFeedback.impactOccurred('medium');
-        }
-
-        function clearEditMedia(btn) {
-            const card = btn.closest('.q-card');
-            if (!card) return;
-            const input = card.querySelector('.q-media-input');
-            if (input) {
-                input.value = '';
-                const qId = card.id.replace('edit-q-card-', '');
-                updateEditMediaPreview(qId, '');
-            }
-        }
-
-        function updateEditOptionStyles(cardId) {
-            const card = document.getElementById(cardId);
-            if (!card) return;
-            card.querySelectorAll('.option-card').forEach(oc => {
-                const radio = oc.querySelector('input[type="radio"]');
-                if (radio && radio.checked) oc.classList.add('selected');
-                else oc.classList.remove('selected');
-            });
-        }
-        
-        function updateEditMediaPreview(qId, mediaValue) {
+        function updateMediaPreview(qId, mediaValue) {
             const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
             if (!previewContainer) return;
             if (!mediaValue) {
@@ -10508,80 +10262,173 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             previewContainer.style.display = 'block';
         }
 
-        function closeEditView() {
-            document.getElementById('edit-view').style.display = 'none';
-            document.getElementById('list-view').style.display = 'block';
-            currentEditQuizId = null;
+        function clearMedia(btn) {
+            const card = btn.closest('.q-card');
+            if (!card) return;
+            const input = card.querySelector('.q-media-input');
+            if (input) {
+                input.value = '';
+                const qId = card.id.replace('edit-q-card-', '');
+                updateMediaPreview(qId, '');
+            }
         }
 
-        // ================= Clone Quiz Logic (Kept Intact) =================
-        async function deleteQuiz(quizId) {
-            if(!confirm("Are you sure you want to delete this quiz?")) return;
-            tg.HapticFeedback.impactOccurred('heavy');
-            try {
-                const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
-                const data = await res.json();
-                if(data.success) {
-                    const card = document.getElementById('card-' + quizId);
-                    if(card) {
-                        card.style.transform = 'scale(0.9)';
-                        card.style.opacity = '0';
-                        setTimeout(() => card.remove(), 300);
-                    }
-                    tg.HapticFeedback.notificationOccurred('success');
-                } else {
-                    alert("Delete failed.");
+        function removeEditQuestion(id) {
+            const el = document.getElementById(\`edit-q-card-\${id}\`);
+            if (el) el.remove();
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function updateOptionStyles(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.querySelectorAll('.option-card').forEach(oc => {
+                const radio = oc.querySelector('input[type="radio"]');
+                if (radio && radio.checked) oc.classList.add('selected');
+                else oc.classList.remove('selected');
+            });
+        }
+
+        async function submitEditQuiz() {
+            const title = document.getElementById('edit-q-title').value.trim();
+            const desc = document.getElementById('edit-q-desc').value.trim();
+            const time = document.getElementById('edit-q-time').value.trim();
+
+            if (!title || !desc || !time) return alert('Please fill title and description!');
+
+            const cards = document.getElementById('edit-questions-container').querySelectorAll('.q-card');
+            if (cards.length === 0) return alert('Please add at least one question!');
+
+            const questions = [];
+            let hasError = false;
+
+            cards.forEach(card => {
+                const text = card.querySelector('.q-text').value.trim();
+                const optInputs = card.querySelectorAll('.opt-val');
+                const op1 = optInputs[0].value.trim();
+                const op2 = optInputs[1].value.trim();
+                const op3 = optInputs[2].value.trim();
+                const op4 = optInputs[3].value.trim();
+
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+
+                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+
+                const options = [op1, op2, op3, op4];
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                let mediaUrl = null, mediaFileId = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
                 }
-            } catch(e) {
-                alert("Network error.");
+
+                questions.push({
+                    question: text,
+                    options: options,
+                    answer: options[ansIndex],
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                    media_url: mediaUrl || null,
+                    media_file_id: mediaFileId || null,
+                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    time_limit: timeLimit || null,
+                    is_rapid_fire: card.querySelector('.q-rapid').checked
+                });
+            });
+
+            if (hasError) return alert('Please ensure all questions and 4 options are completely filled!');
+
+            const payload = {
+                title,
+                description: desc,
+                time_per_question: parseInt(time),
+                questions
+            };
+
+            tg.HapticFeedback.impactOccurred('heavy');
+
+            try {
+                const res = await fetch('/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    alert("✅ Quiz Updated Successfully!");
+                    closeEditView();
+                    loadQuizzes();
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (e) {
+                alert('Update Error: ' + e.message);
+            }
+        }
+
+        async function deleteQuiz(quizId) {
+            if(confirm("Are you sure you want to permanently delete this quiz?")) {
+                tg.HapticFeedback.impactOccurred('heavy');
+                try {
+                    const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
+                    const data = await res.json();
+                    if(data.success) {
+                        document.getElementById('card-' + quizId).style.display = 'none';
+                        tg.HapticFeedback.notificationOccurred('success');
+                    } else {
+                        alert("Error: " + data.error);
+                    }
+                } catch(e) {
+                    alert("Network Error");
+                }
             }
         }
 
         function openCloneModal(quizId) {
-            tg.HapticFeedback.impactOccurred('light');
             targetQuizId = quizId;
+            targetUserId = null;
+            document.getElementById('cloneSearchInput').value = '';
+            document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.remove('active');
+            confirmBtn.innerText = "Select User First";
             document.getElementById('cloneModal').classList.add('open');
-            document.getElementById('cloneSearchInput').focus();
+            setTimeout(() => document.getElementById('cloneSearchInput').focus(), 200);
         }
 
         function closeCloneModal() {
             document.getElementById('cloneModal').classList.remove('open');
-            targetQuizId = null;
-            targetUserId = null;
-            document.getElementById('cloneSearchInput').value = '';
-            document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
-            document.getElementById('btnConfirmClone').classList.remove('active');
         }
 
-        document.getElementById('cloneSearchInput').addEventListener('input', async function() {
-            const query = this.value.trim();
+        document.getElementById('cloneSearchInput').addEventListener('input', async function(e) {
+            const query = e.target.value.trim();
             const resultsDiv = document.getElementById('cloneSearchResults');
-            
+
             if (query.length < 2) {
                 resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
-                document.getElementById('btnConfirmClone').classList.remove('active');
-                targetUserId = null;
                 return;
             }
 
             try {
                 const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
                 const data = await res.json();
-                
-                if (data.success && data.users.length) {
+
+                if (data.success && data.users.length > 0) {
                     let html = '';
                     data.users.forEach(u => {
-                        const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` :
-                                      \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+                        const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` : \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
                         html += \`
-                            <div class="user-result" id="user-res-\${u.id}" onclick="selectTargetUser(\${u.id})">
+                            <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
                                 \${avatar}
-                                <div style="flex:1;">
-                                    <div style="font-weight:600; font-size:15px; color:var(--text);">\${u.name} \${u.username ? '@'+u.username : ''}</div>
-                                    <div style="font-size:12px; color:var(--hint); margin-top:2px;">ID: \${u.id}</div>
-                                </div>
-                                <div style="color:var(--accent); display:none;" class="check-icon">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                <div>
+                                    <div style="font-weight:600; font-size:15px; color:var(--text); margin-bottom:2px;">\${u.name}</div>
+                                    <div style="font-size:12px; color:var(--hint);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
                                 </div>
                             </div>
                         \`;
@@ -10589,64 +10436,50 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     resultsDiv.innerHTML = html;
                 } else {
                     resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">No users found.</p>';
-                    document.getElementById('btnConfirmClone').classList.remove('active');
-                    targetUserId = null;
                 }
-            } catch (e) {
-                resultsDiv.innerHTML = '<p style="text-align:center; color:var(--destructive); margin-top:40px;">Search failed.</p>';
+            } catch(e) {
+                console.error("Search error:", e);
             }
         });
 
-        function selectTargetUser(id) {
+        function selectUserForClone(id, name) {
             targetUserId = id;
             tg.HapticFeedback.selectionChanged();
-            
-            document.querySelectorAll('.user-result').forEach(el => {
-                el.classList.remove('selected');
-                el.querySelector('.check-icon').style.display = 'none';
-            });
-            
-            const selectedEl = document.getElementById('user-res-' + id);
-            selectedEl.classList.add('selected');
-            selectedEl.querySelector('.check-icon').style.display = 'block';
-            
-            document.getElementById('btnConfirmClone').classList.add('active');
+            document.querySelectorAll('.user-result').forEach(el => el.classList.remove('selected'));
+            document.getElementById('ur-' + id).classList.add('selected');
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.add('active');
+            confirmBtn.innerText = \`Clone to \${name}\`;
         }
 
         async function executeClone() {
             if (!targetQuizId || !targetUserId) return;
-            
-            tg.HapticFeedback.impactOccurred('heavy');
             const btn = document.getElementById('btnConfirmClone');
-            btn.innerText = 'Cloning...';
-            btn.style.opacity = '0.7';
-            btn.style.pointerEvents = 'none';
+            btn.innerText = "Cloning, Please wait...";
+            btn.classList.remove('active');
 
             try {
-                const res = await fetch('/api/quiz/manage/clone', {
+                const res = await fetch('/api/quiz/manage/clone/' + targetQuizId, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        sourceUserId: userId, 
-                        quizId: targetQuizId, 
-                        targetUserId: targetUserId 
-                    })
+                    body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
                 });
+
                 const data = await res.json();
-                
+
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
-                    alert('Quiz successfully cloned to User ID: ' + targetUserId);
+                    alert("✅ " + data.message);
                     closeCloneModal();
                 } else {
-                    alert('Error: ' + data.error);
+                    alert("❌ Error: " + data.error);
+                    btn.innerText = "Try Again";
+                    btn.classList.add('active');
                 }
             } catch (e) {
-                alert('Network error during cloning.');
-            } finally {
-                btn.innerText = 'Clone to User';
-                btn.style.opacity = '1';
-                btn.style.pointerEvents = 'all';
+                alert("Network Error");
+                btn.innerText = "Try Again";
+                btn.classList.add('active');
             }
         }
 
@@ -10655,9 +10488,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 </body>
 </html>
     `);
-});
-
-                
+});                
 
 // ------------------------------------------------------------
 // 1. BACKEND REST APIs FOR MANAGING QUIZZES (UPDATED)
