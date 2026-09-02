@@ -10422,7 +10422,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             
             try {
                 // Sahi URL format (Jisme URL params mein hi userId aur quizId ja raha hai)
-                const endpointUrl = `/api/quiz/manage/edit/${userId}/${currentEditQuizId}`;
+                const endpointUrl = '/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId;
+
                 
                 const res = await fetch(endpointUrl, {
                     method: 'PUT', // POST ki jagah PUT
