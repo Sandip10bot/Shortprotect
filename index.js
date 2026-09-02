@@ -9259,11 +9259,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
         .option-card {
-            display: flex; align-items: center; padding: 4px 12px;
+            display: flex; flex-direction: column; align-items: stretch; padding: 4px 12px;
             background: var(--card); border: 1px solid var(--border);
             border-radius: 12px; cursor: pointer; transition: all 0.2s;
         }
         .option-card input[type="radio"] { display: none; }
+        .opt-main-row { display: flex; align-items: center; }
         .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
 
         .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
@@ -9272,6 +9273,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
         .option-card .opt-val::placeholder { color: #a0a0a0; }
+        .option-card .opt-media-val { margin: 0 0 8px 32px; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 6px 0 2px; cursor: text; }
+        .option-card .opt-media-val::placeholder { color: #b0b0b0; }
 
         .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
 
@@ -9310,6 +9313,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
         .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
         .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
+        .media-input-row select.q-media-type:focus { border-color: var(--accent); }
         .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
 
         .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
@@ -9422,7 +9427,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
 
                 <div class="media-input-row">
-                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id (photo/video/audio)" style="padding: 10px;">
+                    <select class="q-media-type" title="Media type (used when pasting a file_id)">
+                        <option value="photo">Photo</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
                     <button class="clear-media" onclick="clearMedia(this)">✕</button>
                 </div>
                 <div class="media-preview" id="preview-\${id}" style="display:none;"></div>
@@ -9434,24 +9444,36 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
                 <div class="options-group">
                     <label class="option-card selected">
-                        <input type="radio" name="q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                 </div>
 
@@ -9471,13 +9493,19 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 triggerAutoSave();
             });
 
+            const mediaTypeSelect = qDiv.querySelector('.q-media-type');
+            mediaTypeSelect.addEventListener('change', function() {
+                updateMediaPreview(id, mediaInput.value.trim());
+                triggerAutoSave();
+            });
+
             qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                 tg.HapticFeedback.impactOccurred('light');
                 updateOptionStyles(\`q-card-\${id}\`);
                 triggerAutoSave();
             }));
 
-            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
+            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .opt-media-val, .q-exp, .q-rapid').forEach(el => {
                 el.addEventListener('input', triggerAutoSave);
                 el.addEventListener('change', triggerAutoSave);
             });
@@ -9490,6 +9518,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         function updateMediaPreview(qId, mediaValue) {
             const previewContainer = document.getElementById(\`preview-\${qId}\`);
             if (!previewContainer) return;
+            const card = document.getElementById(\`q-card-\${qId}\`);
+            const typeSelect = card ? card.querySelector('.q-media-type') : null;
             if (!mediaValue) {
                 previewContainer.style.display = 'none';
                 previewContainer.innerHTML = '';
@@ -9501,18 +9531,25 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             if (isUrl) {
                 const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
                 if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'photo';
                     html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
                 } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'video';
                     html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else if (['mp3','ogg','wav','m4a','flac','aac'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'audio';
+                    html = \`<audio controls style="width:100%;"><source src="\${mediaValue}"></audio>\`;
                 } else {
                     html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
                 }
             } else if (isFileId) {
+                const mType = typeSelect ? typeSelect.value : 'photo';
+                const icon = mType === 'audio' ? '🎵' : (mType === 'video' ? '🎬' : '🖼️');
                 html = \`
                     <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
-                        <span style="font-size:24px;">🖼️</span>
+                        <span style="font-size:24px;">\${icon}</span>
                         <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
-                        <span class="file-id-label">file_id</span>
+                        <span class="file-id-label">\${mType} file_id</span>
                     </div>
                 \`;
             }
@@ -9556,12 +9593,14 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 const textNode = card.querySelector('.q-text');
                 if (!textNode) return;
                 const opts = card.querySelectorAll('.opt-val');
+                const optMedia = card.querySelectorAll('.opt-media-val');
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                 const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
                 let mediaValue = mediaInput ? mediaInput.value.trim() || null : null;
                 let mediaUrl = null, mediaFileId = null;
                 if (mediaValue) {
@@ -9574,12 +9613,17 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     opt2: opts[1] ? opts[1].value : '',
                     opt3: opts[2] ? opts[2].value : '',
                     opt4: opts[3] ? opts[3].value : '',
+                    opt1Media: optMedia[0] ? optMedia[0].value : '',
+                    opt2Media: optMedia[1] ? optMedia[1].value : '',
+                    opt3Media: optMedia[2] ? optMedia[2].value : '',
+                    opt4Media: optMedia[3] ? optMedia[3].value : '',
                     ansIndex: ansIndex,
                     exp: card.querySelector('.q-exp').value,
                     isRapid: card.querySelector('.q-rapid').checked,
                     timeLimit: timeLimit,
                     mediaUrl: mediaUrl,
-                    mediaFileId: mediaFileId
+                    mediaFileId: mediaFileId,
+                    mediaType: mediaTypeSelect ? mediaTypeSelect.value : 'photo'
                 });
             });
             localStorage.setItem(storageKey, JSON.stringify(data));
@@ -9613,6 +9657,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             opts[1].value = q.opt2 || '';
                             opts[2].value = q.opt3 || '';
                             opts[3].value = q.opt4 || '';
+                            const optMedia = card.querySelectorAll('.opt-media-val');
+                            optMedia[0].value = q.opt1Media || '';
+                            optMedia[1].value = q.opt2Media || '';
+                            optMedia[2].value = q.opt3Media || '';
+                            optMedia[3].value = q.opt4Media || '';
                             const radios = card.querySelectorAll('input[type="radio"]');
                             if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                             card.querySelector('.q-exp').value = q.exp || '';
@@ -9620,6 +9669,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             const timeInput = card.querySelector('.q-time-limit');
                             if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
                             const mediaInput = card.querySelector('.q-media-input');
+                            const mediaTypeSelect = card.querySelector('.q-media-type');
+                            if (mediaTypeSelect) mediaTypeSelect.value = q.mediaType || 'photo';
                             if (mediaInput) {
                                 if (q.mediaUrl) mediaInput.value = q.mediaUrl;
                                 else if (q.mediaFileId) mediaInput.value = q.mediaFileId;
@@ -9671,36 +9722,54 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             cards.forEach(card => {
                 const text = card.querySelector('.q-text').value.trim();
                 const optInputs = card.querySelectorAll('.opt-val');
-                const op1 = optInputs[0].value.trim();
-                const op2 = optInputs[1].value.trim();
-                const op3 = optInputs[2].value.trim();
-                const op4 = optInputs[3].value.trim();
+                const optMediaInputs = card.querySelectorAll('.opt-media-val');
+                const optTexts = [
+                    optInputs[0].value.trim(),
+                    optInputs[1].value.trim(),
+                    optInputs[2].value.trim(),
+                    optInputs[3].value.trim()
+                ];
 
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
 
-                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+                if (!text || optTexts.some(t => !t)) hasError = true;
 
-                const options = [op1, op2, op3, op4];
+                const options = optTexts.map((optText, i) => {
+                    const mediaVal = optMediaInputs[i] ? optMediaInputs[i].value.trim() : '';
+                    if (!mediaVal) return optText;
+                    const optObj = { text: optText, media_type: 'photo' };
+                    if (mediaVal.match(/^https?:\\/\\//)) {
+                        optObj.media_url = mediaVal;
+                        if (mediaVal.match(/\\.(mp4|webm|mov)/i)) optObj.media_type = 'video';
+                        else if (mediaVal.match(/\\.(mp3|ogg|wav|m4a|flac|aac)/i)) optObj.media_type = 'audio';
+                    } else {
+                        optObj.media_id = mediaVal;
+                    }
+                    return optObj;
+                });
+
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                 const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
                 let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                let mediaUrl = null, mediaFileId = null;
+                let mediaUrl = null, mediaFileId = null, mediaType = null;
                 if (mediaValue) {
                     if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
                     else mediaFileId = mediaValue;
+                    mediaType = (mediaTypeSelect && mediaTypeSelect.value) || 'photo';
                 }
 
                 questions.push({
                     question: text,
                     options: options,
-                    answer: options[ansIndex],
+                    answer: optTexts[ansIndex],
                     explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                     media_url: mediaUrl || null,
                     media_file_id: mediaFileId || null,
-                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    media_type: mediaType,
                     time_limit: timeLimit || null,
                     is_rapid_fire: card.querySelector('.q-rapid').checked
                 });
@@ -9883,13 +9952,16 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .q-card { background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
         .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; }
         .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-        .option-card { display: flex; align-items: center; padding: 4px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .option-card { display: flex; flex-direction: column; align-items: stretch; padding: 4px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
         .option-card input[type="radio"] { display: none; }
+        .opt-main-row { display: flex; align-items: center; }
         .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
         .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
         .option-card.selected .radio-custom { border-color: var(--accent); background: var(--accent); }
         .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
         .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
+        .option-card .opt-media-val { margin: 0 0 8px 32px; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 6px 0 2px; cursor: text; }
+        .option-card .opt-media-val::placeholder { color: #b0b0b0; }
         .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
 
         .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
@@ -9938,6 +10010,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
         .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
         .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
+        .media-input-row select.q-media-type:focus { border-color: var(--accent); }
         .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
 
         .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
@@ -10114,11 +10188,14 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         const card = document.getElementById(\`edit-q-card-\${id}\`);
                         card.querySelector('.q-text').value = q.question;
                         const opts = card.querySelectorAll('.opt-val');
+                        const optMedia = card.querySelectorAll('.opt-media-val');
 
-                        opts[0].value = typeof q.options[0] === 'object' ? (q.options[0].text || '') : (q.options[0] || '');
-                        opts[1].value = typeof q.options[1] === 'object' ? (q.options[1].text || '') : (q.options[1] || '');
-                        opts[2].value = typeof q.options[2] === 'object' ? (q.options[2].text || '') : (q.options[2] || '');
-                        opts[3].value = typeof q.options[3] === 'object' ? (q.options[3].text || '') : (q.options[3] || '');
+                        for (let i = 0; i < 4; i++) {
+                            const opt = q.options[i];
+                            const isObj = opt && typeof opt === 'object';
+                            opts[i].value = isObj ? (opt.text || '') : (opt || '');
+                            optMedia[i].value = isObj ? (opt.media_id || opt.media_url || opt.media_file_id || '') : '';
+                        }
 
                         const ansIndex = q.options.findIndex(opt => {
                             const optText = typeof opt === 'object' ? opt.text : opt;
@@ -10134,6 +10211,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         if (timeInput && q.time_limit) timeInput.value = q.time_limit;
 
                         const mediaInput = card.querySelector('.q-media-input');
+                        const mediaTypeSelect = card.querySelector('.q-media-type');
+                        if (mediaTypeSelect) mediaTypeSelect.value = q.media_type || 'photo';
                         if (mediaInput) {
                             if (q.media_url) mediaInput.value = q.media_url;
                             else if (q.media_file_id) mediaInput.value = q.media_file_id;
@@ -10174,7 +10253,12 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
 
                 <div class="media-input-row">
-                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id" style="padding: 10px;">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id (photo/video/audio)" style="padding: 10px;">
+                    <select class="q-media-type" title="Media type (used when pasting a file_id)">
+                        <option value="photo">Photo</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
                     <button class="clear-media" onclick="clearMedia(this)">✕</button>
                 </div>
                 <div class="media-preview" id="edit-preview-\${id}" style="display:none;"></div>
@@ -10186,24 +10270,36 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 <div class="options-group">
                     <label class="option-card selected">
-                        <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 1" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="edit-q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 2" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="edit-q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="edit-q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 3" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="edit-q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <input type="radio" name="edit-q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 4" required>
+                        <div class="opt-main-row">
+                            <input type="radio" name="edit-q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        </div>
+                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                 </div>
                 <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
@@ -10220,6 +10316,11 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 updateMediaPreview(id, this.value.trim());
             });
 
+            const mediaTypeSelect = qDiv.querySelector('.q-media-type');
+            mediaTypeSelect.addEventListener('change', function() {
+                updateMediaPreview(id, mediaInput.value.trim());
+            });
+
             qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
                 tg.HapticFeedback.impactOccurred('light');
                 updateOptionStyles(\`edit-q-card-\${id}\`);
@@ -10232,6 +10333,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         function updateMediaPreview(qId, mediaValue) {
             const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
             if (!previewContainer) return;
+            const card = document.getElementById(\`edit-q-card-\${qId}\`);
+            const typeSelect = card ? card.querySelector('.q-media-type') : null;
             if (!mediaValue) {
                 previewContainer.style.display = 'none';
                 previewContainer.innerHTML = '';
@@ -10243,18 +10346,25 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             if (isUrl) {
                 const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
                 if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'photo';
                     html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
                 } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'video';
                     html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else if (['mp3','ogg','wav','m4a','flac','aac'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'audio';
+                    html = \`<audio controls style="width:100%;"><source src="\${mediaValue}"></audio>\`;
                 } else {
                     html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
                 }
             } else if (isFileId) {
+                const mType = typeSelect ? typeSelect.value : 'photo';
+                const icon = mType === 'audio' ? '🎵' : (mType === 'video' ? '🎬' : '🖼️');
                 html = \`
                     <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
-                        <span style="font-size:24px;">🖼️</span>
+                        <span style="font-size:24px;">\${icon}</span>
                         <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
-                        <span class="file-id-label">file_id</span>
+                        <span class="file-id-label">\${mType} file_id</span>
                     </div>
                 \`;
             }
@@ -10305,36 +10415,54 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             cards.forEach(card => {
                 const text = card.querySelector('.q-text').value.trim();
                 const optInputs = card.querySelectorAll('.opt-val');
-                const op1 = optInputs[0].value.trim();
-                const op2 = optInputs[1].value.trim();
-                const op3 = optInputs[2].value.trim();
-                const op4 = optInputs[3].value.trim();
+                const optMediaInputs = card.querySelectorAll('.opt-media-val');
+                const optTexts = [
+                    optInputs[0].value.trim(),
+                    optInputs[1].value.trim(),
+                    optInputs[2].value.trim(),
+                    optInputs[3].value.trim()
+                ];
 
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
 
-                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+                if (!text || optTexts.some(t => !t)) hasError = true;
 
-                const options = [op1, op2, op3, op4];
+                const options = optTexts.map((optText, i) => {
+                    const mediaVal = optMediaInputs[i] ? optMediaInputs[i].value.trim() : '';
+                    if (!mediaVal) return optText;
+                    const optObj = { text: optText, media_type: 'photo' };
+                    if (mediaVal.match(/^https?:\\/\\//)) {
+                        optObj.media_url = mediaVal;
+                        if (mediaVal.match(/\\.(mp4|webm|mov)/i)) optObj.media_type = 'video';
+                        else if (mediaVal.match(/\\.(mp3|ogg|wav|m4a|flac|aac)/i)) optObj.media_type = 'audio';
+                    } else {
+                        optObj.media_id = mediaVal;
+                    }
+                    return optObj;
+                });
+
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                 const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
                 let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                let mediaUrl = null, mediaFileId = null;
+                let mediaUrl = null, mediaFileId = null, mediaType = null;
                 if (mediaValue) {
                     if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
                     else mediaFileId = mediaValue;
+                    mediaType = (mediaTypeSelect && mediaTypeSelect.value) || 'photo';
                 }
 
                 questions.push({
                     question: text,
                     options: options,
-                    answer: options[ansIndex],
+                    answer: optTexts[ansIndex],
                     explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                     media_url: mediaUrl || null,
                     media_file_id: mediaFileId || null,
-                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    media_type: mediaType,
                     time_limit: timeLimit || null,
                     is_rapid_fire: card.querySelector('.q-rapid').checked
                 });
