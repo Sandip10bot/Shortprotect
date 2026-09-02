@@ -9332,7 +9332,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
     <div class="container" id="main-content">
         <div style="text-align: center;">
-            <img src="https://i.ibb.co/7tLt9bY8/photo-2026-09-02-12-06-30-7680908174005633048.jpg" 
+            <img src="https://i.ibb.co/hxH7P7Jk/photo-2026-09-02-12-17-37-7680911038748819472.jpg" 
                  alt="Quiz Creator Banner" 
                  style="width: 48px; height: 48px; display: block; margin: 0 auto 8px; border-radius: 12px; object-fit: cover;" />
             <div class="title">Create New Quiz</div>
