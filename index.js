@@ -9433,26 +9433,38 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 </div>
 
                 <div class="options-group">
-                    <label class="option-card selected">
-                        <input type="radio" name="q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 1" required>
-                    </label>
-                    <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 2" required>
-                    </label>
-                    <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 3" required>
-                    </label>
-                    <label class="option-card">
-                        <input type="radio" name="q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
-                        <input type="text" class="opt-val" placeholder="Option 4" required>
-                    </label>
+                    <div style="margin-bottom: 8px;">
+                        <label class="option-card selected">
+                            <input type="radio" name="q-\${id}-ans" value="0" checked>
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 1 Text" required>
+                        </label>
+                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 1 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="1">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 2 Text" required>
+                        </label>
+                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 2 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="2">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 3 Text" required>
+                        </label>
+                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 3 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label class="option-card">
+                            <input type="radio" name="q-\${id}-ans" value="3">
+                            <span class="radio-custom"></span>
+                            <input type="text" class="opt-val" placeholder="Option 4 Text" required>
+                        </label>
+                        <input type="text" class="form-control opt-media" placeholder="Optional: Option 4 Image (URL / file_id)" style="margin-top:4px; padding:8px; font-size:12px;">
+                    </div>
                 </div>
 
                 <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
@@ -9477,7 +9489,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 triggerAutoSave();
             }));
 
-            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .q-exp, .q-rapid').forEach(el => {
+            // Added .opt-media to auto-save triggers
+            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .opt-media, .q-exp, .q-rapid').forEach(el => {
                 el.addEventListener('input', triggerAutoSave);
                 el.addEventListener('change', triggerAutoSave);
             });
