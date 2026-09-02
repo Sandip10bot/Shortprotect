@@ -10340,7 +10340,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             cards.forEach(card => {
                 const text = card.querySelector('.q-text').value.trim();
                 const optInputs = card.querySelectorAll('.opt-val');
-                const optMedias = card.querySelectorAll('.opt-media'); // Naya option media select
+                const optMedias = card.querySelectorAll('.opt-media'); 
                 
                 const op1Text = optInputs[0].value.trim();
                 const op2Text = optInputs[1].value.trim();
@@ -10353,14 +10353,13 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 if (!text || !op1Text || !op2Text || !op3Text || !op4Text) hasError = true;
 
-                // NAYA: Build options array with media support
                 const options = [];
                 for(let i=0; i<4; i++) {
                     const txt = optInputs[i].value.trim();
                     const mediaVal = optMedias[i] ? optMedias[i].value.trim() : null;
                     
                     if (mediaVal) {
-                        const isOptUrl = mediaVal.match(/^https?:\\/\\//);
+                        const isOptUrl = mediaVal.match(/^https?:\/\//);
                         options.push({
                             text: txt,
                             media_id: !isOptUrl ? mediaVal : null,
@@ -10372,21 +10371,20 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     }
                 }
 
-                const answer = options[ansIndex].text || options[ansIndex]; // Answer as text
+                const answer = options[ansIndex].text || options[ansIndex]; 
 
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
                 
-                // Question Media & Audio Fix (SMART DETECT)
                 const mediaInput = card.querySelector('.q-media-input');
                 let mediaValue = mediaInput ? mediaInput.value.trim() : null;
                 let mediaUrl = null, mediaFileId = null, determinedMediaType = null;
                 
                 if (mediaValue) {
-                    if (mediaValue.match(/^https?:\\/\\//)) {
+                    if (mediaValue.match(/^https?:\/\//)) {
                         mediaUrl = mediaValue;
-                        if (mediaUrl.match(/\\.(mp4|webm|mov|avi)/i)) determinedMediaType = 'video';
-                        else if (mediaUrl.match(/\\.(mp3|m4a|ogg|wav)/i)) determinedMediaType = 'audio';
+                        if (mediaUrl.match(/\.(mp4|webm|mov|avi)/i)) determinedMediaType = 'video';
+                        else if (mediaUrl.match(/\.(mp3|m4a|ogg|wav)/i)) determinedMediaType = 'audio';
                         else determinedMediaType = 'photo';
                     } else {
                         mediaFileId = mediaValue;
@@ -10412,24 +10410,26 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 return tg.HapticFeedback.notificationOccurred('error');
             }
 
+            // Naya Payload Backend ke naye rule ke hisaab se
             const payload = {
-                userId,
-                quizId: currentEditQuizId,
-                title,
+                title: title,
                 description: desc,
                 time_per_question: parseInt(time),
-                questions
+                questions: questions
             };
 
             tg.HapticFeedback.impactOccurred('heavy');
             
             try {
-                // Change endpoint according to your actual edit API URL if it's different.
-                const res = await fetch('/api/quiz/manage/edit', {
-                    method: 'POST',
+                // Sahi URL format (Jisme URL params mein hi userId aur quizId ja raha hai)
+                const endpointUrl = `/api/quiz/manage/edit/${userId}/${currentEditQuizId}`;
+                
+                const res = await fetch(endpointUrl, {
+                    method: 'PUT', // POST ki jagah PUT
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+                
                 const data = await res.json();
 
                 if (data.success) {
@@ -10444,6 +10444,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 alert('Error saving quiz: ' + e.message);
             }
         }
+
 
         // ================= Utility Functions =================
         function removeEditQuestion(id) {
