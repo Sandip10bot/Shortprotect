@@ -9569,6 +9569,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 const textNode = card.querySelector('.q-text');
                 if (!textNode) return;
                 const opts = card.querySelectorAll('.opt-val');
+                const optMedias = card.querySelectorAll('.opt-media'); // Naya option media fetch
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
@@ -9584,9 +9585,13 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 data.questions.push({
                     text: textNode.value,
                     opt1: opts[0] ? opts[0].value : '',
+                    opt1Media: optMedias[0] ? optMedias[0].value.trim() : '',
                     opt2: opts[1] ? opts[1].value : '',
+                    opt2Media: optMedias[1] ? optMedias[1].value.trim() : '',
                     opt3: opts[2] ? opts[2].value : '',
+                    opt3Media: optMedias[2] ? optMedias[2].value.trim() : '',
                     opt4: opts[3] ? opts[3].value : '',
+                    opt4Media: optMedias[3] ? optMedias[3].value.trim() : '',
                     ansIndex: ansIndex,
                     exp: card.querySelector('.q-exp').value,
                     isRapid: card.querySelector('.q-rapid').checked,
@@ -9600,6 +9605,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             indicator.classList.add('show');
             setTimeout(() => indicator.classList.remove('show'), 1500);
         }
+
 
         function triggerAutoSave() {
             clearTimeout(saveTimeout);
@@ -9622,10 +9628,20 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             const card = document.getElementById(\`q-card-\${id}\`);
                             card.querySelector('.q-text').value = q.text || '';
                             const opts = card.querySelectorAll('.opt-val');
+                            const optMedias = card.querySelectorAll('.opt-media'); // Naya option media bind
+                            
                             opts[0].value = q.opt1 || '';
                             opts[1].value = q.opt2 || '';
                             opts[2].value = q.opt3 || '';
                             opts[3].value = q.opt4 || '';
+                            
+                            if (optMedias.length === 4) {
+                                optMedias[0].value = q.opt1Media || '';
+                                optMedias[1].value = q.opt2Media || '';
+                                optMedias[2].value = q.opt3Media || '';
+                                optMedias[3].value = q.opt4Media || '';
+                            }
+                            
                             const radios = card.querySelectorAll('input[type="radio"]');
                             if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                             card.querySelector('.q-exp').value = q.exp || '';
@@ -9650,6 +9666,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 addQuestion();
             }
         }
+
 
         function clearDrafts() {
             if(confirm("Delete all drafted questions?")) {
@@ -9684,36 +9701,69 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             cards.forEach(card => {
                 const text = card.querySelector('.q-text').value.trim();
                 const optInputs = card.querySelectorAll('.opt-val');
-                const op1 = optInputs[0].value.trim();
-                const op2 = optInputs[1].value.trim();
-                const op3 = optInputs[2].value.trim();
-                const op4 = optInputs[3].value.trim();
+                const optMedias = card.querySelectorAll('.opt-media'); // Naya option media select
+                
+                const op1Text = optInputs[0].value.trim();
+                const op2Text = optInputs[1].value.trim();
+                const op3Text = optInputs[2].value.trim();
+                const op4Text = optInputs[3].value.trim();
 
                 const radios = card.querySelectorAll('input[type="radio"]');
                 let ansIndex = 0;
                 radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
 
-                if (!text || !op1 || !op2 || !op3 || !op4) hasError = true;
+                if (!text || !op1Text || !op2Text || !op3Text || !op4Text) hasError = true;
 
-                const options = [op1, op2, op3, op4];
+                // NAYA: Build options array with media support
+                const options = [];
+                for(let i=0; i<4; i++) {
+                    const txt = optInputs[i].value.trim();
+                    const mediaVal = optMedias[i] ? optMedias[i].value.trim() : null;
+                    
+                    if (mediaVal) {
+                        const isOptUrl = mediaVal.match(/^https?:\\/\\//);
+                        options.push({
+                            text: txt,
+                            media_id: !isOptUrl ? mediaVal : null,
+                            media_url: isOptUrl ? mediaVal : null,
+                            media_type: 'photo' // Options sirf photo support karte hain
+                        });
+                    } else {
+                        options.push(txt);
+                    }
+                }
+
+                const answer = options[ansIndex].text || options[ansIndex]; // Save correct answer as text
+
                 const timeInput = card.querySelector('.q-time-limit');
                 const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                
+                // Question Media & Audio Fix (SMART DETECT)
                 const mediaInput = card.querySelector('.q-media-input');
                 let mediaValue = mediaInput ? mediaInput.value.trim() : null;
-                let mediaUrl = null, mediaFileId = null;
+                let mediaUrl = null, mediaFileId = null, determinedMediaType = null;
+                
                 if (mediaValue) {
-                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
-                    else mediaFileId = mediaValue;
+                    if (mediaValue.match(/^https?:\\/\\//)) {
+                        mediaUrl = mediaValue;
+                        if (mediaUrl.match(/\\.(mp4|webm|mov|avi)/i)) determinedMediaType = 'video';
+                        else if (mediaUrl.match(/\\.(mp3|m4a|ogg|wav)/i)) determinedMediaType = 'audio';
+                        else determinedMediaType = 'photo';
+                    } else {
+                        mediaFileId = mediaValue;
+                        // Audio auto-detection based on Telegram file_id patterns
+                        determinedMediaType = (mediaFileId.startsWith('CQ') || mediaFileId.startsWith('Aw')) ? 'audio' : 'photo';
+                    }
                 }
 
                 questions.push({
                     question: text,
                     options: options,
-                    answer: options[ansIndex],
+                    answer: answer,
                     explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
                     media_url: mediaUrl || null,
                     media_file_id: mediaFileId || null,
-                    media_type: mediaUrl ? (mediaUrl.match(/\\.(mp4|webm|mov)/i) ? 'video' : 'photo') : null,
+                    media_type: determinedMediaType, // Ab yeh gracefully "audio" detect karega
                     time_limit: timeLimit || null,
                     is_rapid_fire: card.querySelector('.q-rapid').checked
                 });
@@ -9737,14 +9787,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             document.getElementById('loading').style.display = 'block';
             tg.HapticFeedback.impactOccurred('heavy');
 
-            try {
-                const res = await fetch('/api/quiz/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-
+            fetch('/api/quiz/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json()).then(data => {
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
                     triggerConfetti();
@@ -9786,13 +9833,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 } else {
                     throw new Error(data.error);
                 }
-            } catch (e) {
+            }).catch(e => {
                 alert('Error creating quiz: ' + e.message);
                 document.getElementById('quiz-form').style.display = 'block';
                 document.getElementById('actionBar').classList.add('visible');
                 document.getElementById('loading').style.display = 'none';
-            }
+            });
         }
+
+
 
         loadState();
     </script>
