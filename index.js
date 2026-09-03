@@ -9257,23 +9257,46 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .btn-add:active { transform: scale(0.98); }
         .btn-add svg { width: 20px; height: 20px; fill: var(--accent); }
 
-        .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-        .option-card {
-            display: flex; flex-direction: column; align-items: stretch; padding: 4px 12px;
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 12px; cursor: pointer; transition: all 0.2s;
+        .options-group {
+            display: flex; flex-direction: column; margin: 14px 0;
+            border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
         }
+        .option-card {
+            display: flex; align-items: center; gap: 12px; padding: 0 12px;
+            background: var(--bg); cursor: pointer; transition: background 0.15s;
+        }
+        .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
         .option-card input[type="radio"] { display: none; }
-        .opt-main-row { display: flex; align-items: center; }
-        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
 
-        .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
-        .option-card.selected .radio-custom { border-color: var(--accent); background: var(--accent); }
-        .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
+        .radio-custom {
+            width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0;
+            display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease;
+        }
+        .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
+        .option-card.selected .radio-custom::after {
+            content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px;
+            border-right: 2px solid #fff; border-bottom: 2px solid #fff;
+            transform: translate(-50%, -55%) rotate(45deg);
+        }
 
-        .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
+        .opt-body { flex: 1; min-width: 0; }
+        .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
+        .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
         .option-card .opt-val::placeholder { color: #a0a0a0; }
-        .option-card .opt-media-val { margin: 0 0 8px 32px; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 6px 0 2px; cursor: text; }
+
+        .opt-attach-btn {
+            background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; color: #a0a0a0; cursor: pointer;
+        }
+        .opt-attach-btn svg { width: 20px; height: 20px; }
+        .opt-attach-btn.has-media { color: var(--accent); }
+
+        .option-card .opt-media-val {
+            display: none; width: 100%; background: transparent; border: none;
+            border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none;
+            padding: 8px 0 10px; cursor: text;
+        }
+        .option-card .opt-media-val.show { display: block; }
         .option-card .opt-media-val::placeholder { color: #b0b0b0; }
 
         .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
@@ -9391,6 +9414,19 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         let questionCount = 0;
         let saveTimeout;
 
+        const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
+
+        function toggleOptMedia(e, btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const body = btn.closest('.opt-body');
+            const mediaInput = body.querySelector('.opt-media-val');
+            const showing = mediaInput.classList.toggle('show');
+            btn.classList.toggle('has-media', showing || mediaInput.value.trim().length > 0);
+            if (showing) mediaInput.focus();
+            triggerAutoSave();
+        }
+
         function triggerConfetti() {
             const end = Date.now() + 1500;
             (function frame() {
@@ -9444,36 +9480,48 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
                 <div class="options-group">
                     <label class="option-card selected">
-                        <div class="opt-main-row">
-                            <input type="radio" name="q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        <input type="radio" name="q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 1" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        <input type="radio" name="q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 2" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        <input type="radio" name="q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 3" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        <input type="radio" name="q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 4" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                 </div>
 
@@ -9508,6 +9556,13 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .opt-media-val, .q-exp, .q-rapid').forEach(el => {
                 el.addEventListener('input', triggerAutoSave);
                 el.addEventListener('change', triggerAutoSave);
+            });
+
+            qDiv.querySelectorAll('.opt-media-val').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    const btn = inp.closest('.opt-body').querySelector('.opt-attach-btn');
+                    if (btn) btn.classList.toggle('has-media', inp.value.trim().length > 0);
+                });
             });
 
             tg.HapticFeedback.selectionChanged();
@@ -9662,6 +9717,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             optMedia[1].value = q.opt2Media || '';
                             optMedia[2].value = q.opt3Media || '';
                             optMedia[3].value = q.opt4Media || '';
+                            optMedia.forEach(inp => {
+                                const has = inp.value.trim().length > 0;
+                                inp.classList.toggle('show', has);
+                                const btn = inp.closest('.opt-body') ? inp.closest('.opt-body').querySelector('.opt-attach-btn') : null;
+                                if (btn) btn.classList.toggle('has-media', has);
+                            });
                             const radios = card.querySelectorAll('input[type="radio"]');
                             if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
                             card.querySelector('.q-exp').value = q.exp || '';
@@ -9951,16 +10012,22 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
         .q-card { background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
         .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; }
-        .options-group { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
-        .option-card { display: flex; flex-direction: column; align-items: stretch; padding: 4px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .options-group { display: flex; flex-direction: column; margin: 14px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .option-card { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--bg); cursor: pointer; transition: background 0.15s; }
+        .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
         .option-card input[type="radio"] { display: none; }
-        .opt-main-row { display: flex; align-items: center; }
-        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; margin-right: 10px; flex-shrink: 0; transition: all 0.2s; }
-        .option-card.selected { border-color: var(--accent); background: rgba(42,171,238,0.08); }
-        .option-card.selected .radio-custom { border-color: var(--accent); background: var(--accent); }
-        .option-card.selected .radio-custom::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; font-weight: 900; }
-        .option-card .opt-val { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; padding: 10px 0; }
-        .option-card .opt-media-val { margin: 0 0 8px 32px; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 6px 0 2px; cursor: text; }
+        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease; }
+        .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
+        .option-card.selected .radio-custom::after { content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -55%) rotate(45deg); }
+        .opt-body { flex: 1; min-width: 0; }
+        .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
+        .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
+        .option-card .opt-val::placeholder { color: #a0a0a0; }
+        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #a0a0a0; cursor: pointer; }
+        .opt-attach-btn svg { width: 20px; height: 20px; }
+        .opt-attach-btn.has-media { color: var(--accent); }
+        .option-card .opt-media-val { display: none; width: 100%; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 8px 0 10px; cursor: text; }
+        .option-card .opt-media-val.show { display: block; }
         .option-card .opt-media-val::placeholder { color: #b0b0b0; }
         .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
 
@@ -10108,6 +10175,18 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         let currentEditQuizId = null;
         let editQuestionCount = 0;
 
+        const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
+
+        function toggleOptMedia(e, btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const body = btn.closest('.opt-body');
+            const mediaInput = body.querySelector('.opt-media-val');
+            const showing = mediaInput.classList.toggle('show');
+            btn.classList.toggle('has-media', showing || mediaInput.value.trim().length > 0);
+            if (showing) mediaInput.focus();
+        }
+
         async function loadQuizzes() {
             const container = document.getElementById('quiz-list-container');
             try {
@@ -10196,6 +10275,12 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                             opts[i].value = isObj ? (opt.text || '') : (opt || '');
                             optMedia[i].value = isObj ? (opt.media_id || opt.media_url || opt.media_file_id || '') : '';
                         }
+                        optMedia.forEach(inp => {
+                            const has = inp.value.trim().length > 0;
+                            inp.classList.toggle('show', has);
+                            const btn = inp.closest('.opt-body') ? inp.closest('.opt-body').querySelector('.opt-attach-btn') : null;
+                            if (btn) btn.classList.toggle('has-media', has);
+                        });
 
                         const ansIndex = q.options.findIndex(opt => {
                             const optText = typeof opt === 'object' ? opt.text : opt;
@@ -10270,36 +10355,48 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 <div class="options-group">
                     <label class="option-card selected">
-                        <div class="opt-main-row">
-                            <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 1" required>
+                        <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 1" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="edit-q-\${id}-ans" value="1">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 2" required>
+                        <input type="radio" name="edit-q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 2" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="edit-q-\${id}-ans" value="2">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 3" required>
+                        <input type="radio" name="edit-q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 3" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                     <label class="option-card">
-                        <div class="opt-main-row">
-                            <input type="radio" name="edit-q-\${id}-ans" value="3">
-                            <span class="radio-custom"></span>
-                            <input type="text" class="opt-val" placeholder="Option 4" required>
+                        <input type="radio" name="edit-q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 4" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                         </div>
-                        <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
                     </label>
                 </div>
                 <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
@@ -10325,6 +10422,13 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 tg.HapticFeedback.impactOccurred('light');
                 updateOptionStyles(\`edit-q-card-\${id}\`);
             }));
+
+            qDiv.querySelectorAll('.opt-media-val').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    const btn = inp.closest('.opt-body').querySelector('.opt-attach-btn');
+                    if (btn) btn.classList.toggle('has-media', inp.value.trim().length > 0);
+                });
+            });
 
             tg.HapticFeedback.selectionChanged();
             return id;
