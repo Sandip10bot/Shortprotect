@@ -9938,15 +9938,26 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
         :root {
             --bg: #ffffff;
-            --card: #f4f4f5;
-            --text: #000000;
-            --hint: #707579;
+            --surface: #ffffff;
+            --card: #f6f7f9;
+            --text: #0b0c0e;
+            --hint: #6b7280;
             --accent: #2AABEE;
             --accent-dark: #1e96d2;
-            --border: #e7e7e7;
-            --destructive: #e53935;
-            --success: #31b545;
-            --warning: #f5a623;
+            --accent-soft: rgba(42,171,238,0.10);
+            --border: #ececef;
+            --destructive: #e11d48;
+            --destructive-soft: rgba(225,29,72,0.08);
+            --success: #16a34a;
+            --success-soft: rgba(22,163,74,0.10);
+            --warning: #d97706;
+            --warning-soft: rgba(217,119,6,0.10);
+            --radius-lg: 22px;
+            --radius-md: 14px;
+            --radius-sm: 10px;
+            --shadow-sm: 0 1px 2px rgba(15,15,20,0.04), 0 1px 3px rgba(15,15,20,0.05);
+            --shadow-md: 0 6px 16px rgba(15,15,20,0.06), 0 2px 4px rgba(15,15,20,0.04);
+            --shadow-lift: 0 16px 32px rgba(15,15,20,0.10), 0 4px 10px rgba(15,15,20,0.06);
         }
 
         body {
@@ -9956,136 +9967,233 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             color: var(--text);
             min-height: 100vh;
             -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.01em;
         }
 
         .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
-        .header-title { font-weight: 800; font-size: 26px; text-align: left; margin: 10px 0 24px 4px; color: var(--text); letter-spacing: -0.3px; }
 
-        #list-view, #edit-view { animation: fadeIn 0.35s ease; }
-        .quiz-card {
-            background: var(--bg);
+        /* ---------- Profile header ---------- */
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 20px;
+            background: var(--surface);
             border: 1px solid var(--border);
-            padding: 18px;
-            border-radius: 16px;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 22px;
+        }
+        .profile-avatar { flex-shrink: 0; }
+        .profile-avatar-img {
+            width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+            box-shadow: var(--shadow-sm); border: 2px solid #fff; display: block;
+        }
+        .profile-avatar-fallback {
+            width: 52px; height: 52px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: 700; font-size: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .profile-info { min-width: 0; }
+        .profile-name { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .profile-sub { font-size: 13px; color: var(--hint); margin-top: 3px; font-weight: 500; }
+
+        .header-title { font-weight: 800; font-size: 24px; text-align: left; margin: 4px 4px 18px; color: var(--text); letter-spacing: -0.4px; }
+
+        #list-view, #edit-view { animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        /* ---------- Quiz card ---------- */
+        .quiz-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: var(--radius-lg);
             margin-bottom: 16px;
             display: flex; flex-direction: column;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, border-color 0.28s ease;
+        }
+        .quiz-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lift);
+            border-color: rgba(42,171,238,0.25);
         }
 
-        .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-        .quiz-card-desc { font-size: 13px; color: var(--hint); margin-bottom: 14px; line-height: 1.45; }
-        .quiz-date { font-size: 11px; color: #a0a0a0; margin-bottom: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
+        .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; letter-spacing: -0.2px; }
+        .quiz-card-desc { font-size: 13.5px; color: var(--hint); margin-bottom: 14px; line-height: 1.5; }
 
-        .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .quiz-date { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a3a5ab; margin-bottom: 16px; font-weight: 600; letter-spacing: 0.2px; }
+        .quiz-date svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+        .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
         .tag-glass {
             background: var(--card);
             border: 1px solid var(--border);
-            padding: 5px 10px;
-            border-radius: 16px;
-            font-size: 11px;
+            padding: 6px 11px;
+            border-radius: 20px;
+            font-size: 11.5px;
             font-weight: 600;
             color: var(--text);
-            display: flex; align-items: center; gap: 4px;
+            display: flex; align-items: center; gap: 5px;
         }
+        .tag-glass svg { width: 13px; height: 13px; opacity: 0.7; flex-shrink: 0; }
 
-        .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
-        .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; margin-bottom: 10px; }
+        .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 0; }
 
         .btn {
-            padding: 12px 8px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px;
-            cursor: pointer; transition: transform 0.15s, opacity 0.15s; text-align: center;
-            display: flex; align-items: center; justify-content: center; gap: 4px;
+            padding: 13px 8px; border-radius: var(--radius-md); border: none; font-weight: 700; font-size: 13px;
+            cursor: pointer; transition: transform 0.15s ease, opacity 0.15s ease, background 0.2s ease; text-align: center;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
         }
+        .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .btn:hover { opacity: 0.88; }
         .btn:active { transform: scale(0.96); opacity: 0.85; }
 
-        .btn-start-grp { background: rgba(49,181,69,0.12); color: var(--success); }
-        .btn-start-pm  { background: rgba(42,171,238,0.12); color: var(--accent); }
-        .btn-edit      { background: rgba(245,166,35,0.12); color: var(--warning); font-size: 12px; }
-        .btn-clone     { background: rgba(42,171,238,0.12); color: var(--accent); font-size: 12px; }
-        .btn-delete    { background: rgba(229,57,53,0.1); color: var(--destructive); font-size: 12px; }
+        .btn-secondary { padding: 11px 6px; font-size: 12px; }
+
+        .btn-start-grp { background: var(--success-soft); color: var(--success); }
+        .btn-start-pm  { background: var(--accent-soft); color: var(--accent); }
+        .btn-edit      { background: var(--warning-soft); color: var(--warning); }
+        .btn-clone     { background: var(--accent-soft); color: var(--accent); }
+        .btn-delete    { background: var(--destructive-soft); color: var(--destructive); }
+
+        .btn-close-app {
+            width: 100%; padding: 15px; margin-top: 10px; border-radius: var(--radius-md);
+            background: var(--card); border: 1px solid var(--border); color: var(--text);
+            font-weight: 700; font-size: 15px; cursor: pointer;
+            transition: background 0.2s ease, transform 0.15s ease;
+        }
+        .btn-close-app:hover { background: #ececef; }
+        .btn-close-app:active { transform: scale(0.98); }
+
+        /* ---------- Empty state ---------- */
+        .empty-state { text-align: center; padding: 60px 20px 40px; }
+        .empty-state svg { width: 52px; height: 52px; color: #c7c9ce; margin-bottom: 14px; }
+        .empty-state p { color: var(--hint); font-size: 14.5px; margin: 0; }
 
         .form-group { margin-bottom: 14px; text-align: left; }
         .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
-        .form-control { width: 100%; padding: 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s; }
-        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
+        .form-control { width: 100%; padding: 14px; border-radius: var(--radius-md); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px var(--accent-soft); }
         textarea.form-control { resize: none; font-family: inherit; }
 
-        .q-card { background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 16px; margin-bottom: 16px; }
-        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; }
-        .options-group { display: flex; flex-direction: column; margin: 14px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-        .option-card { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--bg); cursor: pointer; transition: background 0.15s; }
+        .q-card { background: var(--surface); border: 1px solid var(--border); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px; box-shadow: var(--shadow-sm); }
+        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .options-group { display: flex; flex-direction: column; margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+        .option-card { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--surface); cursor: pointer; transition: background 0.15s; }
         .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
         .option-card input[type="radio"] { display: none; }
-        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0; display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease; }
+        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #d1d3d8; display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease; }
         .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
         .option-card.selected .radio-custom::after { content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -55%) rotate(45deg); }
         .opt-body { flex: 1; min-width: 0; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
-        .option-card .opt-val::placeholder { color: #a0a0a0; }
-        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #a0a0a0; cursor: pointer; }
-        .opt-attach-btn svg { width: 20px; height: 20px; }
+        .option-card .opt-val::placeholder { color: #a3a5ab; }
+        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #a3a5ab; cursor: pointer; transition: color 0.2s; }
+        .opt-attach-btn svg { width: 19px; height: 19px; }
         .opt-attach-btn.has-media { color: var(--accent); }
         .option-card .opt-media-val { display: none; width: 100%; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 8px 0 10px; cursor: text; }
         .option-card .opt-media-val.show { display: block; }
-        .option-card .opt-media-val::placeholder { color: #b0b0b0; }
-        .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
+        .option-card .opt-media-val::placeholder { color: #b0b2b8; }
+        .q-exp { border: none; background: var(--card); border-radius: var(--radius-md); padding: 12px; }
 
         .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e2e4e8; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
         .toggle-switch:checked { background: var(--accent); }
         .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         .toggle-switch:checked::after { transform: translateX(20px); }
-        .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .btn-remove { background: var(--destructive-soft); color: var(--destructive); border: none; padding: 7px 12px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.15s; }
+        .btn-remove:hover { opacity: 0.8; }
+        .btn-remove svg { width: 13px; height: 13px; }
 
-        .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
+        .loader { border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         .clone-modal {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            background: rgba(10,10,12,0.4); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
             z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
             animation: fadeIn 0.25s ease;
         }
         .clone-modal.open { display: flex; }
 
         .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .search-header h3 { margin: 0; color: var(--text); font-size: 20px; font-weight: 700; }
-        .close-search-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); width: 32px; height: 32px; border-radius: 16px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .search-header h3 { margin: 0; color: var(--text); font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+        .close-icon-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); width: 34px; height: 34px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; transition: background 0.2s, transform 0.15s; }
+        .close-icon-btn:hover { background: #ececef; }
+        .close-icon-btn:active { transform: scale(0.92); }
+        .close-icon-btn svg { width: 16px; height: 16px; }
 
-        .search-input-box { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; transition: border 0.2s; }
+        .search-input-box { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; transition: border 0.2s; }
         .search-input-box:focus-within { border-color: var(--accent); background: #fff; }
+        .search-input-box svg { width: 18px; height: 18px; color: var(--hint); flex-shrink: 0; }
         .search-input-box input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 16px; outline: none; }
-        .search-input-box input::placeholder { color: #a0a0a0; }
+        .search-input-box input::placeholder { color: #a3a5ab; }
 
         .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
-        .user-result { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 8px; border-radius: 14px; cursor: pointer; transition: all 0.15s; }
+        .search-hint { text-align: center; color: var(--hint); margin-top: 40px; font-size: 14px; }
+        .user-result { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; }
         .user-result:active { transform: scale(0.98); }
-        .user-result.selected { background: rgba(42,171,238,0.08); border: 1px solid rgba(42,171,238,0.35); }
-        .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #2AABEE, #1e96d2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; }
+        .user-result.selected { background: var(--accent-soft); border: 1px solid rgba(42,171,238,0.35); }
+        .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; flex-shrink: 0; }
 
         .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
-        .btn-confirm-clone { width: 100%; background: var(--accent); border: none; padding: 16px; border-radius: 14px; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; opacity: 0.4; transition: all 0.2s; pointer-events: none; }
-        .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 4px 14px rgba(42,171,238,0.35); }
+        .btn-confirm-clone { width: 100%; background: var(--accent); border: none; padding: 16px; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; opacity: 0.4; transition: all 0.2s; pointer-events: none; }
+        .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 6px 16px rgba(42,171,238,0.35); }
         .btn-confirm-clone.active:active { transform: scale(0.98); background: var(--accent-dark); }
 
-        .media-preview { margin: 6px 0 8px; border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 50px; position: relative; }
-        .media-preview img, .media-preview video { max-width: 100%; max-height: 160px; border-radius: 10px; display: block; }
+        .media-preview { margin: 6px 0 8px; border-radius: var(--radius-sm); overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 50px; position: relative; }
+        .media-preview img, .media-preview video { max-width: 100%; max-height: 160px; border-radius: 8px; display: block; }
         .media-preview .file-id-label { font-size: 10px; color: var(--hint); padding: 4px 8px; background: rgba(255,255,255,0.9); border-radius: 6px; position: absolute; bottom: 4px; right: 4px; pointer-events: none; }
+        .media-badge { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--accent-soft); border-radius: var(--radius-sm); width: 100%; }
+        .media-badge svg { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
+        .media-badge .file-name { font-size: 12px; color: var(--accent); word-break: break-all; }
 
         .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
-        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
+        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
         .media-input-row input:focus { border-color: var(--accent); }
-        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
+        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
         .media-input-row select.q-media-type:focus { border-color: var(--accent); }
-        .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
+        .media-input-row .clear-media { background: var(--destructive-soft); border: 1px solid rgba(225,29,72,0.2); color: var(--destructive); border-radius: var(--radius-sm); padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: opacity 0.15s; }
+        .media-input-row .clear-media:hover { opacity: 0.8; }
+        .media-input-row .clear-media svg { width: 14px; height: 14px; }
 
         .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
         .time-per-q input { flex: 1; padding: 10px; }
         .time-per-q .hint { font-size: 11px; color: var(--hint); }
 
         .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+
+        .btn-add-question {
+            width: 100%; background: var(--success-soft); color: var(--success); border: none;
+            padding: 15px; border-radius: var(--radius-md); font-weight: 700; font-size: 14.5px;
+            cursor: pointer; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: opacity 0.15s, transform 0.15s;
+        }
+        .btn-add-question:hover { opacity: 0.88; }
+        .btn-add-question:active { transform: scale(0.98); }
+
+        .edit-actions { display: flex; gap: 10px; margin-bottom: 30px; }
+        .btn-save-changes {
+            flex: 2; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); border: none;
+            padding: 16px; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 15px;
+            cursor: pointer; box-shadow: 0 8px 20px rgba(42,171,238,0.28);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: transform 0.15s, box-shadow 0.2s;
+        }
+        .btn-save-changes:hover { box-shadow: 0 10px 24px rgba(42,171,238,0.38); }
+        .btn-save-changes:active { transform: scale(0.98); }
+        .btn-cancel-edit {
+            flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+            color: var(--text); font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.15s;
+        }
+        .btn-cancel-edit:hover { background: #ececef; }
+        .btn-cancel-edit:active { transform: scale(0.98); }
     </style>
 </head>
 <body>
@@ -10093,11 +10201,21 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     <div class="container" id="main-content">
         <!-- Quiz List View -->
         <div id="list-view">
+            <div class="profile-header">
+                <div class="profile-avatar" id="profile-avatar">
+                    <div class="profile-avatar-fallback">Q</div>
+                </div>
+                <div class="profile-info">
+                    <div class="profile-name" id="profile-name">Quiz Creator</div>
+                    <div class="profile-sub" id="profile-sub">Loading your quizzes&hellip;</div>
+                </div>
+            </div>
+
             <h2 class="header-title">My Quizzes</h2>
             <div id="quiz-list-container">
                 <div class="loader"></div>
             </div>
-            <button onclick="tg.close()" style="width:100%; padding:16px; margin-top:10px; border-radius:14px; background:var(--card); border:1px solid var(--border); color:var(--text); font-weight:700; font-size:15px; cursor:pointer;">
+            <button class="btn-close-app" onclick="tg.close()">
                 Close Mini App
             </button>
         </div>
@@ -10106,7 +10224,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         <div id="edit-view" style="display: none;">
             <div class="search-header">
                 <h3>Edit Quiz</h3>
-                <button class="close-search-btn" onclick="closeEditView()">&times;</button>
+                <button class="close-icon-btn" onclick="closeEditView()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
             </div>
 
             <div class="quiz-card" style="margin-bottom: 24px;">
@@ -10126,17 +10246,17 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             <div id="edit-questions-container"></div>
 
-            <button class="btn btn-start-grp" style="width: 100%; margin-bottom: 20px; padding: 16px; justify-content:center; font-size:15px;" onclick="addEditQuestion()">
+            <button class="btn-add-question" onclick="addEditQuestion()">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                 Add New Question
             </button>
 
-            <div style="display: flex; gap: 10px; margin-bottom: 30px;">
-                <button style="flex: 2; background: var(--accent); border:none; padding:16px; border-radius:12px; color:#fff; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 4px 12px rgba(42,171,238,0.3); display:flex; align-items:center; justify-content:center; gap:8px;" onclick="submitEditQuiz()">
+            <div class="edit-actions">
+                <button class="btn-save-changes" onclick="submitEditQuiz()">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                     Save Changes
                 </button>
-                <button style="flex: 1; background: var(--card); border:1px solid var(--border); border-radius:12px; color:var(--text); font-weight:700; cursor:pointer;" onclick="closeEditView()">Cancel</button>
+                <button class="btn-cancel-edit" onclick="closeEditView()">Cancel</button>
             </div>
         </div>
     </div>
@@ -10145,16 +10265,18 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     <div class="clone-modal" id="cloneModal">
         <div class="search-header">
             <h3>Find User</h3>
-            <button class="close-search-btn" onclick="closeCloneModal()">&times;</button>
+            <button class="close-icon-btn" onclick="closeCloneModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
 
         <div class="search-input-box">
-            <span style="font-size: 18px; opacity: 0.6;">🔍</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
         </div>
 
         <div class="search-results" id="cloneSearchResults">
-            <p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>
+            <p class="search-hint">Type a username or ID to search</p>
         </div>
 
         <div class="clone-footer">
@@ -10177,6 +10299,40 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
         const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
 
+        const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+        const ICON_QUESTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.7 2.7 0 0 1 5.2.9c0 1.8-2.5 2.1-2.5 3.9"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></svg>';
+        const ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
+        const ICON_GAUGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-4"/><path d="M12 18V9"/><path d="M20 18V6"/></svg>';
+        const ICON_USERS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+        const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.3l6 3.7-6 3.7V8.3z" fill="currentColor" stroke="none"/></svg>';
+        const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+        const ICON_CLONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        const ICON_CALENDAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>';
+        const ICON_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
+        const ICON_CLOSE_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        const ICON_IMAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+        const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
+        const ICON_MUSIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+
+        function initProfile() {
+            const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
+            const nameEl = document.getElementById('profile-name');
+            const avatarWrap = document.getElementById('profile-avatar');
+            let displayName = 'Quiz Creator';
+            if (u) {
+                const full = [u.first_name, u.last_name].filter(Boolean).join(' ');
+                displayName = full || (u.username ? '@' + u.username : displayName);
+            }
+            nameEl.textContent = displayName;
+            if (u && u.photo_url) {
+                avatarWrap.innerHTML = \`<img src="\${u.photo_url}" class="profile-avatar-img" alt="\${displayName}">\`;
+            } else {
+                const initial = displayName.trim().charAt(0).toUpperCase() || 'Q';
+                avatarWrap.innerHTML = \`<div class="profile-avatar-fallback">\${initial}</div>\`;
+            }
+        }
+
         function toggleOptMedia(e, btn) {
             e.preventDefault();
             e.stopPropagation();
@@ -10189,12 +10345,14 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
         async function loadQuizzes() {
             const container = document.getElementById('quiz-list-container');
+            const subEl = document.getElementById('profile-sub');
             try {
                 const res = await fetch('/api/quiz/manage/list/' + userId);
                 const data = await res.json();
 
                 if (data.success && data.quizzes.length > 0) {
                     quizzes = data.quizzes;
+                    subEl.textContent = quizzes.length + (quizzes.length === 1 ? ' quiz created' : ' quizzes created');
                     let html = '';
                     quizzes.forEach(q => {
                         const dateObj = q.created_at ? new Date(q.created_at) : new Date();
@@ -10208,37 +10366,40 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                                 <div class="quiz-card-desc">\${desc}</div>
 
                                 <div class="quiz-tags">
-                                    <div class="tag-glass">📁 \${q.category}</div>
-                                    <div class="tag-glass">❓ \${q.total_questions} Qs</div>
-                                    <div class="tag-glass">⏱️ \${q.time_per_question}s</div>
-                                    <div class="tag-glass">🔥 \${difficulty}</div>
+                                    <div class="tag-glass">\${ICON_FOLDER} \${q.category}</div>
+                                    <div class="tag-glass">\${ICON_QUESTION} \${q.total_questions} Qs</div>
+                                    <div class="tag-glass">\${ICON_CLOCK} \${q.time_per_question}s</div>
+                                    <div class="tag-glass">\${ICON_GAUGE} \${difficulty}</div>
                                 </div>
 
-                                <div class="quiz-date">Created on \${dateStr}</div>
+                                <div class="quiz-date">\${ICON_CALENDAR} Created \${dateStr}</div>
 
                                 <div class="btn-group-2">
-                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/IQuizBot?startgroup=quiz_\${q._id}'); tg.close();">🚀 Start Group</button>
-                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/IQuizBot?start=quiz_\${q._id}'); tg.close();">🛠️ PM Test</button>
+                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/IQuizBot?startgroup=quiz_\${q._id}'); tg.close();">\${ICON_USERS} Start Group</button>
+                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/IQuizBot?start=quiz_\${q._id}'); tg.close();">\${ICON_PLAY} PM Test</button>
                                 </div>
 
                                 <div class="btn-group-3">
-                                    <button class="btn btn-edit" onclick="editQuiz('\${q._id}')">✏️ Edit</button>
-                                    <button class="btn btn-clone" onclick="openCloneModal('\${q._id}')">👯 Clone</button>
-                                    <button class="btn btn-delete" onclick="deleteQuiz('\${q._id}')">🗑️ Delete</button>
+                                    <button class="btn btn-secondary btn-edit" onclick="editQuiz('\${q._id}')">\${ICON_EDIT} Edit</button>
+                                    <button class="btn btn-secondary btn-clone" onclick="openCloneModal('\${q._id}')">\${ICON_CLONE} Clone</button>
+                                    <button class="btn btn-secondary btn-delete" onclick="deleteQuiz('\${q._id}')">\${ICON_TRASH} Delete</button>
                                 </div>
                             </div>
                         \`;
                     });
                     container.innerHTML = html;
                 } else {
+                    quizzes = [];
+                    subEl.textContent = 'No quizzes yet';
                     container.innerHTML = \`
-                        <div style="text-align:center; padding: 50px 20px;">
-                            <div style="font-size:48px; margin-bottom:12px; filter: grayscale(1) opacity(0.5);">📭</div>
-                            <p style="color:var(--hint); font-size:15px;">You haven't created any quizzes yet.</p>
+                        <div class="empty-state">
+                            \${ICON_INBOX}
+                            <p>You haven't created any quizzes yet.</p>
                         </div>
                     \`;
                 }
             } catch (e) {
+                subEl.textContent = 'Unable to load quizzes';
                 container.innerHTML = '<p style="color:var(--destructive); text-align:center; margin-top:40px;">Failed to load quizzes.</p>';
             }
         }
@@ -10333,7 +10494,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             qDiv.innerHTML = \`
                 <div class="q-header">
                     <span>Question \${id}</span>
-                    <button class="btn-remove" onclick="removeEditQuestion(\${id})">✕ Remove</button>
+                    <button class="btn-remove" onclick="removeEditQuestion(\${id})">\${ICON_CLOSE_SM} Remove</button>
                 </div>
                 <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
 
@@ -10344,7 +10505,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                         <option value="video">Video</option>
                         <option value="audio">Audio</option>
                     </select>
-                    <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                    <button class="clear-media" onclick="clearMedia(this)">\${ICON_CLOSE_SM}</button>
                 </div>
                 <div class="media-preview" id="edit-preview-\${id}" style="display:none;"></div>
 
@@ -10463,11 +10624,11 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 }
             } else if (isFileId) {
                 const mType = typeSelect ? typeSelect.value : 'photo';
-                const icon = mType === 'audio' ? '🎵' : (mType === 'video' ? '🎬' : '🖼️');
+                const icon = mType === 'audio' ? ICON_MUSIC : (mType === 'video' ? ICON_VIDEO : ICON_IMAGE);
                 html = \`
-                    <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
-                        <span style="font-size:24px;">\${icon}</span>
-                        <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
+                    <div class="media-badge">
+                        \${icon}
+                        <span class="file-name">\${mediaValue}</span>
                         <span class="file-id-label">\${mType} file_id</span>
                     </div>
                 \`;
@@ -10563,7 +10724,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     question: text,
                     options: options,
                     answer: optTexts[ansIndex],
-                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Well done!',
                     media_url: mediaUrl || null,
                     media_file_id: mediaFileId || null,
                     media_type: mediaType,
@@ -10593,7 +10754,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
-                    alert("✅ Quiz Updated Successfully!");
+                    alert("Quiz updated successfully!");
                     closeEditView();
                     loadQuizzes();
                 } else {
@@ -10626,7 +10787,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             targetQuizId = quizId;
             targetUserId = null;
             document.getElementById('cloneSearchInput').value = '';
-            document.getElementById('cloneSearchResults').innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+            document.getElementById('cloneSearchResults').innerHTML = '<p class="search-hint">Type a username or ID to search</p>';
             const confirmBtn = document.getElementById('btnConfirmClone');
             confirmBtn.classList.remove('active');
             confirmBtn.innerText = "Select User First";
@@ -10643,7 +10804,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             const resultsDiv = document.getElementById('cloneSearchResults');
 
             if (query.length < 2) {
-                resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">Type a username or ID to search</p>';
+                resultsDiv.innerHTML = '<p class="search-hint">Type a username or ID to search</p>';
                 return;
             }
 
@@ -10667,7 +10828,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     });
                     resultsDiv.innerHTML = html;
                 } else {
-                    resultsDiv.innerHTML = '<p style="text-align:center; color:var(--hint); margin-top:40px; font-size: 14px;">No users found.</p>';
+                    resultsDiv.innerHTML = '<p class="search-hint">No users found.</p>';
                 }
             } catch(e) {
                 console.error("Search error:", e);
@@ -10701,10 +10862,10 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
-                    alert("✅ " + data.message);
+                    alert(data.message);
                     closeCloneModal();
                 } else {
-                    alert("❌ Error: " + data.error);
+                    alert("Error: " + data.error);
                     btn.innerText = "Try Again";
                     btn.classList.add('active');
                 }
@@ -10715,12 +10876,13 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             }
         }
 
+        initProfile();
         loadQuizzes();
     </script>
 </body>
 </html>
     `);
-});                
+});
 
 // ------------------------------------------------------------
 // 1. BACKEND REST APIs FOR MANAGING QUIZZES (UPDATED)
