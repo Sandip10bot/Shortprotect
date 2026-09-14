@@ -10945,7 +10945,8 @@ app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
         const existing = await quizMetadataCollection.findOne({ _id: quizId, created_by: userId });
         if (!existing) return res.status(404).json({ success: false, error: "Unauthorized." });
 
-        const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+        // Keep the exact same category that was originally set for this quiz
+        const category = existing.category;
 
         // Calculate average time per question if not set globally
         let avgTime = time_per_question || 15;
@@ -10992,6 +10993,7 @@ app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 });
+
 
 // Delete a quiz
 app.delete("/api/quiz/manage/delete/:userId/:quizId", async (req, res) => {
