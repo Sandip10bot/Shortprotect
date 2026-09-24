@@ -11554,6 +11554,152 @@ app.get("/api/saavn", (req, res) => {
     });
 });
 
+// ==========================================
+// /music  ->  search page built on /api/saavn/search (results open on jiosaavn.com)
+// ==========================================
+app.get("/music", (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music | MythoSerial</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #000; color: #fff; -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif;
+    background-image: radial-gradient(circle at 25% 0%, rgba(213,0,249,0.12), transparent 50%), radial-gradient(circle at 85% 100%, rgba(101,31,255,0.10), transparent 50%); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { margin: 0 0 18px; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .search { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 52px; border-radius: 16px;
+    background: rgba(28,28,30,0.72); border: 0.5px solid rgba(255,255,255,0.14); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); }
+  .search:focus-within { border-color: #b74bff; }
+  .search svg { flex: none; color: rgba(235,235,245,0.6); }
+  .search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: #fff; font: inherit; font-size: 16px; }
+  .tabs { display: flex; gap: 8px; margin: 14px 0 18px; overflow-x: auto; }
+  .tabs button { flex: none; padding: 8px 16px; border-radius: 999px; border: 0.5px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+    color: rgba(235,235,245,0.75); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .tabs button.on { background: linear-gradient(180deg, #b74bff, #9526e8); border-color: transparent; color: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips .label { width: 100%; font-size: 13px; color: rgba(235,235,245,0.5); }
+  .chip { padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 0.5px solid rgba(255,255,255,0.12);
+    color: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+  .status { min-height: 22px; margin: 4px 0 10px; color: rgba(235,235,245,0.6); font-size: 15px; }
+  .card { display: flex; align-items: center; gap: 14px; padding: 10px; margin-bottom: 10px; border-radius: 18px;
+    background: rgba(28,28,30,0.72); border: 0.5px solid rgba(255,255,255,0.10); }
+  .cover { flex: none; width: 56px; height: 56px; border-radius: 12px; object-fit: cover; background: rgba(255,255,255,0.08); }
+  .cover.round { border-radius: 50%; }
+  .meta { flex: 1; min-width: 0; }
+  .title, .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title { font-size: 16px; font-weight: 600; }
+  .sub { margin-top: 3px; font-size: 13px; color: rgba(235,235,245,0.55); }
+  .open { flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 12px; color: #fff; text-decoration: none;
+    font-size: 13px; font-weight: 600; background: linear-gradient(180deg, #b74bff, #9526e8); }
+  .note { margin-top: 26px; text-align: center; font-size: 12px; color: rgba(235,235,245,0.4); }
+  @media (max-width: 480px) { .open span { display: none; } .open { padding: 10px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Music</h1>
+  <label class="search">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Search songs, albums, artists" autocomplete="off" autofocus>
+  </label>
+  <div class="tabs" id="tabs">
+    <button class="on" data-type="songs">Songs</button>
+    <button data-type="albums">Albums</button>
+    <button data-type="artists">Artists</button>
+    <button data-type="playlists">Playlists</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="status" id="status"></div>
+  <div id="results"></div>
+  <div class="note">Search only. Tap Open to listen on JioSaavn.</div>
+</div>
+<script>
+(function () {
+  var type = "songs", timer = null, seq = 0;
+  var input = document.getElementById("q"), results = document.getElementById("results");
+  var status = document.getElementById("status"), chips = document.getElementById("chips");
+  var okUrl = new RegExp("^https://(www[.])?jiosaavn[.]com/");
+  var ICON = "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3h7v7'/><path d='M10 14L21 3'/><path d='M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5'/></svg>";
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function fmt(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+  function subtitle(x) {
+    var p = [];
+    var names = x.artists && x.artists.primary ? x.artists.primary.map(function (a) { return a.name; }).join(", ") : "";
+    if (names) p.push(names);
+    if (x.type === "song" && x.album && x.album.name) p.push(x.album.name);
+    if (x.type === "artist" && x.role) p.push(x.role);
+    if (x.year) p.push(x.year);
+    if (x.type === "song" && x.duration) p.push(fmt(x.duration));
+    if ((x.type === "album" || x.type === "playlist") && x.songCount) p.push(x.songCount + " songs");
+    return p.join(" \u00b7 ");
+  }
+  function card(x) {
+    var c = el("article", "card"), img = el("img", "cover" + (x.type === "artist" ? " round" : ""));
+    var im = x.image && (x.image[1] || x.image[0]);
+    if (im && im.url.indexOf("https://") === 0) { img.src = im.url; img.loading = "lazy"; }
+    img.alt = "";
+    var meta = el("div", "meta");
+    meta.appendChild(el("div", "title", x.name));
+    meta.appendChild(el("div", "sub", subtitle(x)));
+    c.appendChild(img); c.appendChild(meta);
+    if (okUrl.test(x.url || "")) {
+      var a = el("a", "open");
+      a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.innerHTML = ICON + "<span>Open</span>";
+      c.appendChild(a);
+    }
+    return c;
+  }
+  function search() {
+    var q = input.value.trim(), my = ++seq;
+    if (!q) { results.innerHTML = ""; status.textContent = ""; chips.style.display = ""; return; }
+    chips.style.display = "none";
+    status.textContent = "Searching...";
+    fetch("/api/saavn/search?type=" + type + "&limit=20&query=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (my !== seq) return;
+        results.innerHTML = "";
+        if (!j.success) { status.textContent = j.error || "Something went wrong."; return; }
+        var list = j.data.results || [];
+        status.textContent = list.length ? "" : 'No results for "' + q + '"';
+        list.forEach(function (x) { results.appendChild(card(x)); });
+      })
+      .catch(function () { if (my === seq) status.textContent = "Could not reach the server."; });
+  }
+  input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(search, 350); });
+  document.getElementById("tabs").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    type = b.getAttribute("data-type");
+    Array.prototype.forEach.call(this.children, function (t) { t.classList.toggle("on", t === b); });
+    search();
+  });
+  fetch("/api/saavn/top-searches").then(function (r) { return r.json(); }).then(function (j) {
+    if (!j.success || !j.data.length) return;
+    chips.appendChild(el("div", "label", "Trending searches"));
+    j.data.slice(0, 10).forEach(function (t) {
+      var b = el("button", "chip", t.title);
+      b.addEventListener("click", function () { input.value = t.title; search(); });
+      chips.appendChild(b);
+    });
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>`);
+});
+
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
