@@ -11074,6 +11074,486 @@ app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
     }
 });
 
+// ==========================================
+// JIOSAAVN API (unofficial)  ->  /api/saavn/*
+// ------------------------------------------
+//  GET /api/saavn/search?query=&type=all|songs|albums|artists|playlists&page=0&limit=10
+//  GET /api/saavn/songs/:id                (one song)
+//  GET /api/saavn/songs?ids=a,b,c          (several songs)   |  ?link=<jiosaavn song url>
+//  GET /api/saavn/songs/:id/suggestions?limit=10
+//  GET /api/saavn/albums/:id               |  /albums?link=<url>
+//  GET /api/saavn/playlists/:id            |  /playlists?link=<url>   (&page=0&limit=50)
+//  GET /api/saavn/artists/:id              |  /artists?link=<url>
+//  GET /api/saavn/artists/:id/songs?page=0&sortBy=popularity|latest|alphabetical&sortOrder=asc|desc
+//  GET /api/saavn/artists/:id/albums?page=0&sortBy=popularity|latest|alphabetical&sortOrder=asc|desc
+//  GET /api/saavn/lyrics/:id
+//  GET /api/saavn/top-searches
+//
+// Uses only axios + crypto (already imported at the top of this file).
+// Optional env var: SAAVN_API_BASE (defaults to https://www.jiosaavn.com/api.php)
+// ==========================================
+const SAAVN_API_BASE = process.env.SAAVN_API_BASE || "https://www.jiosaavn.com/api.php";
+const SAAVN_DES_KEY = Buffer.from("38346591");
+const SAAVN_CACHE = new Map();
+const SAAVN_CACHE_MAX = 500;
+
+class SaavnError extends Error {
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
+
+const saavnHttp = axios.create({
+    timeout: 12000,
+    responseType: "text",
+    transformResponse: [(d) => d], // we parse ourselves so a non-JSON reply gives a clean error
+    headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+});
+
+// ---------- small in-memory cache (oldest entry is evicted first) ----------
+function saavnCacheGet(key) {
+    const hit = SAAVN_CACHE.get(key);
+    if (!hit) return null;
+    if (hit.exp < Date.now()) {
+        SAAVN_CACHE.delete(key);
+        return null;
+    }
+    return hit.data;
+}
+function saavnCacheSet(key, data, ttlMs) {
+    if (SAAVN_CACHE.size >= SAAVN_CACHE_MAX) SAAVN_CACHE.delete(SAAVN_CACHE.keys().next().value);
+    SAAVN_CACHE.set(key, { data, exp: Date.now() + ttlMs });
+}
+
+// ---------- upstream call ----------
+async function saavnCall(call, params = {}, ttlMs = 0) {
+    const query = { __call: call, _format: "json", _marker: "0", api_version: "4", ctx: "web6dot0", ...params };
+    const cacheKey = ttlMs ? new URLSearchParams(query).toString() : null;
+    if (cacheKey) {
+        const hit = saavnCacheGet(cacheKey);
+        if (hit) return hit;
+    }
+
+    const resp = await saavnHttp.get(SAAVN_API_BASE, { params: query });
+
+    let data;
+    try {
+        data = JSON.parse(String(resp.data).trim());
+    } catch {
+        throw new SaavnError(502, "JioSaavn returned an unexpected (non-JSON) response.");
+    }
+    if (data && typeof data === "object" && data.status === "failure") {
+        throw new SaavnError(404, data.error || "Not found on JioSaavn.");
+    }
+
+    if (cacheKey) saavnCacheSet(cacheKey, data, ttlMs);
+    return data;
+}
+
+// ---------- route wrapper: uniform { success, data } / { success:false, error } ----------
+function saavnRoute(handler) {
+    return async (req, res) => {
+        try {
+            const data = await handler(req);
+            res.json({ success: true, data });
+        } catch (e) {
+            if (e instanceof SaavnError) {
+                return res.status(e.status).json({ success: false, error: e.message });
+            }
+            if (e.code === "ECONNABORTED" || e.code === "ETIMEDOUT") {
+                return res.status(504).json({ success: false, error: "JioSaavn timed out." });
+            }
+            if (e.response) {
+                console.error("JioSaavn upstream error:", e.response.status);
+                return res.status(502).json({ success: false, error: `JioSaavn upstream error (${e.response.status}).` });
+            }
+            console.error("JioSaavn API Error:", e.message);
+            res.status(502).json({ success: false, error: "Could not reach JioSaavn." });
+        }
+    };
+}
+
+// ---------- input helpers ----------
+function saavnValidId(v) {
+    const id = String(v || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new SaavnError(400, "Invalid id.");
+    return id;
+}
+function saavnPage(v) {
+    return Math.max(0, parseInt(v, 10) || 0);
+}
+function saavnLimit(v, def, max = 50) {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1) return def;
+    return Math.min(n, max);
+}
+function saavnTokenFromLink(link) {
+    let u;
+    try {
+        u = new URL(String(link));
+    } catch {
+        throw new SaavnError(400, "Invalid link.");
+    }
+    if (!/(^|\.)jiosaavn\.com$/i.test(u.hostname)) throw new SaavnError(400, "Link must be a jiosaavn.com URL.");
+    const parts = u.pathname.split("/").filter(Boolean);
+    const token = parts[parts.length - 1];
+    if (!token || !/^[A-Za-z0-9_-]+$/.test(token)) throw new SaavnError(400, "Could not read an id from this link.");
+    return token;
+}
+
+// ---------- output helpers ----------
+function saavnDecode(str) {
+    if (typeof str !== "string") return "";
+    return str
+        .replace(/&quot;/g, '"')
+        .replace(/&#0?39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&");
+}
+function saavnInt(v) {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+}
+function saavnList(x, key) {
+    if (Array.isArray(x)) return x;
+    if (x && Array.isArray(x[key])) return x[key];
+    return [];
+}
+function saavnImages(url) {
+    if (!url || typeof url !== "string") return [];
+    const base = url.replace(/^http:\/\//, "https://");
+    return ["50x50", "150x150", "500x500"].map((q) => ({
+        quality: q,
+        url: base.replace(/\d+x\d+(?=\.[A-Za-z0-9]+(\?.*)?$)/, q)
+    }));
+}
+
+// JioSaavn encrypts the media URL with single DES (ECB, key "38346591").
+// OpenSSL 3 (Node 17+) hides plain DES, so we run 3DES with the same key three times,
+// which is mathematically identical to single DES.
+function saavnDecryptUrl(encrypted) {
+    if (!encrypted || typeof encrypted !== "string") return null;
+    try {
+        const key24 = Buffer.concat([SAAVN_DES_KEY, SAAVN_DES_KEY, SAAVN_DES_KEY]);
+        const decipher = crypto.createDecipheriv("des-ede3-ecb", key24, null);
+        const out = Buffer.concat([decipher.update(Buffer.from(encrypted, "base64")), decipher.final()]);
+        return out.toString("utf8");
+    } catch {
+        return null;
+    }
+}
+function saavnDownloadUrls(encrypted, has320) {
+    const base = saavnDecryptUrl(encrypted);
+    if (!base) return [];
+    const clean = base.replace(/^http:\/\//, "https://").replace("h.saavncdn.com", "aac.saavncdn.com");
+    const bitrates = has320 ? [12, 48, 96, 160, 320] : [12, 48, 96, 160];
+    return bitrates.map((b) => ({ quality: `${b}kbps`, url: clean.replace(/_\d+\.mp4/, `_${b}.mp4`) }));
+}
+
+// ---------- mappers (raw JioSaavn object -> clean object) ----------
+function saavnArtist(a) {
+    if (!a) return null;
+    return {
+        id: String(a.id ?? a.artistId ?? ""),
+        name: saavnDecode(a.name || a.title || ""),
+        role: a.role || "",
+        type: "artist",
+        image: saavnImages(a.image),
+        url: a.perma_url || a.url || ""
+    };
+}
+function saavnArtistMap(m) {
+    const map = (m && m.artistMap) || {};
+    return {
+        primary: (map.primary_artists || []).map(saavnArtist).filter(Boolean),
+        featured: (map.featured_artists || []).map(saavnArtist).filter(Boolean),
+        all: (map.artists || []).map(saavnArtist).filter(Boolean)
+    };
+}
+function saavnSong(s) {
+    if (!s || !s.id) return null;
+    const m = s.more_info || {};
+    const hasLyrics = m.has_lyrics === "true" || m.has_lyrics === true;
+    return {
+        id: s.id,
+        name: saavnDecode(s.title || s.song || ""),
+        type: "song",
+        year: s.year || null,
+        releaseDate: m.release_date || null,
+        duration: saavnInt(m.duration),
+        label: saavnDecode(m.label || ""),
+        explicitContent: s.explicit_content === "1" || s.explicit_content === 1,
+        playCount: saavnInt(s.play_count),
+        language: s.language || "",
+        hasLyrics,
+        lyricsId: hasLyrics ? s.id : null,
+        url: s.perma_url || "",
+        copyright: saavnDecode(m.copyright_text || ""),
+        album: { id: m.album_id || null, name: saavnDecode(m.album || ""), url: m.album_url || null },
+        artists: saavnArtistMap(m),
+        image: saavnImages(s.image),
+        downloadUrl: saavnDownloadUrls(m.encrypted_media_url, m["320kbps"] === "true" || m["320kbps"] === true)
+    };
+}
+function saavnAlbum(a) {
+    if (!a || !a.id) return null;
+    const m = a.more_info || {};
+    return {
+        id: a.id,
+        name: saavnDecode(a.title || a.name || ""),
+        description: saavnDecode(a.header_desc || ""),
+        type: "album",
+        year: a.year || null,
+        playCount: saavnInt(a.play_count),
+        language: a.language || "",
+        explicitContent: a.explicit_content === "1" || a.explicit_content === 1,
+        url: a.perma_url || "",
+        songCount: saavnInt(m.song_count ?? a.list_count),
+        artists: saavnArtistMap(m),
+        image: saavnImages(a.image),
+        songs: Array.isArray(a.list) ? a.list.map(saavnSong).filter(Boolean) : undefined
+    };
+}
+function saavnPlaylist(p) {
+    if (!p || !p.id) return null;
+    const m = p.more_info || {};
+    return {
+        id: p.id,
+        name: saavnDecode(p.title || p.name || ""),
+        description: saavnDecode(p.header_desc || p.subtitle || ""),
+        type: "playlist",
+        year: p.year || null,
+        playCount: saavnInt(p.play_count),
+        language: p.language || m.language || "",
+        explicitContent: p.explicit_content === "1" || p.explicit_content === 1,
+        url: p.perma_url || "",
+        songCount: saavnInt(p.list_count ?? m.song_count),
+        image: saavnImages(p.image),
+        songs: Array.isArray(p.list) ? p.list.map(saavnSong).filter(Boolean) : undefined
+    };
+}
+function saavnArtistPage(a) {
+    let bio = a.bio;
+    if (typeof bio === "string") {
+        try { bio = JSON.parse(bio); } catch { bio = []; }
+    }
+    return {
+        id: String(a.artistId ?? a.id ?? ""),
+        name: saavnDecode(a.name || ""),
+        type: "artist",
+        url: (a.urls && a.urls.overview) || a.perma_url || "",
+        image: saavnImages(a.image),
+        followerCount: saavnInt(a.follower_count),
+        fanCount: a.fan_count || null,
+        isVerified: a.isVerified === true || a.isVerified === "true",
+        dominantLanguage: a.dominantLanguage || null,
+        dominantType: a.dominantType || null,
+        bio: Array.isArray(bio) ? bio.map((b) => ({ title: saavnDecode(b.title || ""), text: saavnDecode(b.text || "") })) : [],
+        dob: a.dob || null,
+        fb: a.fb || null,
+        twitter: a.twitter || null,
+        wiki: a.wiki || null,
+        availableLanguages: a.availableLanguages || [],
+        topSongs: saavnList(a.topSongs, "songs").map(saavnSong).filter(Boolean),
+        topAlbums: saavnList(a.topAlbums, "albums").map(saavnAlbum).filter(Boolean),
+        singles: saavnList(a.singles, "albums").map(saavnAlbum).filter(Boolean),
+        similarArtists: (a.similarArtists || []).map(saavnArtist).filter(Boolean)
+    };
+}
+
+// ==========================================
+// SEARCH
+// ==========================================
+const SAAVN_SEARCH_TYPES = {
+    songs:     { call: "search.getResults",         map: saavnSong },
+    albums:    { call: "search.getAlbumResults",    map: saavnAlbum },
+    artists:   { call: "search.getArtistResults",   map: saavnArtist },
+    playlists: { call: "search.getPlaylistResults", map: saavnPlaylist }
+};
+
+async function saavnSearchType(type, q, page, limit) {
+    const cfg = SAAVN_SEARCH_TYPES[type];
+    const data = await saavnCall(cfg.call, { q, p: page, n: limit }, 60000);
+    const results = Array.isArray(data.results) ? data.results : [];
+    return {
+        total: saavnInt(data.total) ?? results.length,
+        start: saavnInt(data.start) ?? 0,
+        results: results.map(cfg.map).filter(Boolean)
+    };
+}
+
+app.get("/api/saavn/search", saavnRoute(async (req) => {
+    const q = String(req.query.query || req.query.q || "").trim().slice(0, 200);
+    if (!q) throw new SaavnError(400, "Missing query.");
+
+    const type = String(req.query.type || "all").toLowerCase();
+    const page = saavnPage(req.query.page);
+
+    if (type === "all") {
+        const limit = saavnLimit(req.query.limit, 5);
+        const types = Object.keys(SAAVN_SEARCH_TYPES);
+        const settled = await Promise.allSettled(types.map((t) => saavnSearchType(t, q, page, limit)));
+        if (settled.every((r) => r.status === "rejected")) throw settled[0].reason;
+        const out = {};
+        types.forEach((t, i) => {
+            out[t] = settled[i].status === "fulfilled" ? settled[i].value : { total: 0, start: 0, results: [] };
+        });
+        return out;
+    }
+
+    if (!SAAVN_SEARCH_TYPES[type]) throw new SaavnError(400, "type must be one of: all, songs, albums, artists, playlists.");
+    return saavnSearchType(type, q, page, saavnLimit(req.query.limit, 10));
+}));
+
+// ==========================================
+// SONGS
+// ==========================================
+async function saavnSongsByIds(ids) {
+    const data = await saavnCall("song.getDetails", { pids: ids.join(",") }, 600000);
+    return saavnList(data.songs, "songs").map(saavnSong).filter(Boolean);
+}
+
+app.get("/api/saavn/songs/:id/suggestions", saavnRoute(async (req) => {
+    const id = saavnValidId(req.params.id);
+    const limit = saavnLimit(req.query.limit, 10);
+    const data = await saavnCall("reco.getreco", { pid: id }, 600000);
+    return saavnList(data, "data").slice(0, limit).map(saavnSong).filter(Boolean);
+}));
+
+app.get(["/api/saavn/songs/:id", "/api/saavn/songs"], saavnRoute(async (req) => {
+    // /songs/:id  -> one song object
+    if (req.params.id) {
+        const songs = await saavnSongsByIds([saavnValidId(req.params.id)]);
+        if (!songs.length) throw new SaavnError(404, "Song not found.");
+        return songs[0];
+    }
+    // /songs?ids=a,b,c  -> array
+    if (req.query.ids) {
+        const ids = String(req.query.ids).split(",").map((s) => s.trim()).filter(Boolean);
+        if (!ids.length || ids.length > 20) throw new SaavnError(400, "Provide between 1 and 20 ids.");
+        return saavnSongsByIds(ids.map(saavnValidId));
+    }
+    // /songs?link=<url>  -> one song object
+    if (req.query.link) {
+        const token = saavnTokenFromLink(req.query.link);
+        const data = await saavnCall("webapi.get", { token, type: "song", includeMetaTags: "0" }, 600000);
+        const song = saavnList(data.songs, "songs").map(saavnSong).filter(Boolean)[0];
+        if (!song) throw new SaavnError(404, "Song not found.");
+        return song;
+    }
+    throw new SaavnError(400, "Provide an id, ?ids=a,b,c or ?link=<jiosaavn url>.");
+}));
+
+// ==========================================
+// ALBUMS / PLAYLISTS / ARTISTS  (by id or by jiosaavn.com link)
+// ==========================================
+const SAAVN_ENTITIES = {
+    albums:    { type: "album",    call: "content.getAlbumDetails",     idParam: "albumid",  map: saavnAlbum },
+    playlists: { type: "playlist", call: "playlist.getDetails",         idParam: "listid",   map: saavnPlaylist },
+    artists:   { type: "artist",   call: "artist.getArtistPageDetails", idParam: "artistId", map: saavnArtistPage }
+};
+
+for (const kind of Object.keys(SAAVN_ENTITIES)) {
+    const cfg = SAAVN_ENTITIES[kind];
+    app.get([`/api/saavn/${kind}/:id`, `/api/saavn/${kind}`], saavnRoute(async (req) => {
+        const rawId = req.params.id || req.query.id;
+
+        // playlists page their songs; albums/artists return everything in one go
+        const paging = kind === "playlists"
+            ? { p: saavnPage(req.query.page), n: saavnLimit(req.query.limit, 50, 100) }
+            : {};
+
+        let data;
+        if (rawId) {
+            data = await saavnCall(cfg.call, { [cfg.idParam]: saavnValidId(rawId), ...paging }, 600000);
+        } else if (req.query.link) {
+            const token = saavnTokenFromLink(req.query.link);
+            data = await saavnCall("webapi.get", { token, type: cfg.type, includeMetaTags: "0", ...paging }, 600000);
+        } else {
+            throw new SaavnError(400, `Provide an id or ?link=<jiosaavn ${cfg.type} url>.`);
+        }
+
+        if (!data || (!data.id && !data.artistId)) throw new SaavnError(404, `${cfg.type[0].toUpperCase()}${cfg.type.slice(1)} not found.`);
+        return cfg.map(data);
+    }));
+}
+
+// ---------- artist: more songs / more albums ----------
+function saavnArtistSortParams(req) {
+    const sortBy = ["popularity", "latest", "alphabetical"].includes(req.query.sortBy) ? req.query.sortBy : "popularity";
+    const defaultOrder = sortBy === "alphabetical" ? "asc" : "desc";
+    const sortOrder = ["asc", "desc"].includes(req.query.sortOrder) ? req.query.sortOrder : defaultOrder;
+    return { category: sortBy, sort_order: sortOrder };
+}
+
+app.get("/api/saavn/artists/:id/songs", saavnRoute(async (req) => {
+    const artistId = saavnValidId(req.params.id);
+    const data = await saavnCall("artist.getArtistMoreSong", { artistId, page: saavnPage(req.query.page), ...saavnArtistSortParams(req) }, 300000);
+    const songs = saavnList(data.topSongs, "songs").map(saavnSong).filter(Boolean);
+    return { total: saavnInt(data.topSongs && data.topSongs.total) ?? songs.length, songs };
+}));
+
+app.get("/api/saavn/artists/:id/albums", saavnRoute(async (req) => {
+    const artistId = saavnValidId(req.params.id);
+    const data = await saavnCall("artist.getArtistMoreAlbum", { artistId, page: saavnPage(req.query.page), ...saavnArtistSortParams(req) }, 300000);
+    const albums = saavnList(data.topAlbums, "albums").map(saavnAlbum).filter(Boolean);
+    return { total: saavnInt(data.topAlbums && data.topAlbums.total) ?? albums.length, albums };
+}));
+
+// ==========================================
+// LYRICS & TOP SEARCHES
+// ==========================================
+app.get("/api/saavn/lyrics/:id", saavnRoute(async (req) => {
+    const id = saavnValidId(req.params.id);
+    const data = await saavnCall("lyrics.getLyrics", { lyrics_id: id }, 3600000);
+    if (!data || !data.lyrics) throw new SaavnError(404, "Lyrics not found for this song.");
+    return {
+        id,
+        lyrics: saavnDecode(String(data.lyrics).replace(/<br\s*\/?>/gi, "\n")),
+        snippet: saavnDecode(data.snippet || ""),
+        copyright: saavnDecode(data.lyrics_copyright || "")
+    };
+}));
+
+app.get("/api/saavn/top-searches", saavnRoute(async () => {
+    const data = await saavnCall("content.getTopSearches", {}, 600000);
+    return saavnList(data, "data")
+        .map((x) => ({
+            title: saavnDecode(x.title || x.name || x.query || ""),
+            type: x.type || null,
+            url: x.perma_url || x.url || null,
+            image: saavnImages(x.image)
+        }))
+        .filter((x) => x.title);
+}));
+
+// ---------- index of endpoints ----------
+app.get("/api/saavn", (req, res) => {
+    res.json({
+        success: true,
+        endpoints: [
+            "GET /api/saavn/search?query=&type=all|songs|albums|artists|playlists&page=0&limit=10",
+            "GET /api/saavn/songs/:id",
+            "GET /api/saavn/songs?ids=a,b,c",
+            "GET /api/saavn/songs?link=<jiosaavn song url>",
+            "GET /api/saavn/songs/:id/suggestions?limit=10",
+            "GET /api/saavn/albums/:id  |  /albums?link=<url>",
+            "GET /api/saavn/playlists/:id  |  /playlists?link=<url>  (&page=0&limit=50)",
+            "GET /api/saavn/artists/:id  |  /artists?link=<url>",
+            "GET /api/saavn/artists/:id/songs?page=0&sortBy=popularity&sortOrder=desc",
+            "GET /api/saavn/artists/:id/albums?page=0&sortBy=popularity&sortOrder=desc",
+            "GET /api/saavn/lyrics/:id",
+            "GET /api/saavn/top-searches"
+        ]
+    });
+});
+
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
