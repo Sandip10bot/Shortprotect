@@ -11594,10 +11594,23 @@ app.get("/music", (req, res) => {
   .title, .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .title { font-size: 16px; font-weight: 600; }
   .sub { margin-top: 3px; font-size: 13px; color: rgba(235,235,245,0.55); }
-  .open { flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 12px; color: #fff; text-decoration: none;
-    font-size: 13px; font-weight: 600; background: linear-gradient(180deg, #b74bff, #9526e8); }
+  .play { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0.5px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .play:hover { background: rgba(255,255,255,0.16); }
+  .play.playing { background: linear-gradient(180deg, #b74bff, #9526e8); border-color: transparent; }
   .note { margin-top: 26px; text-align: center; font-size: 12px; color: rgba(235,235,245,0.4); }
-  @media (max-width: 480px) { .open span { display: none; } .open { padding: 10px; } }
+  .playerbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: none; align-items: center; gap: 12px;
+    padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: rgba(20,20,22,0.92); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+    border-top: 0.5px solid rgba(255,255,255,0.14); }
+  .playerbar.show { display: flex; }
+  .playerbar img { flex: none; width: 44px; height: 44px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,0.08); }
+  .playerbar .pmeta { flex: 1; min-width: 0; }
+  .playerbar .ptitle, .playerbar .psub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .playerbar .ptitle { font-size: 14px; font-weight: 600; }
+  .playerbar .psub { margin-top: 2px; font-size: 12px; color: rgba(235,235,245,0.55); }
+  .playerbar button.ptoggle { flex: none; width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+    background: linear-gradient(180deg, #b74bff, #9526e8); color: #fff; display: flex; align-items: center; justify-content: center; }
 </style>
 </head>
 <body>
@@ -11616,15 +11629,67 @@ app.get("/music", (req, res) => {
   <div class="chips" id="chips"></div>
   <div class="status" id="status"></div>
   <div id="results"></div>
-  <div class="note">Search only. Tap Open to listen on JioSaavn.</div>
+  <div class="note">Tap play to listen.</div>
 </div>
+<div class="playerbar" id="bar">
+  <img id="barCover" alt="">
+  <div class="pmeta">
+    <div class="ptitle" id="barTitle"></div>
+    <div class="psub" id="barSub"></div>
+  </div>
+  <button class="ptoggle" id="barToggle" type="button" aria-label="Play/Pause"></button>
+</div>
+<audio id="player" preload="none"></audio>
 <script>
 (function () {
   var type = "songs", timer = null, seq = 0;
   var input = document.getElementById("q"), results = document.getElementById("results");
   var status = document.getElementById("status"), chips = document.getElementById("chips");
-  var okUrl = new RegExp("^https://(www[.])?jiosaavn[.]com/");
-  var ICON = "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3h7v7'/><path d='M10 14L21 3'/><path d='M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5'/></svg>";
+  var ICON_PLAY = "<svg width='18' height='18' viewBox='0 0 24 24' fill='currentColor'><polygon points='6,3 21,12 6,21'/></svg>";
+  var ICON_PAUSE = "<svg width='18' height='18' viewBox='0 0 24 24' fill='currentColor'><rect x='5' y='3' width='5' height='18' rx='1'/><rect x='14' y='3' width='5' height='18' rx='1'/></svg>";
+
+  var player = document.getElementById("player");
+  var bar = document.getElementById("bar");
+  var barCover = document.getElementById("barCover");
+  var barTitle = document.getElementById("barTitle");
+  var barSub = document.getElementById("barSub");
+  var barToggle = document.getElementById("barToggle");
+  barToggle.innerHTML = ICON_PLAY;
+  var activeBtn = null, activeUrl = null;
+
+  function bestAudioUrl(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    return list[list.length - 1].url || null; // highest bitrate is last
+  }
+  function setBtnPlaying(btn, playing) {
+    if (!btn) return;
+    btn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+    btn.classList.toggle("playing", playing);
+  }
+  function playSong(x, btn) {
+    var url = bestAudioUrl(x.downloadUrl);
+    if (!url) return;
+    if (activeUrl === url) {
+      if (player.paused) player.play().catch(function () {}); else player.pause();
+      return;
+    }
+    if (activeBtn) setBtnPlaying(activeBtn, false);
+    activeBtn = btn; activeUrl = url;
+    player.src = url;
+    player.play().catch(function () { status.textContent = "Could not play this track."; });
+    bar.classList.add("show");
+    barTitle.textContent = x.name;
+    barSub.textContent = subtitle(x);
+    var im = x.image && (x.image[1] || x.image[0]);
+    barCover.src = (im && im.url) || "";
+  }
+  player.addEventListener("play", function () { setBtnPlaying(activeBtn, true); barToggle.innerHTML = ICON_PAUSE; });
+  player.addEventListener("pause", function () { setBtnPlaying(activeBtn, false); barToggle.innerHTML = ICON_PLAY; });
+  player.addEventListener("ended", function () { setBtnPlaying(activeBtn, false); barToggle.innerHTML = ICON_PLAY; });
+  barToggle.addEventListener("click", function () {
+    if (!player.src) return;
+    if (player.paused) player.play().catch(function () {}); else player.pause();
+  });
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -11653,11 +11718,13 @@ app.get("/music", (req, res) => {
     meta.appendChild(el("div", "title", x.name));
     meta.appendChild(el("div", "sub", subtitle(x)));
     c.appendChild(img); c.appendChild(meta);
-    if (okUrl.test(x.url || "")) {
-      var a = el("a", "open");
-      a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-      a.innerHTML = ICON + "<span>Open</span>";
-      c.appendChild(a);
+    if (x.type === "song" && bestAudioUrl(x.downloadUrl)) {
+      var playBtn = el("button", "play");
+      playBtn.type = "button";
+      playBtn.setAttribute("aria-label", "Play");
+      playBtn.innerHTML = (activeUrl && activeUrl === bestAudioUrl(x.downloadUrl) && !player.paused) ? ICON_PAUSE : ICON_PLAY;
+      playBtn.addEventListener("click", function () { playSong(x, playBtn); });
+      c.appendChild(playBtn);
     }
     return c;
   }
