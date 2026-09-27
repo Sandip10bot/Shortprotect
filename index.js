@@ -1208,15 +1208,29 @@ app.get("/api/scratch/history/:userId", async (req, res) => {
 // SPIN & WIN (Web Version) – NEW
 // ==========================================
 
-// Helper to compute next spin time (midnight UTC after last_spin_date)
+// ========== IST (UTC+5:30) helpers – must match cspin.py ==========
+function getIstNow() {
+    return new Date(Date.now() + (5 * 60 + 30) * 60 * 1000);
+}
+function getIstDateString(d = getIstNow()) {
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+function getIstYesterdayString() {
+    const d = getIstNow();
+    d.setUTCDate(d.getUTCDate() - 1);
+    return getIstDateString(d);
+}
+// Next spin = midnight IST of the day AFTER last_spin_date
 function getNextSpinTime(lastSpinDate) {
-    if (!lastSpinDate) return new Date(); // now
-    const parts = lastSpinDate.split('-');
-    const year = parseInt(parts[0]);
-    const month = parseInt(parts[1]) - 1;
-    const day = parseInt(parts[2]);
-    const next = new Date(Date.UTC(year, month, day + 1, 0, 0, 0));
-    return next;
+    if (!lastSpinDate) return new Date();
+    const parts = lastSpinDate.split('-').map(Number);
+    // lastSpinDate is IST calendar date → next available is 00:00 IST of following day
+    // 00:00 IST = 18:30 UTC of previous calendar day
+    const nextMidnightIstAsUtc = Date.UTC(parts[0], parts[1] - 1, parts[2] + 1, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+    return new Date(nextMidnightIstAsUtc);
 }
 
 // Helper to format countdown
@@ -1236,16 +1250,15 @@ app.get("/api/spin/status/:userId", async (req, res) => {
         if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
 
         const user = await usersCollection.findOne({ user_id: uid }) || {};
-        const lastSpinDate = user.last_spin_date || null; // format "YYYY-MM-DD"
+        const lastSpinDate = user.last_spin_date || null; // "YYYY-MM-DD" (IST, set by bot)
         const streak = user.streak || 0;
-        const today = new Date().toISOString().split('T')[0];
+        const today = getIstDateString(); // IST – matches cspin.py
         const canSpin = lastSpinDate !== today;
 
         const nextSpinTime = getNextSpinTime(lastSpinDate);
         const now = new Date();
         const msUntilNext = Math.max(0, nextSpinTime.getTime() - now.getTime());
 
-        // Also check if the user has an active web spin session (to allow double)
         let session = null;
         if (lastSpinDate === today) {
             session = await webSpinSessionsCollection.findOne({ user_id: uid });
@@ -1278,7 +1291,8 @@ app.post("/api/spin/do/:userId", async (req, res) => {
         if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
 
         const user = await usersCollection.findOne({ user_id: uid });
-        const today = new Date().toISOString().split('T')[0];
+        // Use IST calendar date so web + bot (cspin.py) stay in sync
+        const today = getIstDateString();
         const lastSpinDate = user?.last_spin_date || null;
 
         if (lastSpinDate === today) {
@@ -1288,25 +1302,30 @@ app.post("/api/spin/do/:userId", async (req, res) => {
         // Generate random roll 1-6
         const roll = Math.floor(Math.random() * 6) + 1;
 
-        // Streak logic
+        // Streak logic – matches cspin.py (keep streak, bonus every 7 days, no reset)
         let streak = user?.streak || 0;
         let bonus = 0;
         if (lastSpinDate) {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            const yesterdayStr = getIstYesterdayString();
             if (lastSpinDate === yesterdayStr) {
                 streak += 1;
             } else {
+                // Broken streak: save lost_streak like the bot does
+                if (streak > 1) {
+                    await usersCollection.updateOne(
+                        { user_id: uid },
+                        { $set: { lost_streak: streak } }
+                    );
+                }
                 streak = 1;
             }
         } else {
             streak = 1;
         }
 
-        if (streak >= 7) {
+        if (streak > 0 && streak % 7 === 0) {
             bonus = 100;
-            streak = 0; // reset streak after bonus
+            // do NOT reset streak (matches cspin.py)
         }
 
         const pointsToAdd = roll + bonus;
@@ -4210,18 +4229,19 @@ app.get("/mini/:userId", (req, res) => {
     ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 10px; }
 
-    /* === GLASS CARD === */
+    /* === GLASS CARD (enhanced glassmorphism) === */
     .glass {
-      background: rgba(28,28,30,0.68);
-      backdrop-filter: blur(40px) saturate(180%);
-      -webkit-backdrop-filter: blur(40px) saturate(180%);
-      border: 0.5px solid rgba(255,255,255,0.1);
-      border-radius: 20px;
+      background: linear-gradient(165deg, rgba(40,40,48,0.72) 0%, rgba(22,22,28,0.78) 100%);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 0.5px solid rgba(255,255,255,0.14);
+      border-radius: 22px;
       padding: 18px;
       margin: 12px 16px;
-      box-shadow: 0 14px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 0.5px rgba(183,75,255,0.08);
       transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s;
     }
+    .glass:active { transform: scale(0.99); }
     .glass-title {
       font-size: 17px;
       font-weight: 600;
@@ -4891,7 +4911,7 @@ app.get("/mini/:userId", (req, res) => {
       color: white;
       cursor: pointer;
       z-index: 200;
-      display: flex;
+      display: none; /* only shown from Settings */
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -4900,6 +4920,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 0;
       line-height: 1;
     }
+    .earn-fab.visible { display: flex; }
     .earn-fab:active { transform: scale(0.9); }
     
     .earn-fab .fab-top {
@@ -6125,9 +6146,6 @@ app.get("/mini/:userId", (req, res) => {
     <div class="profile-hdr">
       <div style="position:relative;">
         <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
-        <div class="settings-gear" id="openSettingsBtn">
-          <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.04 7.04 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.22 0 .43-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></svg>
-        </div>
       </div>
       <div class="profile-info">
         <h1 id="ui-name">Loading...</h1>
@@ -6573,8 +6591,13 @@ app.get("/mini/:userId", (req, res) => {
   <!-- ========== TAB: PROFILE ========== -->
   <div id="tab-profile" class="tab-content">
     <div class="glass">
-      <div class="profile-hdr" style="margin-bottom:12px;">
-        <img id="profile-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+      <div class="profile-hdr" style="margin-bottom:12px; position:relative;">
+        <div style="position:relative;">
+          <img id="profile-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+          <div class="settings-gear" id="openSettingsBtn" title="Settings">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.04 7.04 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.22 0 .43-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></svg>
+          </div>
+        </div>
         <div class="profile-info">
           <h2 id="profile-name">Loading...</h2>
           <p id="profile-id">ID: ${userId}</p>
@@ -6667,7 +6690,12 @@ app.get("/mini/:userId", (req, res) => {
         <span class="setting-label">Force Verification</span>
         <input type="checkbox" class="toggle-switch" id="setting-forceverify">
       </div>
-      <button class="withdraw-btn" style="margin-top:20px; background: rgba(255,255,255,0.1);" onclick="closeSettings()">Close Settings</button>
+      <div style="margin-top:18px; padding-top:14px; border-top:0.5px solid rgba(255,255,255,0.08);">
+        <button class="withdraw-btn" id="settingsWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin-bottom:10px;">
+          ▶ Watch Ad to Earn MythoPoints
+        </button>
+      </div>
+      <button class="withdraw-btn" style="margin-top:8px; background: rgba(255,255,255,0.1);" onclick="closeSettings()">Close Settings</button>
     </div>
   </div>
 
@@ -7079,6 +7107,8 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('ui-life-earn').innerText = formatNum(state.stats.earned);
       document.getElementById('ui-life-spent').innerText = formatNum(state.stats.spent);
       document.getElementById('profile-pts').innerText = formatNum(state.mythopoints);
+      const profileStreakEl = document.getElementById('profile-streak');
+      if (profileStreakEl) profileStreakEl.innerText = formatNum(state.streak) + ' days';
       
       // 3. Force Verification Override Logic
       const forceVerify = document.getElementById('setting-forceverify')?.checked;
@@ -8805,39 +8835,37 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
-    // ─── WATCH & EARN FAB LOGIC ───
-    const earnFab = document.getElementById('earnFab');
-    if(earnFab) {
-        earnFab.addEventListener('click', async function() {
-            if (typeof show_9055307 !== 'function') {
-                alert('Ad service is still loading. Please wait a moment.');
-                return;
-            }
-
-            const confirmed = await showConfirm('Watch a quick ad to earn 1 to 3 MythoPoints? (Max 5 per day)');
-            if (!confirmed) return;
-            
-            show_9055307().then(() => {
-                tg.HapticFeedback.notificationOccurred('success');
-                fetch('/api/watch-earn/claim/' + userId, { method: 'POST' })
-                    .then(res => res.json())
-                    .then(async data => {
-                        if(data.success) {
-                            state.mythopoints = data.newBalance;
-                            updateUI();
-                            await showSuccess('+' + data.reward + ' MythoPoints!', 'Reward Claimed'); 
-                        } else {
-                            alert(data.error || "Error claiming reward.");
-                        }
-                    }).catch(err => {
-                        alert("Network error while claiming reward.");
-                    });
-            }).catch((error) => {
-                alert("Ad failed to load or was closed early.");
-                console.error("Monetag Error:", error);
-            });
+    // ─── WATCH & EARN (Settings only) ───
+    async function runWatchAdEarn() {
+        if (typeof show_9055307 !== 'function') {
+            alert('Ad service is still loading. Please wait a moment.');
+            return;
+        }
+        const confirmed = await showConfirm('Watch a quick ad to earn 1 to 3 MythoPoints? (Max 5 per day)');
+        if (!confirmed) return;
+        show_9055307().then(() => {
+            tg.HapticFeedback.notificationOccurred('success');
+            fetch('/api/watch-earn/claim/' + userId, { method: 'POST' })
+                .then(res => res.json())
+                .then(async data => {
+                    if (data.success) {
+                        state.mythopoints = data.newBalance;
+                        updateUI();
+                        await showSuccess('+' + data.reward + ' MythoPoints!', 'Reward Claimed');
+                    } else {
+                        alert(data.error || "Error claiming reward.");
+                    }
+                }).catch(() => alert("Network error while claiming reward."));
+        }).catch((error) => {
+            alert("Ad failed to load or was closed early.");
+            console.error("Monetag Error:", error);
         });
     }
+    const settingsWatchAdBtn = document.getElementById('settingsWatchAdBtn');
+    if (settingsWatchAdBtn) settingsWatchAdBtn.addEventListener('click', runWatchAdEarn);
+    // FAB kept hidden; only reachable via Settings
+    const earnFab = document.getElementById('earnFab');
+    if (earnFab) earnFab.addEventListener('click', runWatchAdEarn);
   
     // ─── CHANT & EARN ───
     const CHANT_KEY = 'mytho_chant_' + userId;
