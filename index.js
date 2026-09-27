@@ -2728,55 +2728,105 @@ app.post("/api/payment/chat/mark-read", async (req, res) => {
 // Send a chat message
 app.post("/api/payment/chat/message", async (req, res) => {
     try {
-        const { senderId, receiverId, message, senderName } = req.body;
-        if (!senderId || !receiverId || !message) {
+        const { senderId, receiverId, message, senderName, replyTo, type, mediaUrl, mediaType, sticker } = req.body;
+        if (!senderId || !receiverId) {
             return res.status(400).json({ success: false, error: "Missing fields." });
         }
-        
+        const msgType = type || 'message';
+        // text required unless sticker/media/voice
+        if (msgType === 'message' && !message) {
+            return res.status(400).json({ success: false, error: "Missing message text." });
+        }
+        // size guard for base64 media (≈ 350KB)
+        if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.length > 500000) {
+            return res.status(400).json({ success: false, error: "Media too large (max ~350KB)." });
+        }
+
         const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-        
-        const result = await paymentChatCollection.insertOne({
+
+        let replySnapshot = null;
+        if (replyTo) {
+            const parent = await paymentChatCollection.findOne({ messageId: String(replyTo) });
+            if (parent) {
+                replySnapshot = {
+                    messageId: parent.messageId,
+                    message: parent.message || (parent.sticker ? parent.sticker : (parent.type === 'payment' ? `Payment M${parent.amount}` : (parent.type || 'Media'))),
+                    senderId: parent.senderId,
+                    type: parent.type || 'message',
+                    sticker: parent.sticker || null
+                };
+            }
+        }
+
+        const doc = {
             senderId: parseInt(senderId),
             receiverId: parseInt(receiverId),
-            message: message,
+            message: message || '',
             timestamp: new Date(),
-            type: 'message',
+            type: msgType,
             read: false,
             reactions: [],
             deletedFor: [],
-            messageId: messageId
-        });
+            deletedForEveryone: false,
+            messageId: messageId,
+            replyTo: replySnapshot,
+            edited: false,
+            editedAt: null,
+            mediaUrl: mediaUrl || null,
+            mediaType: mediaType || null,
+            sticker: sticker || null
+        };
+        await paymentChatCollection.insertOne(doc);
 
-        // 🚀 ADVANCED TELEGRAM NOTIFICATION (Node.js equivalent of your Pyrogram code)
-        // Ensure you have BOT_TOKEN in your Koyeb/environment variables!
         const botToken = process.env.BOT_TOKEN;
         if (botToken) {
             const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiverId}`;
             const sName = senderName || "a user";
-            
-            // Fire and forget Telegram API call
+            let preview = message || '';
+            if (msgType === 'sticker') preview = '🎨 Sticker';
+            else if (msgType === 'image') preview = '🖼 Photo';
+            else if (msgType === 'voice') preview = '🎤 Voice message';
+            else if (!preview) preview = 'New message';
             fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     chat_id: receiverId,
-                    text: `📩 You have a new message from **${sName}**!`,
+                    text: `📩 **${sName}**: ${String(preview).slice(0, 80)}`,
                     parse_mode: "Markdown",
                     reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "📱 Open MythoApp",
-                                    web_app: { url: dashboardUrl }
-                                }
-                            ]
-                        ]
+                        inline_keyboard: [[{ text: "📱 Open MythoApp", web_app: { url: dashboardUrl } }]]
                     }
                 })
             }).catch(e => console.error("Telegram Notify Error:", e));
         }
-        
-        res.json({ success: true, messageId: messageId });
+
+        res.json({ success: true, messageId: messageId, message: doc });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Edit own message
+app.post("/api/payment/chat/edit", async (req, res) => {
+    try {
+        const { messageId, userId, message } = req.body;
+        if (!messageId || !userId || message == null) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: String(messageId) });
+        if (!existing) return res.status(404).json({ success: false, error: "Message not found." });
+        if (existing.senderId !== uid) return res.status(403).json({ success: false, error: "Only sender can edit." });
+        if (existing.deletedForEveryone) return res.status(400).json({ success: false, error: "Message was deleted." });
+        if (existing.type && existing.type !== 'message') {
+            return res.status(400).json({ success: false, error: "Only text messages can be edited." });
+        }
+        await paymentChatCollection.updateOne(
+            { messageId: String(messageId) },
+            { $set: { message: String(message), edited: true, editedAt: new Date() } }
+        );
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -2814,30 +2864,45 @@ app.post("/api/payment/chat/reaction", async (req, res) => {
     }
 });
 
-// Delete a message for self (soft delete)
+// Delete a message: for self, or for everyone (sender only)
 app.post("/api/payment/chat/delete", async (req, res) => {
     try {
-        const { messageId, userId } = req.body;
+        const { messageId, userId, forEveryone } = req.body;
         if (!messageId || !userId) {
             return res.status(400).json({ success: false, error: "Missing fields." });
         }
-        
+
         const uid = parseInt(userId);
-        const existing = await paymentChatCollection.findOne({ messageId: messageId });
+        const existing = await paymentChatCollection.findOne({ messageId: String(messageId) });
         if (!existing) {
             return res.status(404).json({ success: false, error: "Message not found." });
         }
-        
-        const deletedFor = existing.deletedFor || [];
-        if (!deletedFor.includes(uid)) {
-            deletedFor.push(uid);
+
+        if (forEveryone) {
+            if (existing.senderId !== uid) {
+                return res.status(403).json({ success: false, error: "Only sender can delete for everyone." });
+            }
+            await paymentChatCollection.updateOne(
+                { messageId: String(messageId) },
+                {
+                    $set: {
+                        deletedForEveryone: true,
+                        message: '',
+                        mediaUrl: null,
+                        sticker: null,
+                        type: 'deleted'
+                    }
+                }
+            );
+        } else {
+            const deletedFor = existing.deletedFor || [];
+            if (!deletedFor.includes(uid)) deletedFor.push(uid);
+            await paymentChatCollection.updateOne(
+                { messageId: String(messageId) },
+                { $set: { deletedFor: deletedFor } }
+            );
         }
-        
-        await paymentChatCollection.updateOne(
-            { messageId: messageId },
-            { $set: { deletedFor: deletedFor } }
-        );
-        
+
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -6082,29 +6147,113 @@ app.get("/mini/:userId", (req, res) => {
     .chat-msg .time .tick { font-size: 12px; }
 
     .chat-footer {
-      padding: 10px 16px;
-      background: rgba(0,0,0,0.85);
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.92);
       border-top: 1px solid rgba(255,255,255,0.06);
       padding-bottom: max(10px, env(safe-area-inset-bottom));
+      position: relative;
     }
     .chat-input-wrapper {
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 6px;
       background: rgba(255,255,255,0.05);
       border-radius: 24px;
-      padding: 6px 6px 6px 16px;
+      padding: 4px 4px 4px 8px;
       border: 1px solid rgba(255,255,255,0.1);
     }
     .chat-input {
-      flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none;
+      flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; min-width: 0;
     }
     .chat-input::placeholder { color: rgba(255,255,255,0.3); }
-    .pay-send-btn {
+    .pay-send-btn, .chat-icon-btn {
       background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
       border: none; border-radius: 50%; width: 40px; height: 40px;
       display: flex; align-items: center; justify-content: center;
-      cursor: pointer; transition: transform 0.2s; flex-shrink: 0;
+      cursor: pointer; transition: transform 0.2s; flex-shrink: 0; color: #fff;
     }
-    .pay-send-btn:active { transform: scale(0.9); }
+    .chat-icon-btn {
+      background: transparent; width: 36px; height: 36px; color: rgba(255,255,255,0.7);
+    }
+    .chat-icon-btn:active, .pay-send-btn:active { transform: scale(0.9); }
+    .chat-icon-btn.recording { color: #ff453a; animation: pulseGlow 1s infinite; }
+
+    /* Reply / edit bar (Telegram-style) */
+    .reply-bar {
+      display: none; align-items: center; gap: 10px;
+      padding: 8px 12px; margin-bottom: 6px;
+      background: rgba(183,75,255,0.12); border-left: 3px solid #bf5af2;
+      border-radius: 10px; font-size: 13px;
+    }
+    .reply-bar.open { display: flex; }
+    .reply-bar .rb-body { flex: 1; min-width: 0; }
+    .reply-bar .rb-title { color: #bf5af2; font-weight: 600; font-size: 12px; }
+    .reply-bar .rb-text { color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .reply-bar .rb-close { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; padding: 4px; }
+
+    /* Inline reply quote inside bubble */
+    .reply-quote {
+      border-left: 3px solid #bf5af2; padding: 4px 8px; margin-bottom: 6px;
+      background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px; max-width: 100%;
+    }
+    .reply-quote .rq-name { color: #bf5af2; font-weight: 600; }
+    .reply-quote .rq-text { color: rgba(255,255,255,0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .msg-edited { font-size: 10px; color: rgba(255,255,255,0.35); margin-left: 4px; font-style: italic; }
+    .bubble.deleted { opacity: 0.55; font-style: italic; color: rgba(255,255,255,0.45) !important; background: rgba(255,255,255,0.04) !important; }
+    .bubble.sticker-bubble { background: transparent !important; padding: 4px; font-size: 48px; line-height: 1; }
+    .bubble img.chat-media { max-width: 220px; border-radius: 12px; display: block; }
+    .bubble audio.chat-voice { width: 180px; height: 32px; }
+
+    /* Context menu */
+    .msg-ctx {
+      position: fixed; z-index: 950; min-width: 180px;
+      background: rgba(28,28,30,0.96); backdrop-filter: blur(30px);
+      border: 0.5px solid rgba(255,255,255,0.12); border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.55); padding: 6px; display: none;
+    }
+    .msg-ctx.open { display: block; animation: fadeSlide 0.15s ease; }
+    .msg-ctx button {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      background: none; border: none; color: #fff; font-size: 14px;
+      padding: 11px 12px; border-radius: 10px; cursor: pointer; text-align: left;
+    }
+    .msg-ctx button:active { background: rgba(255,255,255,0.08); }
+    .msg-ctx button.danger { color: #ff453a; }
+
+    /* Sticker panel */
+    .sticker-panel {
+      display: none; max-height: 180px; overflow-y: auto;
+      padding: 8px; margin-bottom: 6px;
+      background: rgba(20,20,22,0.95); border-radius: 14px;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      grid-template-columns: repeat(6, 1fr); gap: 4px;
+    }
+    .sticker-panel.open { display: grid; }
+    .sticker-panel button {
+      background: none; border: none; font-size: 28px; padding: 6px;
+      border-radius: 10px; cursor: pointer; line-height: 1;
+    }
+    .sticker-panel button:active { background: rgba(255,255,255,0.08); transform: scale(1.15); }
+
+    /* Scroll to bottom FAB */
+    .chat-scroll-fab {
+      position: absolute; right: 16px; bottom: 78px; z-index: 40;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(40,40,48,0.95); border: 0.5px solid rgba(255,255,255,0.14);
+      color: #fff; display: none; align-items: center; justify-content: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4); cursor: pointer;
+    }
+    .chat-scroll-fab.show { display: flex; }
+    .chat-scroll-fab .new-badge {
+      position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+      background: #bf5af2; border-radius: 8px; font-size: 10px; font-weight: 700;
+      display: none; align-items: center; justify-content: center; padding: 0 4px;
+    }
+    .chat-scroll-fab .new-badge.show { display: flex; }
+
+    .typing-indicator {
+      font-size: 12px; color: rgba(255,255,255,0.45); padding: 0 4px 6px; display: none;
+    }
+    .typing-indicator.show { display: block; }
     
     /* Reaction popup */
     .reaction-popup {
@@ -6562,21 +6711,43 @@ app.get("/mini/:userId", (req, res) => {
           <h3 id="payUserName">User Name <span class="online-dot offline" id="payOnlineDot"></span></h3>
           <p id="payUserId">ID: 0</p>
         </div>
+        <button onclick="clearChatHistory()" title="Clear chat" style="background:none;border:none;color:#ff453a;font-size:16px;cursor:pointer;padding:6px;">✕</button>
       </div>
 
-      <div class="chat-area" id="payChatArea">
-      </div>
+      <div class="chat-area" id="payChatArea"></div>
 
       <div class="chat-footer">
-        <div id="payStatus" style="width: 100%; text-align:center; font-size:11px; margin-bottom:6px;"></div>
+        <button type="button" class="chat-scroll-fab" id="chatScrollFab" title="Jump to latest">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+          <span class="new-badge" id="chatNewBadge">0</span>
+        </button>
+        <div class="typing-indicator" id="typingIndicator">typing...</div>
+        <div id="payStatus" style="width: 100%; text-align:center; font-size:11px; margin-bottom:4px;"></div>
+        <div class="reply-bar" id="replyBar">
+          <div class="rb-body">
+            <div class="rb-title" id="replyBarTitle">Reply</div>
+            <div class="rb-text" id="replyBarText"></div>
+          </div>
+          <button type="button" class="rb-close" id="replyBarClose" aria-label="Cancel">×</button>
+        </div>
+        <div class="sticker-panel" id="stickerPanel"></div>
         <div class="chat-input-wrapper">
-          <input type="text" id="payAmountInput" class="chat-input" placeholder="Enter amount or chat..." autocomplete="off" />
-          <button class="pay-send-btn" id="paySendBtn">
+          <button type="button" class="chat-icon-btn" id="stickerBtn" title="Stickers">😀</button>
+          <button type="button" class="chat-icon-btn" id="attachBtn" title="Photo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+          </button>
+          <input type="file" id="chatImageInput" accept="image/*" style="display:none" />
+          <input type="text" id="payAmountInput" class="chat-input" placeholder="Message or amount..." autocomplete="off" />
+          <button type="button" class="chat-icon-btn" id="voiceBtn" title="Hold to record">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          </button>
+          <button class="pay-send-btn" id="paySendBtn" title="Send">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </div>
-        <div style="font-size:10px; color:rgba(255,255,255,0.3); text-align:center; margin-top:6px;">Min 200 MythoPoints • 15% tax on transfers</div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.3); text-align:center; margin-top:4px;">Numbers ≥200 = payment • text = chat • long-press msg for actions</div>
       </div>
+      <div class="msg-ctx" id="msgCtxMenu"></div>
     </div>
 
     <div class="payment-processing" id="payment-processing" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:300; background:rgba(0,0,0,0.8); padding:20px; border-radius:20px;">
@@ -8190,6 +8361,10 @@ app.get("/mini/:userId", (req, res) => {
 
     async function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
+      chatStickToBottom = true;
+      pendingNewWhileUp = 0;
+      lastChatFingerprint = '';
+      try { cancelReplyEdit(); } catch (e) {}
       document.getElementById('paySearchArea').classList.add('hidden');
       document.getElementById('payFullscreen').classList.add('open');
       
@@ -8200,7 +8375,7 @@ app.get("/mini/:userId", (req, res) => {
       // Check online status
       checkUserOnlineStatus(id);
       
-      loadPayChat(id);
+      loadPayChat(id, false, true);
       document.getElementById('payAmountInput').focus();
       document.getElementById('payStatus').innerHTML = '';
 
@@ -8255,151 +8430,338 @@ app.get("/mini/:userId", (req, res) => {
       }
     }
 
-    async function loadPayChat(receiverId, silent = false) {
+    // ─── Telegram-style chat state ───
+    let replyToMessage = null;   // { messageId, message, senderId, ... }
+    let editingMessageId = null;
+    let chatStickToBottom = true;
+    let lastChatFingerprint = '';
+    let pendingNewWhileUp = 0;
+    let mediaRecorder = null;
+    let voiceChunks = [];
+
+    function isNearBottom(el, threshold = 80) {
+      return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
+    }
+    function scrollChatToBottom(smooth = false) {
+      const container = document.getElementById('payChatArea');
+      if (!container) return;
+      chatStickToBottom = true;
+      pendingNewWhileUp = 0;
+      updateScrollFab();
+      if (smooth) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      else container.scrollTop = container.scrollHeight;
+    }
+    function updateScrollFab() {
+      const fab = document.getElementById('chatScrollFab');
+      const badge = document.getElementById('chatNewBadge');
+      if (!fab) return;
+      if (chatStickToBottom) {
+        fab.classList.remove('show');
+        if (badge) badge.classList.remove('show');
+      } else {
+        fab.classList.add('show');
+        if (badge && pendingNewWhileUp > 0) {
+          badge.textContent = pendingNewWhileUp > 99 ? '99+' : String(pendingNewWhileUp);
+          badge.classList.add('show');
+        } else if (badge) badge.classList.remove('show');
+      }
+    }
+    function chatFingerprint(chats) {
+      return (chats || []).map(c => c.messageId + ':' + (c.editedAt || '') + ':' + (c.reactions||[]).length + ':' + (c.deletedForEveryone?1:0)).join('|');
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function loadPayChat(receiverId, silent = false, forceScrollBottom = false) {
       try {
         const res = await fetch('/api/payment/chat/' + userId + '?otherId=' + receiverId);
         const data = await res.json();
-        if (data.success) {
-          currentChatMessages = data.chats;
-          const container = document.getElementById('payChatArea');
-          
-          let html = \`
-            <div class="encryption-msg">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-              Your messages and payments are secured with 256-bit encryption
+        if (!data.success) return;
+
+        const container = document.getElementById('payChatArea');
+        const prevScrollTop = container.scrollTop;
+        const prevScrollHeight = container.scrollHeight;
+        const wasNearBottom = isNearBottom(container) || chatStickToBottom || forceScrollBottom;
+
+        const sorted = [...data.chats].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const visible = sorted.filter(c => !(c.deletedFor && c.deletedFor.includes(userId)));
+        const fp = chatFingerprint(visible);
+        const isNewContent = fp !== lastChatFingerprint;
+        if (silent && !isNewContent) return; // nothing changed – keep scroll position
+        if (silent && isNewContent && !wasNearBottom) {
+          // count truly new ids
+          const oldIds = new Set((currentChatMessages || []).map(c => c.messageId));
+          pendingNewWhileUp += visible.filter(c => !oldIds.has(c.messageId) && c.senderId !== userId).length;
+        }
+        lastChatFingerprint = fp;
+        currentChatMessages = data.chats;
+
+        let html = \`
+          <div class="encryption-msg">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            Messages are end-to-end style encrypted in transit
+          </div>
+        \`;
+
+        if (visible.length === 0) {
+          html += \`
+            <div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.3);">
+              <div style="font-size:48px; margin-bottom:16px;">💬</div>
+              <p>No messages yet. Say hello or send a payment!</p>
             </div>
           \`;
+        } else {
+          let lastDate = '';
+          visible.forEach(c => {
+            const isSent = c.senderId === userId;
+            const dateObj = new Date(c.timestamp);
+            const time = dateObj.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+            const dateStr = dateObj.toLocaleDateString(undefined, {month:'long', day:'numeric', year:'numeric'});
+            if (dateStr !== lastDate) {
+              html += \`<div class="chat-date">\${dateStr}</div>\`;
+              lastDate = dateStr;
+            }
 
-          if (data.chats.length === 0) {
-            // Empty state - show welcome message
+            const senderPhoto = isSent ? (tgUser?.photo_url || null) : c.senderPhoto;
+            const senderName = isSent ? (tgUser?.first_name || 'You') : (c.senderName || 'User');
+            const avatar = senderPhoto
+              ? \`<img src="\${senderPhoto}" class="avatar" />\`
+              : \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${escapeHtml(senderName.charAt(0))}</div>\`;
+
+            // reply quote
+            let replyHtml = '';
+            if (c.replyTo) {
+              const rqName = c.replyTo.senderId === userId ? 'You' : (c.senderName || 'User');
+              const rqText = c.replyTo.sticker || c.replyTo.message || c.replyTo.type || 'Message';
+              replyHtml = \`<div class="reply-quote" onclick="scrollToMsg('\${c.replyTo.messageId}')"><div class="rq-name">\${escapeHtml(rqName)}</div><div class="rq-text">\${escapeHtml(String(rqText).slice(0,80))}</div></div>\`;
+            }
+
+            let bubbleHtml = '';
+            if (c.deletedForEveryone || c.type === 'deleted') {
+              bubbleHtml = \`<div class="bubble text deleted">This message was deleted</div>\`;
+            } else if (c.type === 'payment') {
+              const statusText = isSent ? 'SENT' : 'RECEIVED';
+              bubbleHtml = \`
+                <div class="bubble payment">
+                  \${replyHtml}
+                  <div class="payment-amount">M \${c.amount}</div>
+                  <div class="payment-status success">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="background:#30d158; color:#0a0014; border-radius:50%; padding:2px;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    \${statusText} SECURELY
+                  </div>
+                  \${isSent ? '<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ' + (c.tax || 0) + ' pts</div>' : ''}
+                </div>
+              \`;
+            } else if (c.type === 'sticker' && c.sticker) {
+              bubbleHtml = \`<div class="bubble sticker-bubble">\${replyHtml}\${c.sticker}</div>\`;
+            } else if (c.type === 'image' && c.mediaUrl) {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}<img class="chat-media" src="\${c.mediaUrl}" alt="photo" loading="lazy" /></div>\`;
+            } else if (c.type === 'voice' && c.mediaUrl) {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}<audio class="chat-voice" controls preload="none" src="\${c.mediaUrl}"></audio></div>\`;
+            } else {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}\${escapeHtml(c.message)}</div>\`;
+            }
+
+            let reactionsHtml = '';
+            if (c.reactions && c.reactions.length > 0 && !c.deletedForEveryone) {
+              const reactionMap = {};
+              c.reactions.forEach(r => {
+                if (!reactionMap[r.reaction]) reactionMap[r.reaction] = [];
+                reactionMap[r.reaction].push(r.userId);
+              });
+              reactionsHtml = \`<div class="reaction-bar">\`;
+              Object.keys(reactionMap).forEach(emoji => {
+                reactionsHtml += \`<button class="reaction-btn" onclick="addReaction('\${c.messageId}', '\${emoji}')">\${emoji} <span class="count">\${reactionMap[emoji].length}</span></button>\`;
+              });
+              reactionsHtml += \`</div>\`;
+            }
+
+            let tickHtml = '';
+            if (isSent && !c.deletedForEveryone) {
+              tickHtml = c.read
+                ? \`<span class="tick" style="color:#30d158;">✓✓</span>\`
+                : \`<span class="tick" style="color:rgba(255,255,255,0.3);">✓</span>\`;
+            }
+            const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
+
             html += \`
-              <div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.3);">
-                <div style="font-size:48px; margin-bottom:16px;">💬</div>
-                <p>No messages yet. Say hello or send a payment!</p>
+              <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
+                \${avatar}
+                <div class="bubble-wrapper">
+                  \${bubbleHtml}
+                  \${reactionsHtml}
+                  <div class="time">\${time}\${editedHtml} \${tickHtml}</div>
+                </div>
               </div>
             \`;
-          } else {
-            let lastDate = '';
-            const sorted = [...data.chats].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            
-            sorted.forEach(c => {
-              // Skip if deleted for this user
-              if (c.deletedFor && c.deletedFor.includes(userId)) return;
-              
-              const isSent = c.senderId === userId;
-              const dateObj = new Date(c.timestamp);
-              const time = dateObj.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
-              const dateStr = dateObj.toLocaleDateString(undefined, {month:'long', day:'numeric', year:'numeric'});
-              
-              if (dateStr !== lastDate) {
-                html += \`<div class="chat-date">\${dateStr}</div>\`;
-                lastDate = dateStr;
-              }
+          });
+        }
 
-              // Avatar for sender
-              const senderPhoto = isSent ? (tgUser?.photo_url || null) : c.senderPhoto;
-              const senderName = isSent ? (tgUser?.first_name || 'You') : (c.senderName || 'User');
-              
-              const avatar = senderPhoto ? 
-                \`<img src="\${senderPhoto}" class="avatar" />\` : 
-                \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${senderName.charAt(0)}</div>\`;
-              
-              let bubbleHtml = '';
-              let isRead = c.read || false;
-              
-              if (c.type === 'payment') {
-                const statusText = isSent ? 'SENT' : 'RECEIVED';
-                bubbleHtml = \`
-                  <div class="bubble payment">
-                    <div class="payment-amount">M \${c.amount}</div>
-                    <div class="payment-status success">
-                      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="background:#30d158; color:#0a0014; border-radius:50%; padding:2px;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                      \${statusText} SECURELY
-                    </div>
-                    \${isSent ? '<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ' + (c.tax || 0) + ' pts</div>' : ''}
-                  </div>
-                \`;
-              } else {
-                bubbleHtml = \`<div class="bubble text">\${c.message}</div>\`;
-              }
-              
-              // Reactions
-              let reactionsHtml = '';
-              if (c.reactions && c.reactions.length > 0) {
-                const reactionMap = {};
-                c.reactions.forEach(r => {
-                  if (!reactionMap[r.reaction]) reactionMap[r.reaction] = [];
-                  reactionMap[r.reaction].push(r.userId);
-                });
-                reactionsHtml = \`<div class="reaction-bar">\`;
-                Object.keys(reactionMap).forEach(emoji => {
-                  const count = reactionMap[emoji].length;
-                  reactionsHtml += \`
-                    <button class="reaction-btn" onclick="addReaction('\${c.messageId}', '\${emoji}')">
-                      \${emoji} <span class="count">\${count}</span>
-                    </button>
-                  \`;
-                });
-                reactionsHtml += \`</div>\`;
-              }
-              
-              // Message actions
-              const actionsHtml = \`
-                <div class="msg-actions">
-                  <button onclick="showReactionPicker('\${c.messageId}')">😊</button>
-                  \${isSent ? \`<button onclick="deleteMessageForSelf('\${c.messageId}')">🗑️</button>\` : ''}
-                </div>
-              \`;
-              
-              // Read receipt tick
-              let tickHtml = '';
-              if (isSent) {
-                tickHtml = isRead ? 
-                  \`<span class="tick" style="color:#30d158;">✓✓</span>\` : 
-                  \`<span class="tick" style="color:rgba(255,255,255,0.3);">✓</span>\`;
-              }
-              
-              html += \`
-                <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}">
-                  \${avatar}
-                  <div class="bubble-wrapper">
-                    \${bubbleHtml}
-                    \${reactionsHtml}
-                    \${actionsHtml}
-                    <div class="time">
-                      \${time} \${tickHtml}
-                    </div>
-                  </div>
-                </div>
-              \`;
-            });
-          }
-          container.innerHTML = html;
+        container.innerHTML = html;
+
+        // long-press / context menu on messages
+        container.querySelectorAll('.chat-msg').forEach(el => {
+          let pressTimer = null;
+          const mid = el.getAttribute('data-message-id');
+          const openCtx = (x, y) => showMsgContextMenu(mid, x, y);
+          el.addEventListener('contextmenu', (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY); });
+          el.addEventListener('touchstart', (e) => {
+            const t = e.touches[0];
+            pressTimer = setTimeout(() => openCtx(t.clientX, t.clientY), 450);
+          }, { passive: true });
+          el.addEventListener('touchend', () => clearTimeout(pressTimer));
+          el.addEventListener('touchmove', () => clearTimeout(pressTimer));
+        });
+
+        // restore scroll: stick to bottom only if user was near bottom / forced
+        if (wasNearBottom || forceScrollBottom) {
           container.scrollTop = container.scrollHeight;
-          
-          // If not silent, mark messages as read
-          if (!silent && selectedReceiver) {
-            fetch('/api/payment/chat/mark-read', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: userId, otherId: selectedReceiver })
-            }).then(() => {
-              checkUnreadCount();
-            }).catch(e => console.log(e));
-          }
+          chatStickToBottom = true;
+          pendingNewWhileUp = 0;
+        } else {
+          // keep relative position when older content height changes
+          container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight);
+          chatStickToBottom = false;
+        }
+        updateScrollFab();
+
+        if (!silent && selectedReceiver) {
+          fetch('/api/payment/chat/mark-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId, otherId: selectedReceiver })
+          }).then(() => checkUnreadCount()).catch(() => {});
         }
       } catch (e) {
         console.error('Pay chat load error:', e);
       }
     }
 
-    // ─── REACTION FUNCTIONS ───
+    // track user scroll in chat
+    (function bindChatScroll() {
+      const area = document.getElementById('payChatArea');
+      if (!area || area._scrollBound) return;
+      area._scrollBound = true;
+      area.addEventListener('scroll', () => {
+        chatStickToBottom = isNearBottom(area);
+        if (chatStickToBottom) pendingNewWhileUp = 0;
+        updateScrollFab();
+      }, { passive: true });
+      const fab = document.getElementById('chatScrollFab');
+      if (fab) fab.addEventListener('click', () => scrollChatToBottom(true));
+    })();
+
+    window.scrollToMsg = function(messageId) {
+      const el = document.querySelector('.chat-msg[data-message-id="' + messageId + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.outline = '2px solid #bf5af2';
+        setTimeout(() => { el.style.outline = ''; }, 1200);
+      }
+    };
+
+    // ─── REACTIONS / CONTEXT MENU / REPLY / EDIT ───
     let reactionPickerMessageId = null;
     const reactionOptions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏', '🔥'];
+    const STICKERS = ['😀','😂','🥰','😎','🔥','💯','🎉','✨','❤️','💜','🙏','👏','🤝','💪','🚀','⚡','🌟','🏆','💎','🎮','🍕','☕','🌙','☀️','🎯','✅','❌','💬','📎','🎤'];
+
+    function findMsg(messageId) {
+      return (currentChatMessages || []).find(m => m.messageId === messageId);
+    }
+
+    function cancelReplyEdit() {
+      replyToMessage = null;
+      editingMessageId = null;
+      const bar = document.getElementById('replyBar');
+      if (bar) bar.classList.remove('open');
+      const input = document.getElementById('payAmountInput');
+      if (input && input.placeholder.indexOf('Edit') === 0) input.placeholder = 'Message or amount...';
+    }
+    document.getElementById('replyBarClose')?.addEventListener('click', cancelReplyEdit);
+
+    function startReply(messageId) {
+      const m = findMsg(messageId);
+      if (!m || m.deletedForEveryone) return;
+      editingMessageId = null;
+      replyToMessage = m;
+      const bar = document.getElementById('replyBar');
+      document.getElementById('replyBarTitle').textContent = 'Reply to ' + (m.senderId === userId ? 'yourself' : (m.senderName || 'user'));
+      document.getElementById('replyBarText').textContent = m.sticker || m.message || m.type || 'Message';
+      bar.classList.add('open');
+      document.getElementById('payAmountInput').focus();
+      hideMsgContextMenu();
+    }
+    window.startReply = startReply;
+
+    function startEdit(messageId) {
+      const m = findMsg(messageId);
+      if (!m || m.senderId !== userId || m.type !== 'message') return;
+      replyToMessage = null;
+      editingMessageId = messageId;
+      const bar = document.getElementById('replyBar');
+      document.getElementById('replyBarTitle').textContent = 'Edit message';
+      document.getElementById('replyBarText').textContent = m.message || '';
+      bar.classList.add('open');
+      const input = document.getElementById('payAmountInput');
+      input.value = m.message || '';
+      input.placeholder = 'Edit message...';
+      input.focus();
+      hideMsgContextMenu();
+    }
+    window.startEdit = startEdit;
+
+    function hideMsgContextMenu() {
+      const menu = document.getElementById('msgCtxMenu');
+      if (menu) menu.classList.remove('open');
+    }
+    function showMsgContextMenu(messageId, x, y) {
+      const m = findMsg(messageId);
+      if (!m) return;
+      const isSent = m.senderId === userId;
+      const deleted = m.deletedForEveryone || m.type === 'deleted';
+      const menu = document.getElementById('msgCtxMenu');
+      let items = '';
+      if (!deleted) {
+        items += \`<button onclick="startReply('\${messageId}')">↩️ Reply</button>\`;
+        items += \`<button onclick="showReactionPicker('\${messageId}'); hideMsgContextMenu();">😊 React</button>\`;
+        items += \`<button onclick="copyMsgText('\${messageId}')">📋 Copy</button>\`;
+        if (isSent && m.type === 'message') items += \`<button onclick="startEdit('\${messageId}')">✏️ Edit</button>\`;
+        items += \`<button class="danger" onclick="deleteMessageForSelf('\${messageId}')">🗑 Delete for me</button>\`;
+        if (isSent) items += \`<button class="danger" onclick="deleteMessageForEveryone('\${messageId}')">🗑 Delete for everyone</button>\`;
+      } else {
+        items += \`<button class="danger" onclick="deleteMessageForSelf('\${messageId}')">🗑 Remove</button>\`;
+      }
+      menu.innerHTML = items;
+      menu.classList.add('open');
+      const pad = 8;
+      const mw = menu.offsetWidth || 180;
+      const mh = menu.offsetHeight || 200;
+      let left = Math.min(x, window.innerWidth - mw - pad);
+      let top = Math.min(y, window.innerHeight - mh - pad);
+      menu.style.left = Math.max(pad, left) + 'px';
+      menu.style.top = Math.max(pad, top) + 'px';
+      setTimeout(() => {
+        const closer = (e) => {
+          if (!menu.contains(e.target)) { hideMsgContextMenu(); document.removeEventListener('touchstart', closer); document.removeEventListener('mousedown', closer); }
+        };
+        document.addEventListener('touchstart', closer, { passive: true });
+        document.addEventListener('mousedown', closer);
+      }, 30);
+    }
+    window.hideMsgContextMenu = hideMsgContextMenu;
+
+    window.copyMsgText = function(messageId) {
+      const m = findMsg(messageId);
+      if (!m) return;
+      const t = m.message || m.sticker || '';
+      if (navigator.clipboard) navigator.clipboard.writeText(t).catch(() => {});
+      hideMsgContextMenu();
+      tg.HapticFeedback.notificationOccurred('success');
+    };
 
     function showReactionPicker(messageId) {
       reactionPickerMessageId = messageId;
-      // Create a reaction picker popup
       const existing = document.querySelector('.reaction-popup');
       if (existing) existing.remove();
       
@@ -8416,14 +8778,12 @@ app.get("/mini/:userId", (req, res) => {
         popup.appendChild(btn);
       });
       
-      // Find the message bubble
       const msgElement = document.querySelector(\`.chat-msg[data-message-id="\${messageId}"]\`);
       if (msgElement) {
         const bubble = msgElement.querySelector('.bubble-wrapper');
         if (bubble) {
           bubble.style.position = 'relative';
           bubble.appendChild(popup);
-          // Auto close after 5 seconds
           setTimeout(() => {
             if (popup.parentNode) popup.remove();
           }, 5000);
@@ -8477,6 +8837,29 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.deleteMessageForSelf = deleteMessageForSelf;
 
+    async function deleteMessageForEveryone(messageId) {
+      const confirmed = await showConfirm('Delete this message for everyone?');
+      if (!confirmed) return;
+      hideMsgContextMenu();
+      try {
+        const res = await fetch('/api/payment/chat/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId, forEveryone: true })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          if (selectedReceiver) loadPayChat(selectedReceiver, true);
+        } else {
+          alert(data.error || 'Could not delete');
+        }
+      } catch (e) {
+        console.error('Delete for everyone error:', e);
+      }
+    }
+    window.deleteMessageForEveryone = deleteMessageForEveryone;
+
     // ─── CLEAR CHAT HISTORY ───
     async function clearChatHistory() {
       if (!selectedReceiver) return;
@@ -8503,18 +8886,41 @@ app.get("/mini/:userId", (req, res) => {
     }
     window.clearChatHistory = clearChatHistory;
 
-    // Add clear chat button to header
-    document.querySelector('.chat-header').insertAdjacentHTML('beforeend', \`
-      <button onclick="clearChatHistory()" style="background:none;border:none;color:#ff453a;font-size:12px;cursor:pointer;padding:4px;">✕</button>
-    \`);
+    // ─── SEND (text / payment / edit / reply) + media helpers ───
+    async function sendChatPayload(payload) {
+      const res = await fetch('/api/payment/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.json();
+    }
 
-    // ─── PAYMENT SEND ───
     document.getElementById('paySendBtn').addEventListener('click', async function() {
       const inputVal = document.getElementById('payAmountInput').value.trim();
-      if (!inputVal || !selectedReceiver) return;
-      
-      const isNumeric = /^\\d+$/.test(inputVal);
-      
+      if (!selectedReceiver) return;
+
+      if (editingMessageId) {
+        if (!inputVal) return;
+        try {
+          const res = await fetch('/api/payment/chat/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messageId: editingMessageId, userId, message: inputVal })
+          });
+          const data = await res.json();
+          if (data.success) {
+            document.getElementById('payAmountInput').value = '';
+            cancelReplyEdit();
+            loadPayChat(selectedReceiver, true, true);
+          } else alert(data.error || 'Edit failed');
+        } catch (e) { console.error(e); }
+        return;
+      }
+
+      if (!inputVal) return;
+      const isNumeric = /^\\d+$/.test(inputVal) && !replyToMessage;
+
       if (isNumeric) {
           const amount = parseInt(inputVal);
           if (amount < 200) {
@@ -8524,7 +8930,6 @@ app.get("/mini/:userId", (req, res) => {
           const processing = document.getElementById('payment-processing');
           processing.classList.add('active');
           this.disabled = true;
-          
           try {
             const res = await fetch('/api/payment/send', {
               method: 'POST',
@@ -8534,13 +8939,13 @@ app.get("/mini/:userId", (req, res) => {
             const data = await res.json();
             processing.classList.remove('active');
             this.disabled = false;
-            
             if (data.success) {
               tg.HapticFeedback.notificationOccurred('success');
               document.getElementById('payAmountInput').value = '';
               document.getElementById('payStatus').innerHTML = '';
+              cancelReplyEdit();
               loadDashboard();
-              loadPayChat(selectedReceiver);
+              loadPayChat(selectedReceiver, false, true);
             } else {
               document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">' + data.error + '</span>';
               tg.HapticFeedback.notificationOccurred('error');
@@ -8552,21 +8957,20 @@ app.get("/mini/:userId", (req, res) => {
           }
       } else {
           try {
-              const res = await fetch('/api/payment/chat/message', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                      senderId: userId, 
-                      receiverId: selectedReceiver, 
-                      message: inputVal,
-                      senderName: tgUser?.first_name || 'User'
-                  })
-              });
-              const data = await res.json();
+              const body = {
+                senderId: userId,
+                receiverId: selectedReceiver,
+                message: inputVal,
+                senderName: tgUser?.first_name || 'User',
+                type: 'message'
+              };
+              if (replyToMessage) body.replyTo = replyToMessage.messageId;
+              const data = await sendChatPayload(body);
               if (data.success) {
                   document.getElementById('payAmountInput').value = '';
                   document.getElementById('payStatus').innerHTML = '';
-                  loadPayChat(selectedReceiver);
+                  cancelReplyEdit();
+                  loadPayChat(selectedReceiver, false, true);
               }
           } catch(e) {
               console.error(e);
@@ -8575,11 +8979,112 @@ app.get("/mini/:userId", (req, res) => {
     });
 
     document.getElementById('payAmountInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            document.getElementById('paySendBtn').click();
-        }
+        if (e.key === 'Enter') document.getElementById('paySendBtn').click();
     });
-    
+
+    // Stickers
+    (function initStickers() {
+      const panel = document.getElementById('stickerPanel');
+      const btn = document.getElementById('stickerBtn');
+      if (!panel || !btn) return;
+      panel.innerHTML = STICKERS.map(s => '<button type="button" data-s="' + s + '">' + s + '</button>').join('');
+      btn.addEventListener('click', () => panel.classList.toggle('open'));
+      panel.addEventListener('click', async (e) => {
+        const b = e.target.closest('button[data-s]');
+        if (!b || !selectedReceiver) return;
+        panel.classList.remove('open');
+        const sticker = b.getAttribute('data-s');
+        const body = {
+          senderId: userId, receiverId: selectedReceiver,
+          senderName: tgUser?.first_name || 'User',
+          type: 'sticker', sticker, message: sticker
+        };
+        if (replyToMessage) body.replyTo = replyToMessage.messageId;
+        try {
+          const data = await sendChatPayload(body);
+          if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+        } catch (err) { console.error(err); }
+      });
+    })();
+
+    // Image attach
+    document.getElementById('attachBtn')?.addEventListener('click', () => {
+      document.getElementById('chatImageInput')?.click();
+    });
+    document.getElementById('chatImageInput')?.addEventListener('change', async function() {
+      const file = this.files && this.files[0];
+      this.value = '';
+      if (!file || !selectedReceiver) return;
+      if (file.size > 280000) { alert('Image too large (max ~280KB). Compress and retry.'); return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const mediaUrl = reader.result;
+        const body = {
+          senderId: userId, receiverId: selectedReceiver,
+          senderName: tgUser?.first_name || 'User',
+          type: 'image', mediaUrl, mediaType: file.type || 'image/jpeg', message: 'Photo'
+        };
+        if (replyToMessage) body.replyTo = replyToMessage.messageId;
+        try {
+          const data = await sendChatPayload(body);
+          if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+          else alert(data.error || 'Upload failed');
+        } catch (e) { alert('Upload failed'); }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Voice note (hold to record)
+    (function initVoice() {
+      const btn = document.getElementById('voiceBtn');
+      if (!btn || !navigator.mediaDevices) return;
+      const startRec = async (e) => {
+        e.preventDefault();
+        if (!selectedReceiver) return;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          voiceChunks = [];
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (ev) => { if (ev.data.size) voiceChunks.push(ev.data); };
+          mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            btn.classList.remove('recording');
+            const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+            if (blob.size < 500) return;
+            if (blob.size > 280000) { alert('Voice too long. Keep under ~15s.'); return; }
+            const reader = new FileReader();
+            reader.onload = async () => {
+              const body = {
+                senderId: userId, receiverId: selectedReceiver,
+                senderName: tgUser?.first_name || 'User',
+                type: 'voice', mediaUrl: reader.result, mediaType: 'audio/webm', message: 'Voice'
+              };
+              if (replyToMessage) body.replyTo = replyToMessage.messageId;
+              try {
+                const data = await sendChatPayload(body);
+                if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+                else alert(data.error || 'Voice send failed');
+              } catch (err) { console.error(err); }
+            };
+            reader.readAsDataURL(blob);
+          };
+          mediaRecorder.start();
+          btn.classList.add('recording');
+          tg.HapticFeedback.impactOccurred('medium');
+        } catch (err) {
+          alert('Microphone permission needed for voice notes.');
+        }
+      };
+      const stopRec = () => {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      };
+      btn.addEventListener('mousedown', startRec);
+      btn.addEventListener('mouseup', stopRec);
+      btn.addEventListener('mouseleave', stopRec);
+      btn.addEventListener('touchstart', startRec, { passive: false });
+      btn.addEventListener('touchend', stopRec);
+    })();
+
     // ─── CHECK UNREAD COUNT & UPDATE BADGE ───
     async function checkUnreadCount() {
       try {
