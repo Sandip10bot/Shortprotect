@@ -3428,80 +3428,214 @@ app.get("/api/referral/leaderboard", async (req, res) => {
 app.get("/api/leaderboard/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
-        const { timeframe = "all", page = 1 } = req.query;
+        const timeframe = String(req.query.timeframe || "all").toLowerCase();
         const limit = 10;
-        const skip = (parseInt(page) - 1) * limit;
+        const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const skip = (pageNum - 1) * limit;
 
-        let pointField = "mythopoints";
-        if (timeframe === "weekly") pointField = "weekly_points";
-        if (timeframe === "monthly") pointField = "monthly_points";
-
-        const query = {};
-        query[pointField] = { $gt: 0 };
-
-        const totalUsers = await usersCollection.countDocuments(query);
-        const totalPages = Math.ceil(totalUsers / limit) || 1;
-
-        const users = await usersCollection
-            .find(query)
-            .sort({ [pointField]: -1 })
-            .skip(skip)
-            .limit(limit)
-            .toArray();
-
-        const formattedUsers = users.map(u => {
+        const formatUser = (u, points) => {
             let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
             let safeUsername = null;
-            if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim() !== '') {
-                safeUsername = rawUsername.trim().startsWith('@') 
-                    ? rawUsername.trim() 
+            if (rawUsername && typeof rawUsername === "string" && rawUsername.trim() !== "") {
+                safeUsername = rawUsername.trim().startsWith("@")
+                    ? rawUsername.trim()
                     : `@${rawUsername.trim()}`;
             }
             let rawName = u.name || u.first_name || null;
-            if (!rawName) {
-                if (safeUsername) {
-                    rawName = safeUsername;
-                } else {
-                    rawName = `User ${u.user_id}`;
-                }
-            }
-            let finalName = String(rawName); 
-            if (finalName.length > 15) {
-                finalName = finalName.substring(0, 15) + "..";
-            }
+            if (!rawName) rawName = safeUsername || `User ${u.user_id}`;
+            let finalName = String(rawName);
+            if (finalName.length > 15) finalName = finalName.substring(0, 15) + "..";
             return {
                 user_id: u.user_id,
                 name: finalName,
                 username: safeUsername,
-                points: u[pointField] || 0,
-                title: getRankTitle(u[pointField] || 0),
+                points: points,
+                title: getRankTitle(points),
                 photo_url: u.photo_url || null
             };
-        });
+        };
 
+        // ========== ALL-TIME: users.mythopoints ==========
+        if (timeframe === "all") {
+            const pointField = "mythopoints";
+            const query = { [pointField]: { $gt: 0 } };
+            const totalUsers = await usersCollection.countDocuments(query);
+            const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+            const users = await usersCollection
+                .find(query)
+                .sort({ [pointField]: -1 })
+                .skip(skip)
+                .limit(limit)
+                .toArray();
+
+            const formattedUsers = users.map(u => formatUser(u, u[pointField] || 0));
+
+            let currentUser = null;
+            const userDoc = await usersCollection.findOne({ user_id: uid });
+            if (userDoc && (userDoc[pointField] || 0) > 0) {
+                const higherCount = await usersCollection.countDocuments({
+                    [pointField]: { $gt: userDoc[pointField] }
+                });
+                currentUser = {
+                    points: userDoc[pointField],
+                    rank: higherCount + 1,
+                    title: getRankTitle(userDoc[pointField])
+                };
+            }
+
+            return res.json({
+                success: true,
+                page: pageNum,
+                totalPages,
+                users: formattedUsers,
+                currentUser
+            });
+        }
+
+        // ========== WEEKLY / MONTHLY from mphistory (EARNED only) ==========
+        const days = (timeframe === "weekly" || timeframe === "week") ? 7 : 30;
+        const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+        // Case-insensitive EARNED + date window; normalize user_id to int
+        const basePipeline = [
+            {
+                $match: {
+                    $and: [
+                        {
+                            $or: [
+                                { type: "EARNED" },
+                                { type: "earned" },
+                                { type: { $regex: /^earned$/i } }
+                            ]
+                        },
+                        {
+                            $or: [
+                                { date: { $gte: since } },
+                                // string ISO dates fallback
+                                { date: { $gte: since.toISOString() } }
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                $group: {
+                    _id: { $toLong: "$user_id" },
+                    points: { $sum: { $toDouble: "$amount" } }
+                }
+            },
+            { $match: { points: { $gt: 0 }, _id: { $ne: null } } },
+            { $sort: { points: -1 } }
+        ];
+
+        let totalUsers = 0;
+        let rows = [];
+        try {
+            const countAgg = await mpHistoryCollection
+                .aggregate([...basePipeline, { $count: "n" }])
+                .toArray();
+            totalUsers = countAgg[0]?.n || 0;
+
+            rows = await mpHistoryCollection
+                .aggregate([...basePipeline, { $skip: skip }, { $limit: limit }])
+                .toArray();
+        } catch (aggErr) {
+            // Fallback without $toLong/$toDouble if old Mongo
+            console.error("Leaderboard agg primary failed, fallback:", aggErr.message);
+            const simple = [
+                {
+                    $match: {
+                        type: { $in: ["EARNED", "earned"] },
+                        date: { $gte: since }
+                    }
+                },
+                { $group: { _id: "$user_id", points: { $sum: "$amount" } } },
+                { $match: { points: { $gt: 0 } } },
+                { $sort: { points: -1 } }
+            ];
+            const countAgg = await mpHistoryCollection.aggregate([...simple, { $count: "n" }]).toArray();
+            totalUsers = countAgg[0]?.n || 0;
+            rows = await mpHistoryCollection.aggregate([...simple, { $skip: skip }, { $limit: limit }]).toArray();
+        }
+
+        const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+        const formattedUsers = [];
+        for (const r of rows) {
+            const rid = typeof r._id === "number" ? r._id : parseInt(r._id, 10);
+            const u = (await usersCollection.findOne({
+                $or: [{ user_id: rid }, { user_id: String(rid) }]
+            })) || { user_id: rid };
+            if (u.user_id == null) u.user_id = rid;
+            formattedUsers.push(formatUser(u, Math.round(r.points || 0)));
+        }
+
+        // Current user period points + rank
         let currentUser = null;
-        const userDoc = await usersCollection.findOne({ user_id: uid });
-        if (userDoc && userDoc[pointField] > 0) {
-            const rankQuery = {};
-            rankQuery[pointField] = { $gt: userDoc[pointField] };
-            const higherCount = await usersCollection.countDocuments(rankQuery);
-            currentUser = {
-                points: userDoc[pointField],
-                rank: higherCount + 1,
-                title: getRankTitle(userDoc[pointField])
+        try {
+            const myMatch = {
+                $and: [
+                    {
+                        $or: [
+                            { user_id: uid },
+                            { user_id: String(uid) }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { type: "EARNED" },
+                            { type: "earned" },
+                            { type: { $regex: /^earned$/i } }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { date: { $gte: since } },
+                            { date: { $gte: since.toISOString() } }
+                        ]
+                    }
+                ]
             };
+            const myAgg = await mpHistoryCollection.aggregate([
+                { $match: myMatch },
+                { $group: { _id: null, points: { $sum: { $toDouble: "$amount" } } } }
+            ]).toArray().catch(async () => {
+                return mpHistoryCollection.aggregate([
+                    { $match: { user_id: uid, type: { $in: ["EARNED", "earned"] }, date: { $gte: since } } },
+                    { $group: { _id: null, points: { $sum: "$amount" } } }
+                ]).toArray();
+            });
+            const myPoints = Math.round(myAgg[0]?.points || 0);
+            if (myPoints > 0) {
+                const higherAgg = await mpHistoryCollection.aggregate([
+                    ...basePipeline.slice(0, 3),
+                    { $match: { points: { $gt: myPoints } } },
+                    { $count: "n" }
+                ]).toArray().catch(async () => []);
+                const higher = higherAgg[0]?.n || 0;
+                currentUser = {
+                    points: myPoints,
+                    rank: higher + 1,
+                    title: getRankTitle(myPoints)
+                };
+            }
+        } catch (e) {
+            console.error("Leaderboard currentUser error:", e.message);
         }
 
         res.json({
             success: true,
-            page: parseInt(page),
-            totalPages: totalPages,
+            page: pageNum,
+            totalPages,
             users: formattedUsers,
-            currentUser: currentUser
+            currentUser,
+            timeframe,
+            windowDays: days
         });
     } catch (error) {
         console.error("Leaderboard API Error:", error);
-        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard", detail: String(error.message || error) });
     }
 });
 
@@ -6867,6 +7001,17 @@ app.get("/mini/:userId", (req, res) => {
       </div>
     </div>
 
+    <div class="glass" style="padding:14px 16px;">
+      <div class="glass-title" style="margin-bottom:8px;">
+        <svg viewBox="0 0 24 24"><path d="M10 8v8l6-4-6-4zm2-6C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+        Watch &amp; Earn
+      </div>
+      <p style="font-size:12px; color:rgba(255,255,255,0.45); margin:0 0 12px 0; line-height:1.4;">Watch a short ad and earn 1–3 MythoPoints (max 5/day).</p>
+      <button type="button" class="withdraw-btn" id="profileWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin:0; width:100%;">
+        ▶ Watch Ad to Earn MythoPoints
+      </button>
+    </div>
+
     <div class="glass">
       <div class="glass-title">
         <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
@@ -6936,11 +7081,6 @@ app.get("/mini/:userId", (req, res) => {
       <div class="setting-item">
         <span class="setting-label">Short Numbers</span>
         <input type="checkbox" class="toggle-switch" id="setting-shortnum">
-      </div>
-      <div style="margin-top:18px; padding-top:14px; border-top:0.5px solid rgba(255,255,255,0.08);">
-        <button class="withdraw-btn" id="settingsWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin-bottom:10px;">
-          ▶ Watch Ad to Earn MythoPoints
-        </button>
       </div>
     </div>
   </div>
@@ -9372,8 +9512,16 @@ app.get("/mini/:userId", (req, res) => {
         if (!data.success) throw new Error('API error');
         lbTotalPages = data.totalPages || 1;
         document.getElementById('lb-page-info').innerText = \`Page \${data.page} of \${lbTotalPages}\`;
-        if (data.users.length === 0) {
-          list.innerHTML = '<div class="empty">No users found.</div>';
+        if (!data.users || data.users.length === 0) {
+          const msg = lbFilter === 'weekly'
+            ? 'No earnings this week yet.'
+            : lbFilter === 'monthly'
+              ? 'No earnings this month yet.'
+              : 'No users found.';
+          list.innerHTML = '<div class="empty">' + msg + '</div>';
+          if (data.currentUser) {
+            list.innerHTML += '<div class="lb-self-row" style="margin:8px 0;"><span>Your Rank: <strong>#' + (data.currentUser.rank || 'Unranked') + '</strong></span><span class="lb-self-pts">' + data.currentUser.points + ' pts</span></div>';
+          }
           return;
         }
         let html = '<div class="list-card">';
@@ -9423,14 +9571,23 @@ app.get("/mini/:userId", (req, res) => {
         html += '</div>';
         list.innerHTML = html;
       } catch (e) {
+        console.error('Leaderboard load error:', e);
         list.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load leaderboard.</div>';
       }
     }
 
     document.querySelectorAll('.lb-filter').forEach(btn => {
       btn.addEventListener('click', function() {
-        document.querySelectorAll('.lb-filter').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.lb-filter').forEach(b => {
+          b.classList.remove('active');
+          b.style.background = 'transparent';
+          b.style.color = 'rgba(255,255,255,0.4)';
+          b.style.fontWeight = '400';
+        });
         this.classList.add('active');
+        this.style.background = 'rgba(213,0,249,0.1)';
+        this.style.color = '#fff';
+        this.style.fontWeight = '600';
         lbFilter = this.dataset.filter;
         lbPage = 1;
         loadLeaderboard();
@@ -9492,7 +9649,7 @@ app.get("/mini/:userId", (req, res) => {
       });
     });
 
-    // ─── WATCH & EARN (Settings only) ───
+    // ─── WATCH & EARN (Profile) ───
     async function runWatchAdEarn() {
         if (typeof show_9055307 !== 'function') {
             alert('Ad service is still loading. Please wait a moment.');
@@ -9518,9 +9675,11 @@ app.get("/mini/:userId", (req, res) => {
             console.error("Monetag Error:", error);
         });
     }
+    const profileWatchAdBtn = document.getElementById('profileWatchAdBtn');
+    if (profileWatchAdBtn) profileWatchAdBtn.addEventListener('click', runWatchAdEarn);
+    // Legacy settings id (if present) + FAB
     const settingsWatchAdBtn = document.getElementById('settingsWatchAdBtn');
     if (settingsWatchAdBtn) settingsWatchAdBtn.addEventListener('click', runWatchAdEarn);
-    // FAB kept hidden; only reachable via Settings
     const earnFab = document.getElementById('earnFab');
     if (earnFab) earnFab.addEventListener('click', runWatchAdEarn);
   
