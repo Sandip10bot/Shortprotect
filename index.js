@@ -8671,16 +8671,8 @@ app.get("/mini/:userId", (req, res) => {
             }
             const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
 
-            const canAct = !c.deletedForEveryone && c.type !== 'deleted';
-            const actionsHtml = canAct ? \`
-              <div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;">
-                <button type="button" onclick="event.stopPropagation();startReply('\${c.messageId}')" title="Reply" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Reply</button>
-                <button type="button" onclick="event.stopPropagation();showReactionPicker('\${c.messageId}')" title="React" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">React</button>
-                <button type="button" onclick="event.stopPropagation();deleteMessageForSelf('\${c.messageId}')" title="Delete for me" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Delete</button>
-                \${isSent && c.type === 'message' ? \`<button type="button" onclick="event.stopPropagation();startEdit('\${c.messageId}')" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Edit</button>\` : ''}
-                \${isSent ? \`<button type="button" onclick="event.stopPropagation();deleteMessageForEveryone('\${c.messageId}')" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Del all</button>\` : ''}
-              </div>
-            \` : '';
+            // Edit / Delete only via long-press context menu (not under messages)
+            const actionsHtml = '';
 
             html += \`
               <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
