@@ -2460,7 +2460,8 @@ app.post("/api/payment/send", async (req, res) => {
                     read: false,
                     reactions: [],
                     deletedFor: [],
-                    messageId: new Date().getTime().toString() + Math.random().toString(36).substr(2, 5)
+                    messageId: new Date().getTime().toString() + Math.random().toString(36).substr(2, 5),
+                    notified: false
                 });
             });
             await session.endSession();
@@ -2468,6 +2469,33 @@ app.post("/api/payment/send", async (req, res) => {
             await session.endSession();
             throw error;
         }
+
+        // Fast-path Telegram push (bot.py worker is backup if this fails / BOT_TOKEN missing)
+        try {
+            const botToken = process.env.BOT_TOKEN;
+            if (botToken) {
+                const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiver}`;
+                fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: receiver,
+                        text: `💰 You received *${receiverAmount} MythoPoints* from a payment!\nOpen the app to view chat.`,
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [[{ text: '📱 Open MythoApp', web_app: { url: dashboardUrl } }]]
+                        }
+                    })
+                }).then(async (r) => {
+                    if (r.ok) {
+                        await paymentChatCollection.updateMany(
+                            { senderId: sender, receiverId: receiver, type: 'payment', notified: false },
+                            { $set: { notified: true } }
+                        );
+                    }
+                }).catch(() => {});
+            }
+        } catch (_) {}
 
         res.json({
             success: true,
@@ -2774,18 +2802,21 @@ app.post("/api/payment/chat/message", async (req, res) => {
             editedAt: null,
             mediaUrl: mediaUrl || null,
             mediaType: mediaType || null,
-            sticker: sticker || null
+            sticker: sticker || null,
+            // Bot worker (bot.py) picks this up and DMs the receiver when offline
+            notified: false
         };
         await paymentChatCollection.insertOne(doc);
 
+        // Optional fast-path: if BOT_TOKEN is set on Express, notify immediately and mark notified
         const botToken = process.env.BOT_TOKEN;
         if (botToken) {
             const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiverId}`;
             const sName = senderName || "a user";
             let preview = message || '';
-            if (msgType === 'sticker') preview = '🎨 Sticker';
-            else if (msgType === 'image') preview = '🖼 Photo';
-            else if (msgType === 'voice') preview = '🎤 Voice message';
+            if (msgType === 'sticker') preview = 'Sticker';
+            else if (msgType === 'image') preview = 'Photo';
+            else if (msgType === 'voice') preview = 'Voice message';
             else if (!preview) preview = 'New message';
             fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: 'POST',
@@ -2798,6 +2829,10 @@ app.post("/api/payment/chat/message", async (req, res) => {
                         inline_keyboard: [[{ text: "📱 Open MythoApp", web_app: { url: dashboardUrl } }]]
                     }
                 })
+            }).then(async (r) => {
+                if (r.ok) {
+                    await paymentChatCollection.updateOne({ messageId }, { $set: { notified: true } });
+                }
             }).catch(e => console.error("Telegram Notify Error:", e));
         }
 
@@ -2947,6 +2982,38 @@ app.post("/api/payment/chat/clear", async (req, res) => {
 });
 
 // Get unread message count for a user
+
+// ---------- Typing indicator ----------
+app.post("/api/payment/chat/typing", async (req, res) => {
+    try {
+        const { userId, otherId, typing } = req.body;
+        if (!userId || !otherId) return res.status(400).json({ success: false, error: "Missing fields." });
+        const uid = parseInt(userId);
+        const oid = parseInt(otherId);
+        await userSessionsCollection.updateOne(
+            { userId: uid },
+            { $set: { userId: uid, typingTo: typing ? oid : null, typingAt: new Date(), lastSeen: new Date() } },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/payment/chat/typing/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const otherId = parseInt(req.query.otherId);
+        if (!uid || !otherId) return res.status(400).json({ success: false, error: "Missing fields." });
+        const session = await userSessionsCollection.findOne({ userId: otherId });
+        const isTyping = !!(session && session.typingTo === uid && session.typingAt && (Date.now() - new Date(session.typingAt).getTime()) < 5000);
+        res.json({ success: true, typing: isTyping });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 app.get("/api/payment/unread/:userId", async (req, res) => {
     try {
         const uid = parseInt(req.params.userId);
@@ -6096,21 +6163,23 @@ app.get("/mini/:userId", (req, res) => {
       text-align: center; font-size: 11px; color: rgba(255,255,255,0.5); margin: 16px 0 8px;
     }
 
-    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: 88%; }
+    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: min(88%, 320px); width: fit-content; }
     .chat-msg.sent { align-self: flex-end; flex-direction: row-reverse; }
     .chat-msg.received { align-self: flex-start; }
     
     .chat-msg .avatar {
       width: 26px; height: 26px; border-radius: 50%; object-fit: cover; margin-bottom: 18px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5); flex-shrink: 0;
     }
 
-    .chat-msg .bubble-wrapper { display: flex; flex-direction: column; }
+    .chat-msg .bubble-wrapper { display: flex; flex-direction: column; max-width: 100%; min-width: 0; overflow: hidden; }
     .chat-msg.sent .bubble-wrapper { align-items: flex-end; }
 
     .chat-msg .bubble {
-      padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4; word-wrap: break-word;
-      position: relative;
+      padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4;
+      word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word;
+      white-space: pre-wrap; max-width: 100%; box-sizing: border-box;
+      position: relative; overflow: hidden;
     }
     
     .chat-msg.sent .bubble.text {
@@ -6831,8 +6900,9 @@ app.get("/mini/:userId", (req, res) => {
 
   <!-- ========== SETTINGS MODAL ========== -->
   <div class="settings-overlay" id="settingsModal">
-    <div class="settings-box">
-      <h3>⚙️ App Settings</h3>
+    <div class="settings-box" style="position:relative;">
+      <button type="button" onclick="closeSettings()" aria-label="Close" style="position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;border:0.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.08);color:#fff;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;">×</button>
+      <h3 style="padding-right:28px;">⚙️ App Settings</h3>
       <div class="setting-item">
         <span class="setting-label">Sound Effects</span>
         <input type="checkbox" class="toggle-switch" id="setting-sound" checked>
@@ -6857,16 +6927,11 @@ app.get("/mini/:userId", (req, res) => {
         <span class="setting-label">Short Numbers</span>
         <input type="checkbox" class="toggle-switch" id="setting-shortnum">
       </div>
-      <div class="setting-item">
-        <span class="setting-label">Force Verification</span>
-        <input type="checkbox" class="toggle-switch" id="setting-forceverify">
-      </div>
       <div style="margin-top:18px; padding-top:14px; border-top:0.5px solid rgba(255,255,255,0.08);">
         <button class="withdraw-btn" id="settingsWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin-bottom:10px;">
           ▶ Watch Ad to Earn MythoPoints
         </button>
       </div>
-      <button class="withdraw-btn" style="margin-top:8px; background: rgba(255,255,255,0.1);" onclick="closeSettings()">Close Settings</button>
     </div>
   </div>
 
@@ -7008,7 +7073,7 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('setting-privacy').checked = userSettings.privacy || false;
       document.getElementById('setting-pill').checked = userSettings.pillNav || false;
       document.getElementById('setting-shortnum').checked = userSettings.shortNum || false;
-      document.getElementById('setting-forceverify').checked = userSettings.forceVerify || false;
+      // Force verification removed – not required for users
 
       // Apply pill nav
       const tabBar = document.querySelector('.tab-bar');
@@ -7044,7 +7109,7 @@ app.get("/mini/:userId", (req, res) => {
           privacy: document.getElementById('setting-privacy').checked,
           pillNav: document.getElementById('setting-pill').checked,
           shortNum: document.getElementById('setting-shortnum').checked,
-          forceVerify: document.getElementById('setting-forceverify').checked
+          forceVerify: false
         };
         userSettings = settings;
         const res = await fetch('/api/settings/save', {
@@ -7065,6 +7130,7 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('settingsModal').classList.remove('open');
       saveUserSettings();
     }
+    window.closeSettings = closeSettings;
 
     // ─── PURE CODE SOUND ENGINE & SETTINGS LOGIC ───
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -7281,9 +7347,8 @@ app.get("/mini/:userId", (req, res) => {
       const profileStreakEl = document.getElementById('profile-streak');
       if (profileStreakEl) profileStreakEl.innerText = formatNum(state.streak) + ' days';
       
-      // 3. Force Verification Override Logic
-      const forceVerify = document.getElementById('setting-forceverify')?.checked;
-      const isVerified = state.verified || forceVerify;
+      // Verification is optional – do not block users
+      const isVerified = true; // always treat as verified in mini app UI
 
       const badge = document.getElementById('ui-verified');
       if (isVerified) {
@@ -8362,6 +8427,7 @@ app.get("/mini/:userId", (req, res) => {
     async function selectUserForPay(id, name, photo) {
       selectedReceiver = id;
       chatStickToBottom = true;
+      userScrolledUp = false;
       pendingNewWhileUp = 0;
       lastChatFingerprint = '';
       try { cancelReplyEdit(); } catch (e) {}
@@ -8394,9 +8460,10 @@ app.get("/mini/:userId", (req, res) => {
       }
       payChatPollInterval = setInterval(() => {
         if (selectedReceiver) {
-          loadPayChat(selectedReceiver, true);
+          loadPayChat(selectedReceiver, true, false);
+          pollTypingStatus();
         }
-      }, 3000);
+      }, 4000);
     }
 
     window.selectUserForPay = selectUserForPay;
@@ -8431,31 +8498,37 @@ app.get("/mini/:userId", (req, res) => {
     }
 
     // ─── Telegram-style chat state ───
-    let replyToMessage = null;   // { messageId, message, senderId, ... }
+    let replyToMessage = null;
     let editingMessageId = null;
     let chatStickToBottom = true;
+    let userScrolledUp = false; // sticky until user returns to bottom
     let lastChatFingerprint = '';
     let pendingNewWhileUp = 0;
     let mediaRecorder = null;
     let voiceChunks = [];
+    let typingPollTimer = null;
 
-    function isNearBottom(el, threshold = 80) {
+    function isNearBottom(el, threshold = 120) {
+      if (!el) return true;
       return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
     }
     function scrollChatToBottom(smooth = false) {
       const container = document.getElementById('payChatArea');
       if (!container) return;
       chatStickToBottom = true;
+      userScrolledUp = false;
       pendingNewWhileUp = 0;
       updateScrollFab();
-      if (smooth) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-      else container.scrollTop = container.scrollHeight;
+      requestAnimationFrame(() => {
+        if (smooth) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        else container.scrollTop = container.scrollHeight;
+      });
     }
     function updateScrollFab() {
       const fab = document.getElementById('chatScrollFab');
       const badge = document.getElementById('chatNewBadge');
       if (!fab) return;
-      if (chatStickToBottom) {
+      if (!userScrolledUp) {
         fab.classList.remove('show');
         if (badge) badge.classList.remove('show');
       } else {
@@ -8466,8 +8539,9 @@ app.get("/mini/:userId", (req, res) => {
         } else if (badge) badge.classList.remove('show');
       }
     }
+    // Only content that user cares about while scrolled up
     function chatFingerprint(chats) {
-      return (chats || []).map(c => c.messageId + ':' + (c.editedAt || '') + ':' + (c.reactions||[]).length + ':' + (c.deletedForEveryone?1:0)).join('|');
+      return (chats || []).map(c => c.messageId + ':' + (c.message||'') + ':' + (c.edited?1:0) + ':' + (c.reactions||[]).map(r=>r.reaction).join('') + ':' + (c.deletedForEveryone?1:0) + ':' + (c.type||'')).join('|');
     }
     function escapeHtml(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -8480,17 +8554,19 @@ app.get("/mini/:userId", (req, res) => {
         if (!data.success) return;
 
         const container = document.getElementById('payChatArea');
+        // Snapshot BEFORE any DOM change
         const prevScrollTop = container.scrollTop;
         const prevScrollHeight = container.scrollHeight;
-        const wasNearBottom = isNearBottom(container) || chatStickToBottom || forceScrollBottom;
+        // If user scrolled up, NEVER auto-jump to bottom on poll
+        const stayUp = userScrolledUp && !forceScrollBottom;
+        const wasNearBottom = forceScrollBottom || (!userScrolledUp && (isNearBottom(container) || chatStickToBottom));
 
         const sorted = [...data.chats].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         const visible = sorted.filter(c => !(c.deletedFor && c.deletedFor.includes(userId)));
         const fp = chatFingerprint(visible);
         const isNewContent = fp !== lastChatFingerprint;
         if (silent && !isNewContent) return; // nothing changed – keep scroll position
-        if (silent && isNewContent && !wasNearBottom) {
-          // count truly new ids
+        if (silent && isNewContent && stayUp) {
           const oldIds = new Set((currentChatMessages || []).map(c => c.messageId));
           pendingNewWhileUp += visible.filter(c => !oldIds.has(c.messageId) && c.senderId !== userId).length;
         }
@@ -8585,12 +8661,24 @@ app.get("/mini/:userId", (req, res) => {
             }
             const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
 
+            const canAct = !c.deletedForEveryone && c.type !== 'deleted';
+            const actionsHtml = canAct ? \`
+              <div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;">
+                <button type="button" onclick="event.stopPropagation();startReply('\${c.messageId}')" title="Reply" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Reply</button>
+                <button type="button" onclick="event.stopPropagation();showReactionPicker('\${c.messageId}')" title="React" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">React</button>
+                <button type="button" onclick="event.stopPropagation();deleteMessageForSelf('\${c.messageId}')" title="Delete for me" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Delete</button>
+                \${isSent && c.type === 'message' ? \`<button type="button" onclick="event.stopPropagation();startEdit('\${c.messageId}')" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Edit</button>\` : ''}
+                \${isSent ? \`<button type="button" onclick="event.stopPropagation();deleteMessageForEveryone('\${c.messageId}')" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Del all</button>\` : ''}
+              </div>
+            \` : '';
+
             html += \`
               <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
                 \${avatar}
                 <div class="bubble-wrapper">
                   \${bubbleHtml}
                   \${reactionsHtml}
+                  \${actionsHtml}
                   <div class="time">\${time}\${editedHtml} \${tickHtml}</div>
                 </div>
               </div>
@@ -8614,17 +8702,23 @@ app.get("/mini/:userId", (req, res) => {
           el.addEventListener('touchmove', () => clearTimeout(pressTimer));
         });
 
-        // restore scroll: stick to bottom only if user was near bottom / forced
-        if (wasNearBottom || forceScrollBottom) {
-          container.scrollTop = container.scrollHeight;
-          chatStickToBottom = true;
-          pendingNewWhileUp = 0;
+        // restore scroll – never yank user down while they are reading older messages
+        if (forceScrollBottom || (!stayUp && wasNearBottom)) {
+          requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight;
+            chatStickToBottom = true;
+            userScrolledUp = false;
+            pendingNewWhileUp = 0;
+            updateScrollFab();
+          });
         } else {
-          // keep relative position when older content height changes
-          container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight);
+          // Preserve exact visual position after full re-render
+          const delta = container.scrollHeight - prevScrollHeight;
+          container.scrollTop = prevScrollTop + delta;
           chatStickToBottom = false;
+          userScrolledUp = true;
+          updateScrollFab();
         }
-        updateScrollFab();
 
         if (!silent && selectedReceiver) {
           fetch('/api/payment/chat/mark-read', {
@@ -8644,13 +8738,60 @@ app.get("/mini/:userId", (req, res) => {
       if (!area || area._scrollBound) return;
       area._scrollBound = true;
       area.addEventListener('scroll', () => {
-        chatStickToBottom = isNearBottom(area);
-        if (chatStickToBottom) pendingNewWhileUp = 0;
+        const near = isNearBottom(area);
+        chatStickToBottom = near;
+        if (near) {
+          userScrolledUp = false;
+          pendingNewWhileUp = 0;
+        } else {
+          userScrolledUp = true;
+        }
         updateScrollFab();
       }, { passive: true });
       const fab = document.getElementById('chatScrollFab');
       if (fab) fab.addEventListener('click', () => scrollChatToBottom(true));
     })();
+
+
+    let typingSendTimer = null;
+    let lastTypingSent = 0;
+    (function bindTypingInput() {
+      const input = document.getElementById('payAmountInput');
+      if (!input || input._typingBound) return;
+      input._typingBound = true;
+      input.addEventListener('input', function() {
+        if (!selectedReceiver) return;
+        const now = Date.now();
+        if (now - lastTypingSent > 2000) {
+          lastTypingSent = now;
+          fetch('/api/payment/chat/typing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, otherId: selectedReceiver, typing: true })
+          }).catch(function(){});
+        }
+        clearTimeout(typingSendTimer);
+        typingSendTimer = setTimeout(function() {
+          fetch('/api/payment/chat/typing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, otherId: selectedReceiver, typing: false })
+          }).catch(function(){});
+        }, 3000);
+      });
+    })();
+
+    async function pollTypingStatus() {
+      if (!selectedReceiver) return;
+      try {
+        const res = await fetch('/api/payment/chat/typing/' + userId + '?otherId=' + selectedReceiver);
+        const data = await res.json();
+        const el = document.getElementById('typingIndicator');
+        if (!el) return;
+        if (data.success && data.typing) el.classList.add('show');
+        else el.classList.remove('show');
+      } catch (e) {}
+    }
 
     window.scrollToMsg = function(messageId) {
       const el = document.querySelector('.chat-msg[data-message-id="' + messageId + '"]');
