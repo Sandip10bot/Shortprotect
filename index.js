@@ -6116,13 +6116,14 @@ app.get("/mini/:userId", (req, res) => {
       flex-direction: column;
       height: 100%;
       height: 100dvh;
-      max-height: 100vh;
+      max-height: 100dvh;
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0; width: 100%;
+      top: 0; left: 0; width: 100%;
       background: #000000;
-      z-index: 250;
+      z-index: 200;
+      overflow: hidden;
     }
-    .pay-fullscreen.open { display: flex !important; animation: fadeSlide 0.3s ease; }
+    .pay-fullscreen.open { display: flex; animation: fadeSlide 0.3s ease; }
 
     .chat-header {
       display: flex;
@@ -6132,6 +6133,7 @@ app.get("/mini/:userId", (req, res) => {
       background: rgba(0,0,0,0.85);
       border-bottom: 1px solid rgba(255,255,255,0.06);
       padding-top: max(12px, env(safe-area-inset-top));
+      flex-shrink: 0;
     }
     .chat-header .back-btn {
       background: none; border: none; padding: 4px; cursor: pointer; display: flex;
@@ -6148,8 +6150,11 @@ app.get("/mini/:userId", (req, res) => {
     .chat-header .info p { margin: 2px 0 0; font-size: 12px; color: rgba(255,255,255,0.5); }
 
     .chat-area {
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
       padding: 16px;
       display: flex;
       flex-direction: column;
@@ -6165,8 +6170,7 @@ app.get("/mini/:userId", (req, res) => {
       text-align: center; font-size: 11px; color: rgba(255,255,255,0.5); margin: 16px 0 8px;
     }
 
-    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: min(85vw, 300px); width: fit-content; box-sizing: border-box; }
-    .chat-msg .msg-actions { max-width: 100%; flex-wrap: wrap; }
+    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: min(88%, 320px); width: fit-content; }
     .chat-msg.sent { align-self: flex-end; flex-direction: row-reverse; }
     .chat-msg.received { align-self: flex-start; }
     
@@ -6182,7 +6186,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4;
       word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word;
       white-space: pre-wrap; max-width: 100%; box-sizing: border-box;
-      position: relative;
+      position: relative; overflow: hidden;
     }
     
     .chat-msg.sent .bubble.text {
@@ -6224,6 +6228,8 @@ app.get("/mini/:userId", (req, res) => {
       border-top: 1px solid rgba(255,255,255,0.06);
       padding-bottom: max(10px, env(safe-area-inset-bottom));
       position: relative;
+      flex-shrink: 0;
+      z-index: 5;
     }
     .chat-input-wrapper {
       display: flex; align-items: center; gap: 6px;
@@ -6248,202 +6254,34 @@ app.get("/mini/:userId", (req, res) => {
     .chat-icon-btn:active, .pay-send-btn:active { transform: scale(0.9); }
     .chat-icon-btn.recording { color: #ff453a; animation: pulseGlow 1s infinite; }
 
-    /* Reply / edit bar */
+    /* Reply / edit bar (Telegram-style) — stays inside chat footer on screen */
     .reply-bar {
       display: none; align-items: center; gap: 10px;
       padding: 8px 12px; margin-bottom: 6px;
       background: rgba(183,75,255,0.12); border-left: 3px solid #bf5af2;
       border-radius: 10px; font-size: 13px;
-      max-width: 100%; box-sizing: border-box; overflow: hidden;
+      max-width: 100%; box-sizing: border-box;
+      flex-shrink: 0;
     }
     .reply-bar.open { display: flex; }
-    .reply-bar .rb-body { flex: 1; min-width: 0; max-width: 100%; overflow: hidden; }
-    .reply-bar .rb-title { color: #bf5af2; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .reply-bar .rb-text {
-      color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 100%; display: block;
-    }
+    .reply-bar .rb-body { flex: 1; min-width: 0; overflow: hidden; }
+    .reply-bar .rb-title { color: #bf5af2; font-weight: 600; font-size: 12px; }
+    .reply-bar .rb-text { color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
     .reply-bar .rb-close { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; padding: 4px; flex-shrink: 0; }
 
-    /* Inline reply quote – always clipped inside bubble */
+    /* Inline reply quote inside bubble */
     .reply-quote {
       border-left: 3px solid #bf5af2; padding: 4px 8px; margin-bottom: 6px;
-      background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px;
-      max-width: 100%; width: 100%; box-sizing: border-box;
-      overflow: hidden; min-width: 0;
+      background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px; max-width: 100%;
     }
-    .reply-quote .rq-name {
-      color: #bf5af2; font-weight: 600;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block;
-    }
-    .reply-quote .rq-text {
-      color: rgba(255,255,255,0.55);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 100%; display: block;
-    }
+    .reply-quote .rq-name { color: #bf5af2; font-weight: 600; }
+    .reply-quote .rq-text { color: rgba(255,255,255,0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .msg-edited { font-size: 10px; color: rgba(255,255,255,0.35); margin-left: 4px; font-style: italic; }
     .bubble.deleted { opacity: 0.55; font-style: italic; color: rgba(255,255,255,0.45) !important; background: rgba(255,255,255,0.04) !important; }
     .bubble.sticker-bubble { background: transparent !important; padding: 4px; font-size: 48px; line-height: 1; }
     .bubble img.chat-media { max-width: 220px; border-radius: 12px; display: block; }
-    .bubble audio.chat-voice { width: 180px; height: 32px; max-width: 100%; }
-
-    /* ===== CHAT THEMES: Mytho (default) / Telegram Dark / Telegram Light ===== */
-    .pay-fullscreen.theme-telegram-dark {
-      background: #0e1621;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-area {
-      background-color: #0e1621;
-      background-image:
-        url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%231a2733' fill-opacity='0.45'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E");
-      background-size: 60px 60px;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-header {
-      background: #17212b; border-bottom: 1px solid #0e1621;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-header .back-btn { color: #6ab3f3; }
-    .pay-fullscreen.theme-telegram-dark .chat-header .info h3 { color: #fff; }
-    .pay-fullscreen.theme-telegram-dark .chat-header .info p { color: rgba(255,255,255,0.45); }
-    .pay-fullscreen.theme-telegram-dark .chat-footer {
-      background: #17212b; border-top: 1px solid #0e1621;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-input-wrapper {
-      background: #242f3d; border: none; border-radius: 22px;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-input { color: #fff; }
-    .pay-fullscreen.theme-telegram-dark .pay-send-btn { background: #5288c1; }
-    .pay-fullscreen.theme-telegram-dark .chat-msg.sent .bubble.text {
-      background: #2b5278; color: #fff; border-radius: 14px 14px 4px 14px;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-msg.received .bubble.text {
-      background: #182533; color: #fff; border-radius: 14px 14px 14px 4px;
-    }
-    .pay-fullscreen.theme-telegram-dark .chat-msg.sent .bubble.payment { background: #2b5278; border-color: rgba(255,255,255,0.08); }
-    .pay-fullscreen.theme-telegram-dark .chat-msg.received .bubble.payment { background: #182533; }
-    .pay-fullscreen.theme-telegram-dark .reply-quote { border-left-color: #6ab3f3; background: rgba(0,0,0,0.25); }
-    .pay-fullscreen.theme-telegram-dark .reply-quote .rq-name { color: #6ab3f3; }
-    .pay-fullscreen.theme-telegram-dark .reply-quote .rq-text { color: rgba(255,255,255,0.5); }
-    .pay-fullscreen.theme-telegram-dark .reply-bar { background: rgba(42,82,120,0.35); border-left-color: #6ab3f3; }
-    .pay-fullscreen.theme-telegram-dark .reply-bar .rb-title { color: #6ab3f3; }
-    .pay-fullscreen.theme-telegram-dark .chat-date {
-      background: rgba(24,37,51,0.85); display: inline-block; align-self: center;
-      padding: 4px 12px; border-radius: 12px; color: rgba(255,255,255,0.55);
-    }
-    .pay-fullscreen.theme-telegram-dark .encryption-msg { color: rgba(255,255,255,0.35); }
-    .pay-fullscreen.theme-telegram-dark .chat-msg .time { color: rgba(255,255,255,0.4); }
-    .pay-fullscreen.theme-telegram-dark .chat-msg.sent .time .tick { color: #6ab3f3; }
-    .pay-fullscreen.theme-telegram-dark .chat-icon-btn { color: rgba(255,255,255,0.65); }
-    .pay-fullscreen.theme-telegram-dark .typing-indicator { color: #6ab3f3; }
-
-    /* Telegram Light */
-    .pay-fullscreen.theme-telegram-light {
-      background: #c8d9e8;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-area {
-      background-color: #c8d9e8;
-      background-image:
-        url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23a8c0d4' fill-opacity='0.55'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E");
-      background-size: 60px 60px;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-header {
-      background: #ffffff; border-bottom: 1px solid #dfe5eb;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-header .back-btn { color: #3390ec; }
-    .pay-fullscreen.theme-telegram-light .chat-header .info h3 { color: #000; }
-    .pay-fullscreen.theme-telegram-light .chat-header .info p { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .chat-footer {
-      background: #ffffff; border-top: 1px solid #dfe5eb;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-input-wrapper {
-      background: #f1f3f4; border: none; border-radius: 22px;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-input { color: #000; }
-    .pay-fullscreen.theme-telegram-light .chat-input::placeholder { color: #8e8e93; }
-    .pay-fullscreen.theme-telegram-light .pay-send-btn { background: #3390ec; }
-    .pay-fullscreen.theme-telegram-light .chat-msg.sent .bubble.text {
-      background: #eeffde; color: #000; border-radius: 14px 14px 4px 14px;
-      box-shadow: 0 1px 1px rgba(0,0,0,0.06);
-    }
-    .pay-fullscreen.theme-telegram-light .chat-msg.received .bubble.text {
-      background: #ffffff; color: #000; border-radius: 14px 14px 14px 4px;
-      box-shadow: 0 1px 1px rgba(0,0,0,0.06);
-    }
-    .pay-fullscreen.theme-telegram-light .chat-msg.sent .bubble.payment {
-      background: #eeffde; border: 1px solid #d4e8c4; color: #000;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-msg.received .bubble.payment {
-      background: #fff; border: 1px solid #e6e6e6; color: #000;
-    }
-    .pay-fullscreen.theme-telegram-light .payment-amount { color: #000; }
-    .pay-fullscreen.theme-telegram-light .reply-quote {
-      border-left-color: #3390ec; background: rgba(51,144,236,0.08);
-    }
-    .pay-fullscreen.theme-telegram-light .reply-quote .rq-name { color: #3390ec; }
-    .pay-fullscreen.theme-telegram-light .reply-quote .rq-text { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .reply-bar {
-      background: #f0f7ff; border-left-color: #3390ec;
-    }
-    .pay-fullscreen.theme-telegram-light .reply-bar .rb-title { color: #3390ec; }
-    .pay-fullscreen.theme-telegram-light .reply-bar .rb-text { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .reply-bar .rb-close { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .chat-date {
-      background: rgba(255,255,255,0.85); display: inline-block; align-self: center;
-      padding: 4px 12px; border-radius: 12px; color: #707579;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-    }
-    .pay-fullscreen.theme-telegram-light .encryption-msg { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .chat-msg .time { color: #8e8e93; }
-    .pay-fullscreen.theme-telegram-light .chat-msg.sent .time .tick { color: #4fae4e; }
-    .pay-fullscreen.theme-telegram-light .chat-icon-btn { color: #707579; }
-    .pay-fullscreen.theme-telegram-light .typing-indicator { color: #3390ec; }
-    .pay-fullscreen.theme-telegram-light .msg-actions button {
-      background: rgba(0,0,0,0.05) !important; color: #333 !important;
-    }
-    .pay-fullscreen.theme-telegram-light .sticker-panel {
-      background: #fff; border-color: #e6e6e6;
-    }
-    .pay-fullscreen.theme-telegram-light .chat-scroll-fab {
-      background: #fff; color: #3390ec; border-color: #dfe5eb;
-    }
-
-    /* Shared containment for long reply / bubble text */
-    .pay-fullscreen .chat-area { overflow-x: hidden; }
-    .pay-fullscreen .chat-msg,
-    .pay-fullscreen .chat-msg .bubble-wrapper,
-    .pay-fullscreen .chat-msg .bubble,
-    .pay-fullscreen .reply-quote {
-      max-width: 100%;
-      min-width: 0;
-      box-sizing: border-box;
-      overflow: hidden;
-    }
-    .pay-fullscreen .reply-quote .rq-name,
-    .pay-fullscreen .reply-quote .rq-text,
-    .pay-fullscreen .reply-bar .rb-title,
-    .pay-fullscreen .reply-bar .rb-text {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 100%;
-      display: block;
-    }
-
-    /* Theme switcher chips in settings */
-    .theme-chips { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-    .theme-chip {
-      flex: 1; min-width: 90px; padding: 10px 6px; border-radius: 12px; border: 0.5px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); font-size: 12px; font-weight: 600;
-      cursor: pointer; text-align: center;
-    }
-    .theme-chip.active {
-      border-color: #bf5af2; background: rgba(191,90,242,0.18); color: #fff;
-    }
-    .theme-chip.tg-dark.active {
-      border-color: #5288c1; background: rgba(82,136,193,0.25); color: #fff;
-    }
-    .theme-chip.tg-light.active {
-      border-color: #3390ec; background: rgba(51,144,236,0.22); color: #fff;
-    }
+    .bubble audio.chat-voice { width: 180px; height: 32px; }
 
     /* Context menu */
     .msg-ctx {
@@ -6764,7 +6602,6 @@ app.get("/mini/:userId", (req, res) => {
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
                 Share Link
             </button>
-            <button class="store-buy-btn" style="background:rgba(255,255,255,0.1); box-shadow:none; padding:8px 14px;" onclick="loadDashboard()">🔄</button>
         </div>
         <div style="display:flex; gap:8px;">
             <button class="coupon-buy-btn" style="flex:1; padding:8px 6px; border-color:rgba(10,132,255,0.3); color:#0a84ff; background:rgba(10,132,255,0.1);" onclick="showRefRewards()">🎁 Rewards</button>
@@ -7100,14 +6937,6 @@ app.get("/mini/:userId", (req, res) => {
         <span class="setting-label">Short Numbers</span>
         <input type="checkbox" class="toggle-switch" id="setting-shortnum">
       </div>
-      <div class="setting-item" style="flex-direction:column; align-items:stretch; gap:8px;">
-        <span class="setting-label">Chat Theme</span>
-        <div class="theme-chips">
-          <button type="button" class="theme-chip active" id="themeMytho" data-theme="mytho">✨ Mytho</button>
-          <button type="button" class="theme-chip tg-dark" id="themeTgDark" data-theme="telegram-dark">✈️ TG Dark</button>
-          <button type="button" class="theme-chip tg-light" id="themeTgLight" data-theme="telegram-light">☀️ TG Light</button>
-        </div>
-      </div>
       <div style="margin-top:18px; padding-top:14px; border-top:0.5px solid rgba(255,255,255,0.08);">
         <button class="withdraw-btn" id="settingsWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin-bottom:10px;">
           ▶ Watch Ad to Earn MythoPoints
@@ -7241,8 +7070,7 @@ app.get("/mini/:userId", (req, res) => {
           privacy: false,
           pillNav: false,
           shortNum: false,
-          forceVerify: false,
-          chatTheme: 'mytho'
+          forceVerify: false
         };
         applySettingsToUI();
       }
@@ -7255,7 +7083,6 @@ app.get("/mini/:userId", (req, res) => {
       document.getElementById('setting-privacy').checked = userSettings.privacy || false;
       document.getElementById('setting-pill').checked = userSettings.pillNav || false;
       document.getElementById('setting-shortnum').checked = userSettings.shortNum || false;
-      applyChatTheme(userSettings.chatTheme || 'mytho');
       // Force verification removed – not required for users
 
       // Apply pill nav
@@ -7292,8 +7119,7 @@ app.get("/mini/:userId", (req, res) => {
           privacy: document.getElementById('setting-privacy').checked,
           pillNav: document.getElementById('setting-pill').checked,
           shortNum: document.getElementById('setting-shortnum').checked,
-          forceVerify: false,
-          chatTheme: (function(){ const fs=document.getElementById('payFullscreen'); if(!fs) return 'mytho'; if(fs.classList.contains('theme-telegram-light')) return 'telegram-light'; if(fs.classList.contains('theme-telegram-dark')||fs.classList.contains('theme-telegram')) return 'telegram-dark'; return 'mytho'; })()
+          forceVerify: false
         };
         userSettings = settings;
         const res = await fetch('/api/settings/save', {
@@ -7315,40 +7141,6 @@ app.get("/mini/:userId", (req, res) => {
       saveUserSettings();
     }
     window.closeSettings = closeSettings;
-
-    function applyChatTheme(theme) {
-      const fs = document.getElementById('payFullscreen');
-      if (!fs) return;
-      // Normalize legacy 'telegram' -> dark
-      if (theme === 'telegram') theme = 'telegram-dark';
-      if (!['mytho', 'telegram-dark', 'telegram-light'].includes(theme)) theme = 'mytho';
-
-      fs.classList.remove('theme-telegram', 'theme-telegram-dark', 'theme-telegram-light');
-      if (theme === 'telegram-dark') fs.classList.add('theme-telegram-dark');
-      if (theme === 'telegram-light') fs.classList.add('theme-telegram-light');
-
-      const chips = {
-        mytho: document.getElementById('themeMytho'),
-        'telegram-dark': document.getElementById('themeTgDark'),
-        'telegram-light': document.getElementById('themeTgLight')
-      };
-      Object.values(chips).forEach(el => el && el.classList.remove('active'));
-      if (chips[theme]) chips[theme].classList.add('active');
-
-      userSettings.chatTheme = theme;
-    }
-    window.applyChatTheme = applyChatTheme;
-
-    function bindThemeChip(id, theme) {
-      document.getElementById(id)?.addEventListener('click', () => {
-        applyChatTheme(theme);
-        saveUserSettings();
-        try { tg.HapticFeedback.selectionChanged(); } catch(e) {}
-      });
-    }
-    bindThemeChip('themeMytho', 'mytho');
-    bindThemeChip('themeTgDark', 'telegram-dark');
-    bindThemeChip('themeTgLight', 'telegram-light');
 
     // ─── PURE CODE SOUND ENGINE & SETTINGS LOGIC ───
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -8576,7 +8368,7 @@ app.get("/mini/:userId", (req, res) => {
             const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
                           \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
             html += \`
-              <div class="user-result" onclick="selectUserForPay(\${u.id}, decodeURIComponent('\${encodeURIComponent(String(u.name||''))}'), decodeURIComponent('\${encodeURIComponent(String(u.photo_url||''))}'))" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
                 \${avatar}
                 <div class="result-info" style="flex:1;">
                   <div class="name" style="font-size:15px; font-weight:500;">\${u.name} \${u.username ? '@'+u.username : ''}</div>
@@ -8767,18 +8559,11 @@ app.get("/mini/:userId", (req, res) => {
 
     async function loadPayChat(receiverId, silent = false, forceScrollBottom = false) {
       try {
-        const container = document.getElementById('payChatArea');
-        if (!container) return;
-        if (!silent) {
-          container.innerHTML = '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">Loading messages...</div>';
-        }
         const res = await fetch('/api/payment/chat/' + userId + '?otherId=' + receiverId);
         const data = await res.json();
-        if (!data.success) {
-          if (!silent) container.innerHTML = '<div style="text-align:center;padding:24px;color:#ff453a;">Failed to load chat.</div>';
-          return;
-        }
+        if (!data.success) return;
 
+        const container = document.getElementById('payChatArea');
         // Snapshot BEFORE any DOM change
         const prevScrollTop = container.scrollTop;
         const prevScrollHeight = container.scrollHeight;
@@ -8834,10 +8619,8 @@ app.get("/mini/:userId", (req, res) => {
             let replyHtml = '';
             if (c.replyTo) {
               const rqName = c.replyTo.senderId === userId ? 'You' : (c.senderName || 'User');
-              let rqText = c.replyTo.sticker || c.replyTo.message || c.replyTo.type || 'Message';
-              rqText = String(rqText).replace(/\s+/g, ' ').trim();
-              if (rqText.length > 48) rqText = rqText.slice(0, 45) + '...';
-              replyHtml = \`<div class="reply-quote" onclick="scrollToMsg('\${c.replyTo.messageId}')"><div class="rq-name">\${escapeHtml(rqName)}</div><div class="rq-text">\${escapeHtml(rqText)}</div></div>\`;
+              const rqText = c.replyTo.sticker || c.replyTo.message || c.replyTo.type || 'Message';
+              replyHtml = \`<div class="reply-quote" onclick="scrollToMsg('\${c.replyTo.messageId}')"><div class="rq-name">\${escapeHtml(rqName)}</div><div class="rq-text">\${escapeHtml(String(rqText).slice(0,80))}</div></div>\`;
             }
 
             let bubbleHtml = '';
@@ -8889,22 +8672,15 @@ app.get("/mini/:userId", (req, res) => {
             const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
 
             const canAct = !c.deletedForEveryone && c.type !== 'deleted';
-            let actionsHtml = '';
-            if (canAct) {
-              const mid = String(c.messageId || '');
-              const btn = function(label, fn, danger) {
-                const bg = danger ? 'rgba(255,69,58,0.15)' : 'rgba(255,255,255,0.08)';
-                const col = danger ? '#ff453a' : '#fff';
-                return '<button type="button" onclick="event.stopPropagation();' + fn + '(\'' + mid + '\')" style="background:' + bg + ';border:none;color:' + col + ';border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">' + label + '</button>';
-              };
-              actionsHtml = '<div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap;">'
-                + btn('Reply', 'startReply', false)
-                + btn('React', 'showReactionPicker', false)
-                + btn('Delete', 'deleteMessageForSelf', true);
-              if (isSent && (c.type === 'message' || !c.type)) actionsHtml += btn('Edit', 'startEdit', false);
-              if (isSent) actionsHtml += btn('Del all', 'deleteMessageForEveryone', true);
-              actionsHtml += '</div>';
-            }
+            const actionsHtml = canAct ? \`
+              <div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;">
+                <button type="button" onclick="event.stopPropagation();startReply('\${c.messageId}')" title="Reply" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Reply</button>
+                <button type="button" onclick="event.stopPropagation();showReactionPicker('\${c.messageId}')" title="React" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">React</button>
+                <button type="button" onclick="event.stopPropagation();deleteMessageForSelf('\${c.messageId}')" title="Delete for me" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Delete</button>
+                \${isSent && c.type === 'message' ? \`<button type="button" onclick="event.stopPropagation();startEdit('\${c.messageId}')" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Edit</button>\` : ''}
+                \${isSent ? \`<button type="button" onclick="event.stopPropagation();deleteMessageForEveryone('\${c.messageId}')" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Del all</button>\` : ''}
+              </div>
+            \` : '';
 
             html += \`
               <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
@@ -9062,12 +8838,18 @@ app.get("/mini/:userId", (req, res) => {
       replyToMessage = m;
       const bar = document.getElementById('replyBar');
       document.getElementById('replyBarTitle').textContent = 'Reply to ' + (m.senderId === userId ? 'yourself' : (m.senderName || 'user'));
-      let _rt = m.sticker || m.message || m.type || 'Message';
-      _rt = String(_rt).replace(/\s+/g, ' ').trim();
-      if (_rt.length > 60) _rt = _rt.slice(0, 57) + '...';
-      document.getElementById('replyBarText').textContent = _rt;
+      document.getElementById('replyBarText').textContent = m.sticker || m.message || m.type || 'Message';
       bar.classList.add('open');
-      document.getElementById('payAmountInput').focus();
+      // Keep reply bar + input on screen (chat-area shrinks via flex min-height:0)
+      requestAnimationFrame(() => {
+        const area = document.getElementById('payChatArea');
+        if (area) area.scrollTop = area.scrollHeight;
+        const input = document.getElementById('payAmountInput');
+        if (input) {
+          input.focus({ preventScroll: true });
+          try { input.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+        }
+      });
       hideMsgContextMenu();
     }
     window.startReply = startReply;
