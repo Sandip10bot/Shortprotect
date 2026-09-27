@@ -6114,13 +6114,15 @@ app.get("/mini/:userId", (req, res) => {
     .pay-fullscreen {
       display: none;
       flex-direction: column;
-      height: 100vh;
+      height: 100%;
+      height: 100dvh;
+      max-height: 100vh;
       position: fixed;
-      top: 0; left: 0; width: 100%;
+      top: 0; left: 0; right: 0; bottom: 0; width: 100%;
       background: #000000;
-      z-index: 200;
+      z-index: 250;
     }
-    .pay-fullscreen.open { display: flex; animation: fadeSlide 0.3s ease; }
+    .pay-fullscreen.open { display: flex !important; animation: fadeSlide 0.3s ease; }
 
     .chat-header {
       display: flex;
@@ -6180,7 +6182,7 @@ app.get("/mini/:userId", (req, res) => {
       padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4;
       word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word;
       white-space: pre-wrap; max-width: 100%; box-sizing: border-box;
-      position: relative; overflow: hidden;
+      position: relative;
     }
     
     .chat-msg.sent .bubble.text {
@@ -8574,7 +8576,7 @@ app.get("/mini/:userId", (req, res) => {
             const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
                           \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
             html += \`
-              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, decodeURIComponent('\${encodeURIComponent(String(u.name||''))}'), decodeURIComponent('\${encodeURIComponent(String(u.photo_url||''))}'))" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
                 \${avatar}
                 <div class="result-info" style="flex:1;">
                   <div class="name" style="font-size:15px; font-weight:500;">\${u.name} \${u.username ? '@'+u.username : ''}</div>
@@ -8765,11 +8767,18 @@ app.get("/mini/:userId", (req, res) => {
 
     async function loadPayChat(receiverId, silent = false, forceScrollBottom = false) {
       try {
+        const container = document.getElementById('payChatArea');
+        if (!container) return;
+        if (!silent) {
+          container.innerHTML = '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.4);font-size:13px;">Loading messages...</div>';
+        }
         const res = await fetch('/api/payment/chat/' + userId + '?otherId=' + receiverId);
         const data = await res.json();
-        if (!data.success) return;
+        if (!data.success) {
+          if (!silent) container.innerHTML = '<div style="text-align:center;padding:24px;color:#ff453a;">Failed to load chat.</div>';
+          return;
+        }
 
-        const container = document.getElementById('payChatArea');
         // Snapshot BEFORE any DOM change
         const prevScrollTop = container.scrollTop;
         const prevScrollHeight = container.scrollHeight;
@@ -8880,15 +8889,22 @@ app.get("/mini/:userId", (req, res) => {
             const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
 
             const canAct = !c.deletedForEveryone && c.type !== 'deleted';
-            const actionsHtml = canAct ? \`
-              <div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;">
-                <button type="button" onclick="event.stopPropagation();startReply('\${c.messageId}')" title="Reply" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Reply</button>
-                <button type="button" onclick="event.stopPropagation();showReactionPicker('\${c.messageId}')" title="React" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">React</button>
-                <button type="button" onclick="event.stopPropagation();deleteMessageForSelf('\${c.messageId}')" title="Delete for me" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Delete</button>
-                \${isSent && c.type === 'message' ? \`<button type="button" onclick="event.stopPropagation();startEdit('\${c.messageId}')" style="background:rgba(255,255,255,0.08);border:none;color:#fff;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Edit</button>\` : ''}
-                \${isSent ? \`<button type="button" onclick="event.stopPropagation();deleteMessageForEveryone('\${c.messageId}')" style="background:rgba(255,69,58,0.15);border:none;color:#ff453a;border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">Del all</button>\` : ''}
-              </div>
-            \` : '';
+            let actionsHtml = '';
+            if (canAct) {
+              const mid = String(c.messageId || '');
+              const btn = function(label, fn, danger) {
+                const bg = danger ? 'rgba(255,69,58,0.15)' : 'rgba(255,255,255,0.08)';
+                const col = danger ? '#ff453a' : '#fff';
+                return '<button type="button" onclick="event.stopPropagation();' + fn + '(\'' + mid + '\')" style="background:' + bg + ';border:none;color:' + col + ';border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;">' + label + '</button>';
+              };
+              actionsHtml = '<div class="msg-actions" style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap;">'
+                + btn('Reply', 'startReply', false)
+                + btn('React', 'showReactionPicker', false)
+                + btn('Delete', 'deleteMessageForSelf', true);
+              if (isSent && (c.type === 'message' || !c.type)) actionsHtml += btn('Edit', 'startEdit', false);
+              if (isSent) actionsHtml += btn('Del all', 'deleteMessageForEveryone', true);
+              actionsHtml += '</div>';
+            }
 
             html += \`
               <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
