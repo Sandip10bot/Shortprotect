@@ -4456,6 +4456,184 @@ app.post("/api/user_shorten", async (req, res) => {
 
 
 // ==========================================
+// MONETAG DIRECT LINK INTERSTITIAL SYSTEM
+// ==========================================
+
+// 1. UI Page: Admin Link Generator Tab
+app.get("/ad-link-creator", (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Create Ad Link</title>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <div style="font-size:40px; margin-bottom:10px;">🔗</div>
+            <h2>Create Episode Link</h2>
+            <p>Paste original link to generate your Ad-enabled Monetag link.</p>
+            
+            <input type="text" id="originalUrl" placeholder="https://t.me/..." style="width:100%; padding:14px; margin-bottom:16px; border-radius:12px; border:1px solid rgba(191,90,242,0.5); background:rgba(0,0,0,0.4); color:#fff; outline:none; font-size:15px;">
+            <button id="generateBtn" class="btn">Generate Link</button>
+            
+            <div id="resultBox" style="display:none; margin-top:24px; background:rgba(255,255,255,0.06); padding:16px; border-radius:16px; border:0.5px solid rgba(255,255,255,0.1);">
+                <p style="margin:0 0 12px 0; font-size:15px; color:#30d158; font-weight:600;">✅ Link Successfully Generated!</p>
+                <input type="text" id="shortUrl" readonly style="width:100%; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.6); color:#ea80fc; margin-bottom:12px; font-size:13px;">
+                <button id="copyBtn" class="btn" style="padding:12px; font-size:15px; background:linear-gradient(135deg, #32d74b, #248a3d); box-shadow: 0 4px 15px rgba(48,209,88,0.3);">Copy & Share</button>
+            </div>
+        </div>
+        <script>
+            document.getElementById('generateBtn').onclick = async () => {
+                const url = document.getElementById('originalUrl').value.trim();
+                if(!url) return alert('Please enter a valid link first.');
+                
+                const btn = document.getElementById('generateBtn');
+                btn.innerText = "Generating...";
+                
+                try {
+                    const res = await fetch('/api/create-ad-link', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ url: url })
+                    });
+                    const data = await res.json();
+                    
+                    if(data.success) {
+                        const finalUrl = window.location.origin + '/get-episode/' + data.token;
+                        document.getElementById('shortUrl').value = finalUrl;
+                        document.getElementById('resultBox').style.display = 'block';
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                } catch(e) {
+                    alert('Network Error');
+                }
+                btn.innerText = "Generate Link";
+            };
+
+            document.getElementById('copyBtn').onclick = () => {
+                const copyText = document.getElementById('shortUrl');
+                copyText.select();
+                document.execCommand("copy");
+                alert('Link Copied! Send this to your users.');
+            };
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// 2. API to Save Target Link in DB
+app.post("/api/create-ad-link", async (req, res) => {
+    try {
+        const { url } = req.body;
+        if (!url) return res.status(400).json({ success: false, error: "URL is required" });
+        
+        // 8 character random hex token
+        const token = crypto.randomBytes(4).toString("hex");
+        
+        // Reusing your existing urlShortenerCollection
+        await urlShortenerCollection.insertOne({
+            token: token,
+            creator_id: "admin", 
+            target_url: url,
+            created_at: new Date(),
+            clicks: 0,
+            type: "monetag_redirect"
+        });
+        
+        res.json({ success: true, token: token });
+    } catch (error) {
+        console.error("Ad Link Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// 3. Interstitial Page: Force Ad click before content
+app.get("/get-episode/:token", async (req, res) => {
+    const { token } = req.params;
+    
+    try {
+        const dbRecord = await urlShortenerCollection.findOne({ token: token });
+        
+        if (!dbRecord) {
+            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Link Expired or Invalid</h2><p>Please request a new link.</p></div></body></html>`);
+        }
+
+        // Update click tracking
+        await urlShortenerCollection.updateOne({ token: token }, { $inc: { clicks: 1 } });
+
+        // Aapki Monetag Link
+        const monetagLink = "https://uplcm.com/4/12021126";
+        const originalLink = dbRecord.target_url;
+
+        res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Unlock Episode</title>
+            ${THEME_CSS}
+        </head>
+        <body>
+            <div class="container">
+                <div style="font-size:50px; margin-bottom:12px;">🎬</div>
+                <h2>Your Episode is Ready!</h2>
+                <p id="wait-text">Securing connection... Please wait <span id="timer" style="color:#bf5af2; font-size:18px; font-weight:bold;">5</span> seconds.</p>
+                
+                <button id="unlockBtn" class="btn" style="display:none; background: linear-gradient(135deg, #00e676, #00b359); box-shadow: 0 8px 20px rgba(48,209,88,0.3);">▶ Get Episode Now</button>
+                
+                <div style="margin-top:24px; padding:12px; background:rgba(255,255,255,0.05); border-radius:12px; border:0.5px solid rgba(255,255,255,0.1);">
+                    <p style="font-size:12px; color:#aaa; margin:0;">Clicking the button will open our sponsor to support the server, and instantly redirect you to the episode.</p>
+                </div>
+            </div>
+
+            <script>
+                let timeLeft = 5;
+                const timerEl = document.getElementById('timer');
+                const waitText = document.getElementById('wait-text');
+                const unlockBtn = document.getElementById('unlockBtn');
+                
+                const countdown = setInterval(() => {
+                    timeLeft--;
+                    timerEl.innerText = timeLeft;
+                    if(timeLeft <= 0) {
+                        clearInterval(countdown);
+                        waitText.style.display = 'none';
+                        unlockBtn.style.display = 'block';
+                    }
+                }, 1000);
+
+                unlockBtn.onclick = function() {
+                    // Monetag Ad naye tab me khulega (Revenue)
+                    window.open("${monetagLink}", "_blank");
+                    
+                    // Button disabled aur loading text show karega
+                    unlockBtn.innerText = "Redirecting...";
+                    unlockBtn.style.opacity = "0.7";
+                    unlockBtn.disabled = true;
+
+                    // Current page original link par chali jayegi (Content)
+                    setTimeout(() => {
+                        window.location.href = "${originalLink}";
+                    }, 500);
+                };
+            </script>
+        </body>
+        </html>
+        `);
+    } catch (error) {
+        res.redirect('https://t.me/MythoSerialBot');
+    }
+});
+
+
+
+// ==========================================
 // MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section & Persistent Settings)
 // ==========================================
 
