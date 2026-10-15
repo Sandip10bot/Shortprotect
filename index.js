@@ -12982,12 +12982,21 @@ function registerQuizLifeline(app, mongoClient) {
   }
 
   function pickRemoval(n, correct) {
-    // keep the correct one + 1 random wrong one => exactly two options left
+    // keep the CORRECT option + 1 random WRONG option => exactly two options left
+    // correct_index must be 0-based. Clamp invalid values so we never invert keep/remove.
+    let c = Number(correct);
+    if (!Number.isFinite(c)) c = 0;
+    c = Math.trunc(c);
+    if (c < 0 || c >= n) c = 0;
+
     const wrong = [];
-    for (let i = 0; i < n; i++) if (i !== correct) wrong.push(i);
+    for (let i = 0; i < n; i++) if (i !== c) wrong.push(i);
+    if (wrong.length === 0) {
+      return { remove: [], keep: [c] };
+    }
     const keepWrong = wrong[crypto.randomInt(0, wrong.length)];
     const remove = wrong.filter((i) => i !== keepWrong);
-    const keep = [correct, keepWrong].sort((a, b) => a - b);
+    const keep = [c, keepWrong].sort((a, b) => a - b);
     return { remove, keep };
   }
 
@@ -13014,11 +13023,14 @@ function registerQuizLifeline(app, mongoClient) {
 
       await trackNetwork(req, auth.user.id, st.q, auth.user.first_name);
 
+      // If blocked (e.g. no lifelines left) and no prior result for this token,
+      // do not leak the question/options to the client.
+      const blocked = !!st.reason && !st.prev;
       res.json({
         ok: true,
-        question: st.q.question,
-        options: st.options,
-        secondsLeft: st.secondsLeft,
+        question: blocked ? "" : st.q.question,
+        options: blocked ? [] : st.options,
+        secondsLeft: blocked ? 0 : st.secondsLeft,
         maxUses: MAX_USES,
         usesLeft: Math.max(0, MAX_USES - st.uses),
         reason: st.reason,                 // null => can use
@@ -13095,60 +13107,286 @@ const LIFELINE_HTML = `<!DOCTYPE html>
 <title>50:50 Lifeline</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root { --bg:#0a0618; --card:#16102e; --line:#2c2358; --txt:#f3f0ff; --mut:#9c93c9; --ok:#22ff88; --bad:#ff3d5a; --acc:#b44cff; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
-    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","Segoe UI",Roboto,sans-serif; overflow-x:hidden; }
-  body { background-image:radial-gradient(circle at 20% 0%,rgba(180,76,255,.22),transparent 55%),
-                          radial-gradient(circle at 90% 100%,rgba(34,255,136,.10),transparent 50%); }
-  #fx { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:50; }
-  #app { position:relative; z-index:2; max-width:520px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); }
-  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-  .badge { font-weight:800; letter-spacing:.5px; font-size:20px; background:linear-gradient(90deg,#ff3d9a,#b44cff,#3dc8ff);
-    -webkit-background-clip:text; background-clip:text; color:transparent; }
-  .pips { display:flex; gap:6px; }
-  .pip { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; font-size:14px; background:var(--card); border:1px solid var(--line); transition:.4s; }
-  .pip.used { opacity:.25; filter:grayscale(1); transform:scale(.85); }
-  .timer { height:6px; border-radius:6px; background:var(--card); overflow:hidden; margin-bottom:16px; }
-  #bar { height:100%; width:100%; background:linear-gradient(90deg,var(--ok),#ffd23d,var(--bad)); transform-origin:left; transition:transform 1s linear; }
-  .question { font-size:18px; font-weight:700; line-height:1.35; margin:0 0 16px; white-space:pre-wrap; word-break:break-word; }
-  .opts { display:flex; flex-direction:column; gap:10px; }
-  .opt { position:relative; display:flex; align-items:center; gap:12px; padding:14px; border-radius:16px; background:var(--card);
-    border:1.5px solid var(--line); opacity:0; transform:translateY(18px) scale(.97); will-change:transform,filter,opacity; }
-  .opt.in { animation:rise .5s cubic-bezier(.2,.9,.3,1.2) forwards; }
-  @keyframes rise { to { opacity:1; transform:none; } }
-  .opt .ltr { flex:0 0 32px; height:32px; border-radius:10px; display:grid; place-items:center; font-weight:800; background:#241a4d; color:#d9ccff; }
-  .opt .txt { flex:1; font-size:16px; word-break:break-word; }
-  .opt.charge { animation:shake .12s linear infinite; border-color:var(--acc); box-shadow:0 0 18px rgba(180,76,255,.55); }
-  @keyframes shake { 0%{transform:translate(-2px,1px) rotate(-.4deg)} 50%{transform:translate(2px,-1px) rotate(.4deg)} 100%{transform:translate(-1px,-2px) rotate(0)} }
-  .opt.boom { animation:boom .55s ease-in forwards; border-color:var(--bad); box-shadow:0 0 40px var(--bad); }
-  @keyframes boom { 0%{transform:scale(1); filter:blur(0); opacity:1}
-                    35%{transform:scale(1.12); filter:blur(1px) brightness(1.8); opacity:1}
-                    100%{transform:scale(1.5); filter:blur(14px); opacity:0} }
-  .opt.gone { opacity:.2; transform:scale(.97); filter:grayscale(1); border-style:dashed; border-color:#3a3170; }
-  .opt.gone .txt { text-decoration:line-through; }
-  .opt.gone .ltr::after { content:"✕"; }
-  .opt.gone .ltr { font-size:0; } .opt.gone .ltr::after { font-size:15px; }
-  .opt.keep { border-color:var(--ok); background:linear-gradient(135deg,rgba(34,255,136,.14),rgba(34,255,136,.04));
-    animation:glow 1.3s ease-in-out infinite alternate; }
-  .opt.keep .ltr { background:var(--ok); color:#04210f; }
-  @keyframes glow { from{ box-shadow:0 0 6px rgba(34,255,136,.35) } to{ box-shadow:0 0 28px rgba(34,255,136,.9), 0 0 3px var(--ok) inset } }
-  .ring { position:fixed; width:20px; height:20px; border-radius:50%; border:3px solid var(--bad); z-index:49; pointer-events:none;
-    transform:translate(-50%,-50%); animation:ring .7s ease-out forwards; }
-  @keyframes ring { to { width:340px; height:340px; opacity:0; border-width:1px; } }
-  #flash { position:fixed; inset:0; background:#fff; opacity:0; z-index:48; pointer-events:none; }
-  #flash.on { animation:flash .35s ease-out; } @keyframes flash { 0%{opacity:.55} 100%{opacity:0} }
-  body.shake #app { animation:quake .4s linear; } @keyframes quake { 20%{transform:translate(-5px,3px)} 40%{transform:translate(5px,-3px)} 60%{transform:translate(-3px,-2px)} 80%{transform:translate(3px,2px)} }
-  #status { min-height:46px; margin:16px 0 10px; text-align:center; font-weight:700; font-size:15px; color:var(--mut); }
-  #status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
-  button { width:100%; border:0; border-radius:14px; padding:15px; font-size:16px; font-weight:800; color:#fff; cursor:pointer; margin-top:8px;
-    background:linear-gradient(90deg,#ff3d9a,#b44cff); box-shadow:0 8px 26px rgba(180,76,255,.4); }
-  button.sec { background:var(--card); border:1px solid var(--line); box-shadow:none; color:var(--txt); }
-  button:disabled { opacity:.5; }
-  [hidden] { display:none !important; }
-  .scan { position:absolute; left:0; right:0; height:3px; background:linear-gradient(90deg,transparent,#3dc8ff,transparent); z-index:3; top:0; opacity:0; }
-  .scan.on { animation:scan 1s ease-in-out; } @keyframes scan { 0%{top:0;opacity:1} 100%{top:100%;opacity:0} }
-  .opts-wrap { position:relative; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  :root {
+    --bg: #05040c;
+    --card: rgba(28, 22, 48, 0.72);
+    --card-solid: #16102e;
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(183, 75, 255, 0.35);
+    --txt: #f5f2ff;
+    --mut: #9b93c4;
+    --ok: #30d158;
+    --bad: #ff453a;
+    --acc: #b74bff;
+    --acc2: #9526e8;
+    --gold: #ffd60a;
+    --glass: blur(40px) saturate(180%);
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--txt);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(183, 75, 255, 0.28), transparent 55%),
+      radial-gradient(ellipse 70% 40% at 90% 110%, rgba(48, 209, 88, 0.10), transparent 50%),
+      radial-gradient(circle at 50% 40%, rgba(149, 38, 232, 0.06), transparent 60%);
+  }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 48; pointer-events: none; }
+  #flash.on { animation: flash .35s ease-out; }
+  @keyframes flash { 0% { opacity: .5; } 100% { opacity: 0; } }
+
+  #app {
+    position: relative; z-index: 2;
+    max-width: 440px; margin: 0 auto;
+    padding: calc(16px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));
+    min-height: 100%;
+    display: flex; flex-direction: column;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-icon {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(145deg, #b74bff, #6b1fff);
+    box-shadow: 0 8px 22px rgba(183, 75, 255, 0.4), inset 0 1px 0 rgba(255,255,255,0.25);
+    display: grid; place-items: center;
+  }
+  .brand-icon svg { width: 20px; height: 20px; }
+  .brand-text { display: flex; flex-direction: column; gap: 1px; }
+  .brand-title {
+    font-size: 15px; font-weight: 800; letter-spacing: -0.3px;
+    background: linear-gradient(90deg, #ff6bcb, #b74bff, #5ac8ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .brand-sub { font-size: 11px; font-weight: 600; color: var(--mut); letter-spacing: 0.4px; text-transform: uppercase; }
+
+  .pips { display: flex; gap: 6px; }
+  .pip {
+    width: 28px; height: 28px; border-radius: 9px;
+    display: grid; place-items: center;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid var(--line);
+    transition: all 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .pip svg { width: 14px; height: 14px; color: var(--acc); }
+  .pip.used {
+    opacity: 0.28; filter: grayscale(1); transform: scale(0.88);
+  }
+  .pip.used svg { color: var(--mut); }
+
+  /* ---- Timer ---- */
+  .timer-wrap {
+    margin-bottom: 20px;
+  }
+  .timer-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .timer-label { font-size: 11px; font-weight: 700; color: var(--mut); letter-spacing: 0.8px; text-transform: uppercase; }
+  .timer-sec { font-size: 13px; font-weight: 700; color: var(--txt); font-variant-numeric: tabular-nums; }
+  .timer {
+    height: 5px; border-radius: 99px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+    border: 0.5px solid var(--line);
+  }
+  #bar {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, var(--ok), var(--gold), var(--bad));
+    transform-origin: left;
+    transition: transform 1s linear;
+    border-radius: 99px;
+    box-shadow: 0 0 12px rgba(48, 209, 88, 0.35);
+  }
+
+  /* ---- Question card ---- */
+  .q-card {
+    background: var(--card);
+    backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass);
+    border: 0.5px solid var(--line);
+    border-radius: 22px;
+    padding: 20px 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .q-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; color: var(--acc);
+    letter-spacing: 0.6px; text-transform: uppercase;
+    margin-bottom: 10px;
+    padding: 4px 10px; border-radius: 99px;
+    background: rgba(183, 75, 255, 0.12);
+    border: 0.5px solid rgba(183, 75, 255, 0.25);
+  }
+  .question {
+    font-size: 17px; font-weight: 700; line-height: 1.4;
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    letter-spacing: -0.2px; color: var(--txt);
+  }
+
+  /* ---- Options ---- */
+  .opts-wrap { position: relative; margin-bottom: 8px; }
+  .opts { display: flex; flex-direction: column; gap: 10px; }
+  .opt {
+    position: relative;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 14px;
+    border-radius: 16px;
+    background: var(--card);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 0.5px solid var(--line);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+    opacity: 0; transform: translateY(16px) scale(0.97);
+    will-change: transform, filter, opacity;
+    transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  }
+  .opt.in { animation: rise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.15) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .opt .ltr {
+    flex: 0 0 34px; height: 34px; border-radius: 11px;
+    display: grid; place-items: center;
+    font-weight: 800; font-size: 14px;
+    background: rgba(183, 75, 255, 0.15);
+    color: #dcc8ff;
+    border: 0.5px solid rgba(183, 75, 255, 0.25);
+    letter-spacing: -0.2px;
+  }
+  .opt .txt { flex: 1; font-size: 15px; font-weight: 550; word-break: break-word; letter-spacing: -0.15px; line-height: 1.35; }
+
+  .opt.charge {
+    animation: shake 0.12s linear infinite;
+    border-color: var(--acc);
+    box-shadow: 0 0 24px rgba(183, 75, 255, 0.45), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+  @keyframes shake {
+    0% { transform: translate(-1.5px, 1px) rotate(-0.3deg); }
+    50% { transform: translate(1.5px, -1px) rotate(0.3deg); }
+    100% { transform: translate(-1px, -1.5px) rotate(0); }
+  }
+  .opt.boom {
+    animation: boom 0.55s ease-in forwards;
+    border-color: var(--bad);
+    box-shadow: 0 0 40px var(--bad);
+  }
+  @keyframes boom {
+    0% { transform: scale(1); filter: blur(0); opacity: 1; }
+    35% { transform: scale(1.1); filter: blur(1px) brightness(1.7); opacity: 1; }
+    100% { transform: scale(1.45); filter: blur(14px); opacity: 0; }
+  }
+  /* Removed options fully hidden — no strike-through */
+  .opt.gone {
+    display: none !important;
+    opacity: 0; pointer-events: none;
+    height: 0; margin: 0; padding: 0; border: 0; overflow: hidden;
+  }
+  .opt.keep {
+    border-color: rgba(48, 209, 88, 0.55);
+    background: linear-gradient(135deg, rgba(48, 209, 88, 0.14), rgba(48, 209, 88, 0.04));
+    box-shadow: 0 0 0 0.5px rgba(48, 209, 88, 0.3), 0 10px 30px rgba(48, 209, 88, 0.15);
+    animation: glow 1.4s ease-in-out infinite alternate;
+  }
+  .opt.keep .ltr {
+    background: var(--ok); color: #04210f;
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(48, 209, 88, 0.35);
+  }
+  .opt.keep .txt { text-decoration: none !important; font-weight: 650; }
+  @keyframes glow {
+    from { box-shadow: 0 0 8px rgba(48, 209, 88, 0.3), 0 8px 20px rgba(0,0,0,0.25); }
+    to { box-shadow: 0 0 28px rgba(48, 209, 88, 0.75), 0 0 4px var(--ok) inset; }
+  }
+
+  .ring {
+    position: fixed; width: 20px; height: 20px; border-radius: 50%;
+    border: 3px solid var(--bad); z-index: 49; pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: ring 0.7s ease-out forwards;
+  }
+  @keyframes ring { to { width: 340px; height: 340px; opacity: 0; border-width: 1px; } }
+  body.shake #app { animation: quake 0.4s linear; }
+  @keyframes quake {
+    20% { transform: translate(-4px, 2px); }
+    40% { transform: translate(4px, -2px); }
+    60% { transform: translate(-3px, -2px); }
+    80% { transform: translate(3px, 2px); }
+  }
+
+  .scan {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, #5ac8ff, transparent);
+    z-index: 3; top: 0; opacity: 0;
+    box-shadow: 0 0 12px #5ac8ff;
+  }
+  .scan.on { animation: scan 1s ease-in-out; }
+  @keyframes scan { 0% { top: 0; opacity: 1; } 100% { top: 100%; opacity: 0; } }
+
+  /* ---- Status & buttons ---- */
+  #status {
+    min-height: 48px; margin: 14px 0 10px;
+    text-align: center; font-weight: 650; font-size: 14px;
+    color: var(--mut); line-height: 1.4; letter-spacing: -0.1px;
+  }
+  #status.ok { color: var(--ok); }
+  #status.bad { color: var(--bad); }
+
+  .actions { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+  button#go {
+    width: 100%; border: 0; border-radius: 16px; padding: 16px;
+    font-size: 16px; font-weight: 700; color: #fff; cursor: pointer;
+    letter-spacing: -0.2px;
+    background: linear-gradient(180deg, #c45dff, #9526e8);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 12px 28px rgba(149, 38, 232, 0.4);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
+  }
+  button#go:active { transform: scale(0.97); }
+  button#go:disabled { opacity: 0.5; }
+  button#close {
+    width: 100%; border: 0.5px solid var(--line); border-radius: 16px; padding: 15px;
+    font-size: 15px; font-weight: 650; color: var(--txt); cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    letter-spacing: -0.15px;
+    transition: transform 0.2s, background 0.2s;
+  }
+  button#close:active { transform: scale(0.97); background: rgba(255,255,255,0.09); }
+
+  /* Empty / error state */
+  .empty-state {
+    text-align: center; padding: 48px 16px 24px;
+  }
+  .empty-icon {
+    width: 64px; height: 64px; margin: 0 auto 16px;
+    border-radius: 18px;
+    background: linear-gradient(145deg, rgba(255, 69, 58, 0.2), rgba(255, 69, 58, 0.05));
+    border: 0.5px solid rgba(255, 69, 58, 0.3);
+    display: grid; place-items: center;
+    box-shadow: 0 12px 28px rgba(255, 69, 58, 0.15);
+  }
+  .empty-icon svg { width: 28px; height: 28px; color: var(--bad); }
+
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -13156,29 +13394,68 @@ const LIFELINE_HTML = `<!DOCTYPE html>
 <div id="flash"></div>
 <div id="app">
   <header>
-    <div class="badge">✂️ 50:50 LIFELINE</div>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h4v16H6z"/><path d="M14 4h4v16h-4z"/><path d="M4 8h16"/><path d="M4 16h16"/></svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">50:50 Lifeline</div>
+        <div class="brand-sub">Mytho Quiz</div>
+      </div>
+    </div>
     <div class="pips" id="pips"></div>
   </header>
-  <div class="timer"><div id="bar"></div></div>
-  <div class="question" id="q">Loading…</div>
-  <div class="opts-wrap"><div class="scan" id="scan"></div><div class="opts" id="opts"></div></div>
+
+  <div class="timer-wrap" id="timerWrap">
+    <div class="timer-meta">
+      <span class="timer-label">Time left</span>
+      <span class="timer-sec" id="timerSec">—</span>
+    </div>
+    <div class="timer"><div id="bar"></div></div>
+  </div>
+
+  <div class="q-card" id="qCard">
+    <div class="q-label">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+      Question
+    </div>
+    <div class="question" id="q">Loading…</div>
+  </div>
+
+  <div class="opts-wrap" id="optsWrap">
+    <div class="scan" id="scan"></div>
+    <div class="opts" id="opts"></div>
+  </div>
+
   <div id="status"></div>
-  <button id="go" hidden>✂️ Use 50:50</button>
-  <button id="close" class="sec">Back to quiz</button>
+
+  <div class="actions">
+    <button id="go" hidden>Use 50:50 Lifeline</button>
+    <button id="close">Back to quiz</button>
+  </div>
 </div>
 
 <script>
 (function () {
   var tg = window.Telegram && window.Telegram.WebApp;
-  var AUTO_ACTIVATE = true;      // false => player must tap the "Use 50:50" button
+  var AUTO_ACTIVATE = true;
   var LETTERS = "ABCDEFGHIJ";
   var $ = function (id) { return document.getElementById(id); };
   var optEls = [], token = "", maxUses = 3, secondsLeft = 0, ended = false, timerId = null, busy = false;
 
+  var ICON_SCISSORS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88"/><path d="M14.47 14.48L20 20"/><path d="M8.12 8.12L12 12"/></svg>';
+  var ICON_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
   if (tg) {
     tg.ready(); tg.expand();
-    try { tg.setHeaderColor("#0a0618"); tg.setBackgroundColor("#0a0618"); } catch (e) {}
+    try { tg.setHeaderColor("#05040c"); tg.setBackgroundColor("#05040c"); } catch (e) {}
   }
+  // Block copy / long-press select
+  document.addEventListener("copy", function (e) { e.preventDefault(); });
+  document.addEventListener("cut", function (e) { e.preventDefault(); });
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  document.addEventListener("selectstart", function (e) { e.preventDefault(); });
+
   function haptic(kind, style) {
     try {
       if (!tg || !tg.HapticFeedback) return;
@@ -13203,7 +13480,7 @@ const LIFELINE_HTML = `<!DOCTYPE html>
     not_found: "This lifeline is no longer available.",
     expired: "Time is up for this question.",
     answered: "You already answered this question.",
-    no_uses: "No lifelines left for this quiz.",
+    no_uses: "You already used all 3 lifelines for this quiz.",
     too_few: "Not enough options for a 50:50 here.",
     server: "Something went wrong. Please try again."
   };
@@ -13213,16 +13490,24 @@ const LIFELINE_HTML = `<!DOCTYPE html>
     for (var i = 0; i < maxUses; i++) {
       var d = document.createElement("div");
       d.className = "pip" + (i >= left ? " used" : "");
-      d.textContent = "✂️"; p.appendChild(d);
+      d.innerHTML = ICON_SCISSORS;
+      p.appendChild(d);
     }
   }
   function startTimer(total) {
     secondsLeft = total; var full = Math.max(total, 1);
-    function paint() { $("bar").style.transform = "scaleX(" + Math.max(0, secondsLeft / full) + ")"; }
+    var secEl = $("timerSec");
+    function paint() {
+      $("bar").style.transform = "scaleX(" + Math.max(0, secondsLeft / full) + ")";
+      if (secEl) secEl.textContent = Math.max(0, secondsLeft) + "s";
+    }
     paint();
     timerId = setInterval(function () {
       secondsLeft--; paint();
-      if (secondsLeft <= 0) { clearInterval(timerId); if (!ended) { setStatus("⏰ Time is up!", "bad"); $("go").hidden = true; } }
+      if (secondsLeft <= 0) {
+        clearInterval(timerId);
+        if (!ended) { setStatus("Time is up!", "bad"); $("go").hidden = true; }
+      }
     }, 1000);
   }
   function renderOptions(options) {
@@ -13234,8 +13519,21 @@ const LIFELINE_HTML = `<!DOCTYPE html>
       d.appendChild(l); d.appendChild(x); box.appendChild(d); optEls.push(d);
     });
     return Promise.all(optEls.map(function (el, i) {
-      return sleep(140 * i).then(function () { el.classList.add("in"); haptic("impact", "light"); });
-    })).then(function () { return sleep(500); });
+      return sleep(120 * i).then(function () { el.classList.add("in"); haptic("impact", "light"); });
+    })).then(function () { return sleep(400); });
+  }
+
+  function showBlockedState(msg) {
+    ended = true;
+    $("q").textContent = "";
+    $("opts").innerHTML = "";
+    $("go").hidden = true;
+    if (timerId) clearInterval(timerId);
+    $("bar").style.transform = "scaleX(0)";
+    if ($("timerSec")) $("timerSec").textContent = "—";
+    var card = $("qCard");
+    card.innerHTML = '<div class="empty-state"><div class="empty-icon">' + ICON_LOCK + '</div><div class="question" style="font-size:16px;margin-bottom:6px;">Lifelines exhausted</div></div>';
+    setStatus(msg, "bad");
   }
 
   // ---------- particles ----------
@@ -13244,16 +13542,22 @@ const LIFELINE_HTML = `<!DOCTYPE html>
   fit(); addEventListener("resize", fit);
   function burst(rect) {
     var ox = (rect.left + rect.width / 2) * devicePixelRatio, oy = (rect.top + rect.height / 2) * devicePixelRatio;
-    var cols = ["#ff3d5a", "#ff8a3d", "#ffd23d", "#ff3d9a", "#ffffff"];
+    var cols = ["#ff453a", "#ff9f0a", "#ffd60a", "#b74bff", "#ffffff"];
     for (var i = 0; i < 90; i++) {
       var a = Math.random() * Math.PI * 2, s = (2 + Math.random() * 9) * devicePixelRatio;
-      parts.push({ x: ox + (Math.random() - .5) * rect.width * devicePixelRatio * .8, y: oy + (Math.random() - .5) * rect.height * devicePixelRatio * .5,
-        vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2 * devicePixelRatio, r: (2 + Math.random() * 5) * devicePixelRatio,
-        life: 1, dec: .012 + Math.random() * .02, c: cols[(Math.random() * cols.length) | 0] });
+      parts.push({
+        x: ox + (Math.random() - .5) * rect.width * devicePixelRatio * .8,
+        y: oy + (Math.random() - .5) * rect.height * devicePixelRatio * .5,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2 * devicePixelRatio,
+        r: (2 + Math.random() * 5) * devicePixelRatio,
+        life: 1, dec: .012 + Math.random() * .02, c: cols[(Math.random() * cols.length) | 0]
+      });
     }
     var ring = document.createElement("div"); ring.className = "ring";
-    ring.style.left = (rect.left + rect.width / 2) + "px"; ring.style.top = (rect.top + rect.height / 2) + "px";
-    document.body.appendChild(ring); setTimeout(function () { ring.remove(); }, 800);
+    ring.style.left = (rect.left + rect.width / 2) + "px";
+    ring.style.top = (rect.top + rect.height / 2) + "px";
+    document.body.appendChild(ring);
+    setTimeout(function () { ring.remove(); }, 800);
     if (!raf) raf = requestAnimationFrame(loop);
   }
   function loop() {
@@ -13261,7 +13565,8 @@ const LIFELINE_HTML = `<!DOCTYPE html>
     parts = parts.filter(function (p) { return p.life > 0; });
     parts.forEach(function (p) {
       p.x += p.vx; p.y += p.vy; p.vy += .35 * devicePixelRatio; p.vx *= .985; p.life -= p.dec;
-      cx.globalAlpha = Math.max(p.life, 0); cx.fillStyle = p.c; cx.beginPath(); cx.arc(p.x, p.y, p.r * Math.max(p.life, .2), 0, 6.283); cx.fill();
+      cx.globalAlpha = Math.max(p.life, 0); cx.fillStyle = p.c;
+      cx.beginPath(); cx.arc(p.x, p.y, p.r * Math.max(p.life, .2), 0, 6.283); cx.fill();
     });
     cx.globalAlpha = 1;
     raf = parts.length ? requestAnimationFrame(loop) : 0;
@@ -13272,22 +13577,33 @@ const LIFELINE_HTML = `<!DOCTYPE html>
   function showResult(res, animate) {
     ended = true; if (timerId) clearInterval(timerId);
     $("go").hidden = true;
-    var keepSet = {}; res.keep.forEach(function (i) { keepSet[i] = 1; });
+    var keepList = Array.isArray(res.keep) ? res.keep : [];
+    var removeList = Array.isArray(res.remove) ? res.remove : [];
+    var keepSet = {};
+    keepList.forEach(function (i) { keepSet[Number(i)] = 1; });
     function finish() {
       optEls.forEach(function (el, i) {
         el.classList.remove("charge", "boom");
-        if (keepSet[i]) el.classList.add("keep"); else el.classList.add("gone");
+        if (keepSet[i]) {
+          el.classList.add("keep");
+          el.style.display = "";
+          el.style.opacity = "1";
+        } else {
+          el.classList.add("gone");
+          el.style.display = "none";
+        }
       });
       renderPips(res.usesLeft);
-      setStatus("✨ Two wrong answers removed! Pick one of the glowing options in the poll.", "ok");
+      setStatus("Two wrong answers removed. Pick one of the glowing options in the poll.", "ok");
       haptic("notify", "success");
     }
     if (!animate) { finish(); return Promise.resolve(); }
     var chain = Promise.resolve();
-    res.remove.forEach(function (idx, n) {
+    removeList.forEach(function (idx, n) {
       chain = chain.then(function () { return sleep(n ? 260 : 0); }).then(function () {
-        var el = optEls[idx]; if (!el) return;
-        burst(el.getBoundingClientRect()); el.classList.remove("charge"); el.classList.add("boom");
+        var el = optEls[Number(idx)]; if (!el) return;
+        burst(el.getBoundingClientRect());
+        el.classList.remove("charge"); el.classList.add("boom");
         $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
         document.body.classList.remove("shake"); void document.body.offsetWidth; document.body.classList.add("shake");
         haptic("impact", "heavy");
@@ -13298,7 +13614,7 @@ const LIFELINE_HTML = `<!DOCTYPE html>
 
   function activate() {
     if (busy || ended) return; busy = true; $("go").hidden = true;
-    setStatus("🔍 Scanning answers…");
+    setStatus("Scanning answers…");
     optEls.forEach(function (el) { el.classList.add("charge"); });
     var sc = $("scan"); sc.classList.remove("on"); void sc.offsetWidth; sc.classList.add("on");
     haptic("impact", "medium");
@@ -13309,7 +13625,9 @@ const LIFELINE_HTML = `<!DOCTYPE html>
       var res = r[0];
       optEls.forEach(function (el) { el.classList.remove("charge"); });
       if (res && res.ok) return showResult(res, !res.replay);
-      ended = true; setStatus(MSG[res && res.code] || MSG.server, "bad"); haptic("notify", "error");
+      ended = true;
+      setStatus(MSG[res && res.code] || MSG.server, "bad");
+      haptic("notify", "error");
       if (res && typeof res.usesLeft === "number") renderPips(res.usesLeft);
     }).catch(function () {
       optEls.forEach(function (el) { el.classList.remove("charge"); });
@@ -13322,21 +13640,41 @@ const LIFELINE_HTML = `<!DOCTYPE html>
 
   // ---------- boot ----------
   token = getToken();
-  if (!token) { $("q").textContent = "🤔"; setStatus(MSG.auth, "bad"); return; }
+  if (!token) {
+    $("q").textContent = "";
+    showBlockedState(MSG.auth);
+    return;
+  }
   api("/api/quiz-lifeline/open", { initData: tg ? tg.initData : "", token: token }).then(function (d) {
     if (!d || !d.ok) {
-      $("q").textContent = "😕"; setStatus(MSG[d && d.code] || MSG.server, "bad"); return;
+      $("q").textContent = "";
+      showBlockedState(MSG[d && d.code] || MSG.server);
+      return;
     }
-    maxUses = d.maxUses; $("q").textContent = d.question; renderPips(d.usesLeft);
+    maxUses = d.maxUses;
+    renderPips(typeof d.usesLeft === "number" ? d.usesLeft : 0);
+
+    // Out of lifelines (or other block) and no prior result — hide Q/A
+    if (d.reason && !d.result) {
+      showBlockedState(MSG[d.reason] || MSG.server);
+      return;
+    }
+
+    $("q").textContent = d.question;
     startTimer(d.secondsLeft);
     return renderOptions(d.options).then(function () {
-      if (d.result) { d.result.usesLeft = d.usesLeft; return showResult(d.result, false); }
-      if (d.reason) { ended = true; setStatus(MSG[d.reason] || MSG.server, "bad"); return; }
-      setStatus("Ready… (" + d.usesLeft + " lifeline" + (d.usesLeft === 1 ? "" : "s") + " left)");
+      if (d.result) {
+        d.result.usesLeft = d.usesLeft;
+        return showResult(d.result, false);
+      }
+      setStatus("Ready — " + d.usesLeft + " lifeline" + (d.usesLeft === 1 ? "" : "s") + " left");
       if (AUTO_ACTIVATE) return sleep(400).then(activate);
       $("go").hidden = false;
     });
-  }).catch(function () { $("q").textContent = "😕"; setStatus(MSG.server, "bad"); });
+  }).catch(function () {
+    $("q").textContent = "";
+    showBlockedState(MSG.server);
+  });
 })();
 </script>
 </body>
