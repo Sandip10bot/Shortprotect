@@ -12789,6 +12789,561 @@ app.get("/music", (req, res) => {
 </html>`);
 });
 
+// ============================================================
+// ✂️ QUIZ 50:50 LIFELINE (mini-app + API + fair-play IP detection)
+//   GET  /quiz-lifeline            -> mini-app page
+//   POST /api/quiz-lifeline/open   -> logs IP, returns question/options/uses left
+//   POST /api/quiz-lifeline/use    -> consumes 1 use, returns the 2 options to remove
+// ENV: QUIZ_BOT_TOKEN = quiz bot token (verifies Telegram initData). Used by cquiz.py.
+// ============================================================
+const DB_NAME = "Mytho";                 // same DB as the rest of index.js
+const MAX_USES = 3;                      // lifelines per player per quiz
+const DUP_WINDOW_MS = 6 * 60 * 60 * 1000; // "recently" = last 6 hours
+const MAX_SHARED_MATCHES = 3;            // >3 other IDs on one IP => public wifi / CGNAT, don't accuse
+const INITDATA_MAX_AGE_S = 3600;
+const LL_BOT_TOKEN = process.env.QUIZ_BOT_TOKEN || "";
+
+// ---------- pure helpers (exported for testing) ----------
+function getClientIp(req) {
+  let ip = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  if (ip.includes(",")) ip = ip.split(",")[0].trim();
+  ip = ip.trim();
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  return ip.split("%")[0];
+}
+
+// IPv4 -> exact address. IPv6 -> /64 prefix (privacy-extension addresses rotate inside a /64).
+function ipKey(ip) {
+  if (!ip) return "unknown";
+  if (!ip.includes(":")) return ip;
+  const [head, tail] = ip.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail !== undefined ? (tail ? tail.split(":") : []) : [];
+  const full = tail !== undefined
+    ? [...h, ...Array(Math.max(8 - h.length - t.length, 0)).fill("0"), ...t]
+    : h;
+  return "v6:" + full.slice(0, 4).map((x) => x.padStart(4, "0")).join(":");
+}
+
+// Loopback / private ranges mean the proxy header is missing -> every user would "match".
+function isPublicIp(ip) {
+  if (!ip) return false;
+  if (ip.includes(":")) {
+    const l = ip.toLowerCase();
+    return !(l === "::1" || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("fe80"));
+  }
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return false;
+  if (p[0] === 10 || p[0] === 127 || p[0] === 0) return false;
+  if (p[0] === 192 && p[1] === 168) return false;
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return false;
+  if (p[0] === 169 && p[1] === 254) return false;
+  return true;
+}
+
+let warnedNoToken = false;
+function verifyInitData(initData, botToken = LL_BOT_TOKEN) {
+  if (!initData || typeof initData !== "string" || initData.length > 4096) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+
+  if (botToken) {
+    const dcs = [...params.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n");
+    const secret = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
+    const calc = crypto.createHmac("sha256", secret).update(dcs).digest("hex");
+    const a = Buffer.from(calc);
+    const b = Buffer.from(hash);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const authDate = Number(params.get("auth_date") || 0);
+    if (!authDate || Date.now() / 1000 - authDate > INITDATA_MAX_AGE_S) return null;
+  } else if (!warnedNoToken) {
+    warnedNoToken = true;
+    console.warn("[quiz-lifeline] QUIZ_BOT_TOKEN not set – Telegram initData is NOT verified (user ids can be spoofed).");
+  }
+
+  try {
+    const user = JSON.parse(params.get("user") || "null");
+    if (!user || !Number.isFinite(Number(user.id))) return null;
+    return { user: { id: Number(user.id), first_name: user.first_name || "" }, verified: !!botToken };
+  } catch {
+    return null;
+  }
+}
+
+const cleanToken = (t) => {
+  const s = String(t || "").replace(/^lf_/, "");
+  return /^[a-f0-9]{6,32}$/.test(s) ? s : null;
+};
+
+// ---------- route registration ----------
+function registerQuizLifeline(app, mongoClient) {
+  const db = () => mongoClient.db(DB_NAME);
+  const col = {
+    questions: () => db().collection("quiz_lifeline_questions"), // written by cquiz.py
+    usage: () => db().collection("quiz_lifeline_usage"),
+    ips: () => db().collection("quiz_lifeline_ips"),
+    pairs: () => db().collection("quiz_fairplay_pairs"),
+    alerts: () => db().collection("quiz_fairplay_alerts"),     // read by cquiz.py
+  };
+
+  let indexesReady = false;
+  async function ensureIndexes() {
+    if (indexesReady) return;
+    indexesReady = true;
+    try {
+      await col.ips().createIndex({ chat_id: 1, user_id: 1, ip_key: 1 }, { unique: true });
+      await col.ips().createIndex({ chat_id: 1, ip_key: 1, last_seen: -1 });
+      await col.ips().createIndex({ last_seen: 1 }, { expireAfterSeconds: 7 * 86400 }); // keep IPs 7 days max
+      await col.usage().createIndex({ created_at: 1 }, { expireAfterSeconds: 3 * 86400 });
+      await col.pairs().createIndex({ created_at: 1 }, { expireAfterSeconds: 3 * 86400 });
+      await col.alerts().createIndex({ created_at: 1 }, { expireAfterSeconds: 86400 });
+    } catch (e) {
+      indexesReady = false;
+      console.error("[quiz-lifeline] index error:", e.message);
+    }
+  }
+
+  // ---- log IP + queue a Fair-Play alert if another ID in the same group used this network recently ----
+  async function trackNetwork(req, userId, q, firstName) {
+    try {
+      const ip = getClientIp(req);
+      if (!isPublicIp(ip)) return;
+      const key = ipKey(ip);
+      const now = new Date();
+
+      await col.ips().updateOne(
+        { chat_id: q.chat_id, user_id: userId, ip_key: key },
+        { $set: { ip, last_seen: now, session_id: q.session_id, name: firstName }, $setOnInsert: { first_seen: now } },
+        { upsert: true }
+      );
+
+      if (q.chat_id >= 0) return; // PM tests: nothing to announce
+
+      const others = await col.ips().find({
+        chat_id: q.chat_id,
+        ip_key: key,
+        user_id: { $ne: userId },
+        last_seen: { $gte: new Date(Date.now() - DUP_WINDOW_MS) },
+      }).toArray();
+
+      if (!others.length || others.length > MAX_SHARED_MATCHES) return;
+
+      // one alert per pair per quiz session
+      const fresh = [];
+      for (const o of others) {
+        const lo = Math.min(userId, o.user_id), hi = Math.max(userId, o.user_id);
+        try {
+          await col.pairs().insertOne({ _id: `${q.session_id}:${lo}:${hi}`, created_at: now });
+          fresh.push(o.user_id);
+        } catch (e) {
+          if (e.code !== 11000) throw e;
+        }
+      }
+      if (!fresh.length) return;
+
+      await col.alerts().insertOne({
+        chat_id: q.chat_id,
+        session_id: q.session_id,
+        user_id: userId,
+        other_ids: fresh,
+        sent: false,
+        attempts: 0,
+        created_at: now,
+      });
+      console.log(`[quiz-lifeline] fair-play alert queued chat=${q.chat_id} user=${userId} others=${fresh.join(",")}`);
+    } catch (e) {
+      console.error("[quiz-lifeline] trackNetwork error:", e.message);
+    }
+  }
+
+  // ---- shared state evaluation ----
+  async function loadState(userId, token) {
+    const q = await col.questions().findOne({ token });
+    if (!q) return { err: "not_found" };
+    const usage = await col.usage().findOne({ _id: `${q.session_id}:${userId}` });
+    const uses = usage?.uses || 0;
+    const prev = usage?.used?.[token] || null; // {remove, keep}
+    const secondsLeft = Math.max(0, Math.ceil((new Date(q.expires_at).getTime() - Date.now()) / 1000));
+    const answered = (q.voted || []).some((v) => Number(v) === userId);
+    const options = q.options || [];
+    let reason = null;
+    if (!prev) {
+      if (options.length < 3) reason = "too_few";
+      else if (answered) reason = "answered";
+      else if (secondsLeft <= 0) reason = "expired";
+      else if (uses >= MAX_USES) reason = "no_uses";
+    }
+    return { q, uses, prev, secondsLeft, answered, options, reason };
+  }
+
+  function pickRemoval(n, correct) {
+    // keep the correct one + 1 random wrong one => exactly two options left
+    const wrong = [];
+    for (let i = 0; i < n; i++) if (i !== correct) wrong.push(i);
+    const keepWrong = wrong[crypto.randomInt(0, wrong.length)];
+    const remove = wrong.filter((i) => i !== keepWrong);
+    const keep = [correct, keepWrong].sort((a, b) => a - b);
+    return { remove, keep };
+  }
+
+  const authFail = (res) =>
+    res.status(401).json({ ok: false, code: "auth", message: "Open this from the quiz message inside Telegram." });
+
+  // ---------------- GET page ----------------
+  app.get("/quiz-lifeline", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.type("html").send(LIFELINE_HTML);
+  });
+
+  // ---------------- POST open ----------------
+  app.post("/api/quiz-lifeline/open", async (req, res) => {
+    try {
+      await ensureIndexes();
+      const auth = verifyInitData(req.body?.initData);
+      if (!auth) return authFail(res);
+      const token = cleanToken(req.body?.token);
+      if (!token) return res.json({ ok: false, code: "not_found" });
+
+      const st = await loadState(auth.user.id, token);
+      if (st.err) return res.json({ ok: false, code: st.err });
+
+      await trackNetwork(req, auth.user.id, st.q, auth.user.first_name);
+
+      res.json({
+        ok: true,
+        question: st.q.question,
+        options: st.options,
+        secondsLeft: st.secondsLeft,
+        maxUses: MAX_USES,
+        usesLeft: Math.max(0, MAX_USES - st.uses),
+        reason: st.reason,                 // null => can use
+        result: st.prev,                   // already used on this question => replay, no extra use
+      });
+    } catch (e) {
+      console.error("[quiz-lifeline] open error:", e);
+      res.status(500).json({ ok: false, code: "server" });
+    }
+  });
+
+  // ---------------- POST use ----------------
+  app.post("/api/quiz-lifeline/use", async (req, res) => {
+    try {
+      await ensureIndexes();
+      const auth = verifyInitData(req.body?.initData);
+      if (!auth) return authFail(res);
+      const userId = auth.user.id;
+      const token = cleanToken(req.body?.token);
+      if (!token) return res.json({ ok: false, code: "not_found" });
+
+      const st = await loadState(userId, token);
+      if (st.err) return res.json({ ok: false, code: st.err });
+
+      // already used on this question -> same answer, no extra use
+      if (st.prev) {
+        return res.json({ ok: true, ...st.prev, usesLeft: Math.max(0, MAX_USES - st.uses), replay: true });
+      }
+      if (st.reason) return res.json({ ok: false, code: st.reason, usesLeft: Math.max(0, MAX_USES - st.uses) });
+
+      const pick = pickRemoval(st.options.length, st.q.correct_index);
+      const _id = `${st.q.session_id}:${userId}`;
+      let consumed = false;
+      try {
+        // atomic: only succeeds while uses < MAX and this question not used yet
+        await col.usage().updateOne(
+          { _id, uses: { $lt: MAX_USES }, [`used.${token}`]: { $exists: false } },
+          {
+            $inc: { uses: 1 },
+            $set: { [`used.${token}`]: pick, user_id: userId, session_id: st.q.session_id },
+            $setOnInsert: { created_at: new Date() },
+          },
+          { upsert: true }
+        );
+        consumed = true;
+      } catch (e) {
+        if (e.code !== 11000) throw e; // 11000 => cap reached or lost a double-tap race
+      }
+
+      const after = await col.usage().findOne({ _id });
+      const usesLeft = Math.max(0, MAX_USES - (after?.uses || 0));
+      const stored = after?.used?.[token];
+      if (stored) {
+        return res.json({ ok: true, ...stored, usesLeft, replay: !consumed });
+      }
+      return res.json({ ok: false, code: "no_uses", usesLeft });
+    } catch (e) {
+      console.error("[quiz-lifeline] use error:", e);
+      res.status(500).json({ ok: false, code: "server" });
+    }
+  });
+
+  console.log("✅ Quiz 50:50 lifeline routes registered");
+}
+
+// ============================================================
+// MINI-APP PAGE (no backticks / template placeholders inside the client JS on purpose)
+// ============================================================
+const LIFELINE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>50:50 Lifeline</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --bg:#0a0618; --card:#16102e; --line:#2c2358; --txt:#f3f0ff; --mut:#9c93c9; --ok:#22ff88; --bad:#ff3d5a; --acc:#b44cff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","Segoe UI",Roboto,sans-serif; overflow-x:hidden; }
+  body { background-image:radial-gradient(circle at 20% 0%,rgba(180,76,255,.22),transparent 55%),
+                          radial-gradient(circle at 90% 100%,rgba(34,255,136,.10),transparent 50%); }
+  #fx { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:50; }
+  #app { position:relative; z-index:2; max-width:520px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .badge { font-weight:800; letter-spacing:.5px; font-size:20px; background:linear-gradient(90deg,#ff3d9a,#b44cff,#3dc8ff);
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .pips { display:flex; gap:6px; }
+  .pip { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; font-size:14px; background:var(--card); border:1px solid var(--line); transition:.4s; }
+  .pip.used { opacity:.25; filter:grayscale(1); transform:scale(.85); }
+  .timer { height:6px; border-radius:6px; background:var(--card); overflow:hidden; margin-bottom:16px; }
+  #bar { height:100%; width:100%; background:linear-gradient(90deg,var(--ok),#ffd23d,var(--bad)); transform-origin:left; transition:transform 1s linear; }
+  .question { font-size:18px; font-weight:700; line-height:1.35; margin:0 0 16px; white-space:pre-wrap; word-break:break-word; }
+  .opts { display:flex; flex-direction:column; gap:10px; }
+  .opt { position:relative; display:flex; align-items:center; gap:12px; padding:14px; border-radius:16px; background:var(--card);
+    border:1.5px solid var(--line); opacity:0; transform:translateY(18px) scale(.97); will-change:transform,filter,opacity; }
+  .opt.in { animation:rise .5s cubic-bezier(.2,.9,.3,1.2) forwards; }
+  @keyframes rise { to { opacity:1; transform:none; } }
+  .opt .ltr { flex:0 0 32px; height:32px; border-radius:10px; display:grid; place-items:center; font-weight:800; background:#241a4d; color:#d9ccff; }
+  .opt .txt { flex:1; font-size:16px; word-break:break-word; }
+  .opt.charge { animation:shake .12s linear infinite; border-color:var(--acc); box-shadow:0 0 18px rgba(180,76,255,.55); }
+  @keyframes shake { 0%{transform:translate(-2px,1px) rotate(-.4deg)} 50%{transform:translate(2px,-1px) rotate(.4deg)} 100%{transform:translate(-1px,-2px) rotate(0)} }
+  .opt.boom { animation:boom .55s ease-in forwards; border-color:var(--bad); box-shadow:0 0 40px var(--bad); }
+  @keyframes boom { 0%{transform:scale(1); filter:blur(0); opacity:1}
+                    35%{transform:scale(1.12); filter:blur(1px) brightness(1.8); opacity:1}
+                    100%{transform:scale(1.5); filter:blur(14px); opacity:0} }
+  .opt.gone { opacity:.2; transform:scale(.97); filter:grayscale(1); border-style:dashed; border-color:#3a3170; }
+  .opt.gone .txt { text-decoration:line-through; }
+  .opt.gone .ltr::after { content:"✕"; }
+  .opt.gone .ltr { font-size:0; } .opt.gone .ltr::after { font-size:15px; }
+  .opt.keep { border-color:var(--ok); background:linear-gradient(135deg,rgba(34,255,136,.14),rgba(34,255,136,.04));
+    animation:glow 1.3s ease-in-out infinite alternate; }
+  .opt.keep .ltr { background:var(--ok); color:#04210f; }
+  @keyframes glow { from{ box-shadow:0 0 6px rgba(34,255,136,.35) } to{ box-shadow:0 0 28px rgba(34,255,136,.9), 0 0 3px var(--ok) inset } }
+  .ring { position:fixed; width:20px; height:20px; border-radius:50%; border:3px solid var(--bad); z-index:49; pointer-events:none;
+    transform:translate(-50%,-50%); animation:ring .7s ease-out forwards; }
+  @keyframes ring { to { width:340px; height:340px; opacity:0; border-width:1px; } }
+  #flash { position:fixed; inset:0; background:#fff; opacity:0; z-index:48; pointer-events:none; }
+  #flash.on { animation:flash .35s ease-out; } @keyframes flash { 0%{opacity:.55} 100%{opacity:0} }
+  body.shake #app { animation:quake .4s linear; } @keyframes quake { 20%{transform:translate(-5px,3px)} 40%{transform:translate(5px,-3px)} 60%{transform:translate(-3px,-2px)} 80%{transform:translate(3px,2px)} }
+  #status { min-height:46px; margin:16px 0 10px; text-align:center; font-weight:700; font-size:15px; color:var(--mut); }
+  #status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
+  button { width:100%; border:0; border-radius:14px; padding:15px; font-size:16px; font-weight:800; color:#fff; cursor:pointer; margin-top:8px;
+    background:linear-gradient(90deg,#ff3d9a,#b44cff); box-shadow:0 8px 26px rgba(180,76,255,.4); }
+  button.sec { background:var(--card); border:1px solid var(--line); box-shadow:none; color:var(--txt); }
+  button:disabled { opacity:.5; }
+  [hidden] { display:none !important; }
+  .scan { position:absolute; left:0; right:0; height:3px; background:linear-gradient(90deg,transparent,#3dc8ff,transparent); z-index:3; top:0; opacity:0; }
+  .scan.on { animation:scan 1s ease-in-out; } @keyframes scan { 0%{top:0;opacity:1} 100%{top:100%;opacity:0} }
+  .opts-wrap { position:relative; }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div id="flash"></div>
+<div id="app">
+  <header>
+    <div class="badge">✂️ 50:50 LIFELINE</div>
+    <div class="pips" id="pips"></div>
+  </header>
+  <div class="timer"><div id="bar"></div></div>
+  <div class="question" id="q">Loading…</div>
+  <div class="opts-wrap"><div class="scan" id="scan"></div><div class="opts" id="opts"></div></div>
+  <div id="status"></div>
+  <button id="go" hidden>✂️ Use 50:50</button>
+  <button id="close" class="sec">Back to quiz</button>
+</div>
+
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var AUTO_ACTIVATE = true;      // false => player must tap the "Use 50:50" button
+  var LETTERS = "ABCDEFGHIJ";
+  var $ = function (id) { return document.getElementById(id); };
+  var optEls = [], token = "", maxUses = 3, secondsLeft = 0, ended = false, timerId = null, busy = false;
+
+  if (tg) {
+    tg.ready(); tg.expand();
+    try { tg.setHeaderColor("#0a0618"); tg.setBackgroundColor("#0a0618"); } catch (e) {}
+  }
+  function haptic(kind, style) {
+    try {
+      if (!tg || !tg.HapticFeedback) return;
+      if (kind === "impact") tg.HapticFeedback.impactOccurred(style || "medium");
+      else tg.HapticFeedback.notificationOccurred(style || "success");
+    } catch (e) {}
+  }
+  function getToken() {
+    var sp = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
+    if (!sp) { try { sp = new URLSearchParams(location.search).get("t") || ""; } catch (e) {} }
+    return String(sp).replace(/^lf_/, "");
+  }
+  function api(path, body) {
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); });
+  }
+  function setStatus(msg, cls) { var s = $("status"); s.textContent = msg || ""; s.className = cls || ""; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var MSG = {
+    auth: "Open this from the quiz message inside Telegram.",
+    not_found: "This lifeline is no longer available.",
+    expired: "Time is up for this question.",
+    answered: "You already answered this question.",
+    no_uses: "No lifelines left for this quiz.",
+    too_few: "Not enough options for a 50:50 here.",
+    server: "Something went wrong. Please try again."
+  };
+
+  function renderPips(left) {
+    var p = $("pips"); p.innerHTML = "";
+    for (var i = 0; i < maxUses; i++) {
+      var d = document.createElement("div");
+      d.className = "pip" + (i >= left ? " used" : "");
+      d.textContent = "✂️"; p.appendChild(d);
+    }
+  }
+  function startTimer(total) {
+    secondsLeft = total; var full = Math.max(total, 1);
+    function paint() { $("bar").style.transform = "scaleX(" + Math.max(0, secondsLeft / full) + ")"; }
+    paint();
+    timerId = setInterval(function () {
+      secondsLeft--; paint();
+      if (secondsLeft <= 0) { clearInterval(timerId); if (!ended) { setStatus("⏰ Time is up!", "bad"); $("go").hidden = true; } }
+    }, 1000);
+  }
+  function renderOptions(options) {
+    var box = $("opts"); box.innerHTML = ""; optEls = [];
+    options.forEach(function (t, i) {
+      var d = document.createElement("div"); d.className = "opt";
+      var l = document.createElement("div"); l.className = "ltr"; l.textContent = LETTERS[i] || (i + 1);
+      var x = document.createElement("div"); x.className = "txt"; x.textContent = t;
+      d.appendChild(l); d.appendChild(x); box.appendChild(d); optEls.push(d);
+    });
+    return Promise.all(optEls.map(function (el, i) {
+      return sleep(140 * i).then(function () { el.classList.add("in"); haptic("impact", "light"); });
+    })).then(function () { return sleep(500); });
+  }
+
+  // ---------- particles ----------
+  var cv = $("fx"), cx = cv.getContext("2d"), parts = [], raf = 0;
+  function fit() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; }
+  fit(); addEventListener("resize", fit);
+  function burst(rect) {
+    var ox = (rect.left + rect.width / 2) * devicePixelRatio, oy = (rect.top + rect.height / 2) * devicePixelRatio;
+    var cols = ["#ff3d5a", "#ff8a3d", "#ffd23d", "#ff3d9a", "#ffffff"];
+    for (var i = 0; i < 90; i++) {
+      var a = Math.random() * Math.PI * 2, s = (2 + Math.random() * 9) * devicePixelRatio;
+      parts.push({ x: ox + (Math.random() - .5) * rect.width * devicePixelRatio * .8, y: oy + (Math.random() - .5) * rect.height * devicePixelRatio * .5,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2 * devicePixelRatio, r: (2 + Math.random() * 5) * devicePixelRatio,
+        life: 1, dec: .012 + Math.random() * .02, c: cols[(Math.random() * cols.length) | 0] });
+    }
+    var ring = document.createElement("div"); ring.className = "ring";
+    ring.style.left = (rect.left + rect.width / 2) + "px"; ring.style.top = (rect.top + rect.height / 2) + "px";
+    document.body.appendChild(ring); setTimeout(function () { ring.remove(); }, 800);
+    if (!raf) raf = requestAnimationFrame(loop);
+  }
+  function loop() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    parts = parts.filter(function (p) { return p.life > 0; });
+    parts.forEach(function (p) {
+      p.x += p.vx; p.y += p.vy; p.vy += .35 * devicePixelRatio; p.vx *= .985; p.life -= p.dec;
+      cx.globalAlpha = Math.max(p.life, 0); cx.fillStyle = p.c; cx.beginPath(); cx.arc(p.x, p.y, p.r * Math.max(p.life, .2), 0, 6.283); cx.fill();
+    });
+    cx.globalAlpha = 1;
+    raf = parts.length ? requestAnimationFrame(loop) : 0;
+    if (!parts.length) cx.clearRect(0, 0, cv.width, cv.height);
+  }
+
+  // ---------- the show ----------
+  function showResult(res, animate) {
+    ended = true; if (timerId) clearInterval(timerId);
+    $("go").hidden = true;
+    var keepSet = {}; res.keep.forEach(function (i) { keepSet[i] = 1; });
+    function finish() {
+      optEls.forEach(function (el, i) {
+        el.classList.remove("charge", "boom");
+        if (keepSet[i]) el.classList.add("keep"); else el.classList.add("gone");
+      });
+      renderPips(res.usesLeft);
+      setStatus("✨ Two wrong answers removed! Pick one of the glowing options in the poll.", "ok");
+      haptic("notify", "success");
+    }
+    if (!animate) { finish(); return Promise.resolve(); }
+    var chain = Promise.resolve();
+    res.remove.forEach(function (idx, n) {
+      chain = chain.then(function () { return sleep(n ? 260 : 0); }).then(function () {
+        var el = optEls[idx]; if (!el) return;
+        burst(el.getBoundingClientRect()); el.classList.remove("charge"); el.classList.add("boom");
+        $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
+        document.body.classList.remove("shake"); void document.body.offsetWidth; document.body.classList.add("shake");
+        haptic("impact", "heavy");
+      });
+    });
+    return chain.then(function () { return sleep(750); }).then(finish);
+  }
+
+  function activate() {
+    if (busy || ended) return; busy = true; $("go").hidden = true;
+    setStatus("🔍 Scanning answers…");
+    optEls.forEach(function (el) { el.classList.add("charge"); });
+    var sc = $("scan"); sc.classList.remove("on"); void sc.offsetWidth; sc.classList.add("on");
+    haptic("impact", "medium");
+    Promise.all([
+      api("/api/quiz-lifeline/use", { initData: tg ? tg.initData : "", token: token }),
+      sleep(1100)
+    ]).then(function (r) {
+      var res = r[0];
+      optEls.forEach(function (el) { el.classList.remove("charge"); });
+      if (res && res.ok) return showResult(res, !res.replay);
+      ended = true; setStatus(MSG[res && res.code] || MSG.server, "bad"); haptic("notify", "error");
+      if (res && typeof res.usesLeft === "number") renderPips(res.usesLeft);
+    }).catch(function () {
+      optEls.forEach(function (el) { el.classList.remove("charge"); });
+      setStatus(MSG.server, "bad"); $("go").hidden = false;
+    }).then(function () { busy = false; });
+  }
+
+  $("go").addEventListener("click", activate);
+  $("close").addEventListener("click", function () { if (tg) tg.close(); else history.back(); });
+
+  // ---------- boot ----------
+  token = getToken();
+  if (!token) { $("q").textContent = "🤔"; setStatus(MSG.auth, "bad"); return; }
+  api("/api/quiz-lifeline/open", { initData: tg ? tg.initData : "", token: token }).then(function (d) {
+    if (!d || !d.ok) {
+      $("q").textContent = "😕"; setStatus(MSG[d && d.code] || MSG.server, "bad"); return;
+    }
+    maxUses = d.maxUses; $("q").textContent = d.question; renderPips(d.usesLeft);
+    startTimer(d.secondsLeft);
+    return renderOptions(d.options).then(function () {
+      if (d.result) { d.result.usesLeft = d.usesLeft; return showResult(d.result, false); }
+      if (d.reason) { ended = true; setStatus(MSG[d.reason] || MSG.server, "bad"); return; }
+      setStatus("Ready… (" + d.usesLeft + " lifeline" + (d.usesLeft === 1 ? "" : "s") + " left)");
+      if (AUTO_ACTIVATE) return sleep(400).then(activate);
+      $("go").hidden = false;
+    });
+  }).catch(function () { $("q").textContent = "😕"; setStatus(MSG.server, "bad"); });
+})();
+</script>
+</body>
+</html>`;
+
+registerQuizLifeline(app, client);
+
 // ========================
 // HOME & FALLBACK ROUTE
 // ========================
