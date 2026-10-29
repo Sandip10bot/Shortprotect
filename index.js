@@ -3862,10 +3862,177 @@ app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
 });
 
 // ==========================================
-// WATCH AD TO FORWARD (DIAGNOSTIC VERSION)
+// WATCH 3 ADS TO FORWARD (ADVANCED MULTI-STEP, URL-SHORTENER STYLE)
+// Step progress 1/3 -> 2/3 -> 3/3, server-verified, resumable, anti-bypass
 // ==========================================
+const FORWARD_AD_REQUIRED = 3;          // number of ads to watch
+const FORWARD_AD_MIN_GAP_MS = 4000;     // min time between server-verified steps
+const FORWARD_AD_SESSION_TTL_MS = 30 * 60 * 1000; // session validity (30 min)
+
+function getForwardAdCollection() {
+    return client.db("Mytho").collection("forward_ad_sessions");
+}
+
+let forwardAdIndexReady = false;
+async function ensureForwardAdIndexes() {
+    if (forwardAdIndexReady) return;
+    try {
+        const col = getForwardAdCollection();
+        await col.createIndex({ createdAt: 1 }, { expireAfterSeconds: 3600 });
+        await col.createIndex({ user_id: 1, file_id: 1, completed: 1 });
+        forwardAdIndexReady = true;
+    } catch (e) {
+        console.error("Forward-ad index error:", e.message);
+    }
+}
+
+// Create (or resume) a session for user + file
+async function getOrCreateForwardAdSession(userId, fileId) {
+    await ensureForwardAdIndexes();
+    const col = getForwardAdCollection();
+    const now = Date.now();
+    let session = await col.findOne({
+        user_id: userId,
+        file_id: fileId,
+        completed: false,
+        expiresAt: { $gt: now }
+    });
+    if (!session) {
+        session = {
+            token: crypto.randomBytes(16).toString("hex"),
+            user_id: userId,
+            file_id: fileId,
+            step: 0,
+            completed: false,
+            lastStepAt: 0,
+            createdAt: new Date(),
+            expiresAt: now + FORWARD_AD_SESSION_TTL_MS
+        };
+        await col.insertOne(session);
+    }
+    return session;
+}
+
+// Status API (used by page on load to resume progress)
+app.get("/api/forward-ad/status/:userId/:fileId", async (req, res) => {
+    try {
+        const userId = String(req.params.userId);
+        const fileId = String(req.params.fileId);
+        const session = await getOrCreateForwardAdSession(userId, fileId);
+        res.json({
+            success: true,
+            token: session.token,
+            step: session.step,
+            required: FORWARD_AD_REQUIRED
+        });
+    } catch (e) {
+        console.error("Forward-ad status error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// Step API: called after each ad finishes; server validates and increments
+app.post("/api/forward-ad/step", async (req, res) => {
+    try {
+        const { token, userId, fileId } = req.body || {};
+        if (!token || !userId || !fileId) {
+            return res.status(400).json({ success: false, error: "Invalid request" });
+        }
+
+        const col = getForwardAdCollection();
+        const session = await col.findOne({
+            token: String(token),
+            user_id: String(userId),
+            file_id: String(fileId)
+        });
+
+        if (!session || session.expiresAt < Date.now()) {
+            return res.json({ success: false, code: "expired", error: "Session expired. Please reopen the link." });
+        }
+        if (session.completed || session.step >= FORWARD_AD_REQUIRED) {
+            return res.json({ success: true, step: FORWARD_AD_REQUIRED, required: FORWARD_AD_REQUIRED, done: true });
+        }
+
+        const now = Date.now();
+        const wait = FORWARD_AD_MIN_GAP_MS - (now - (session.lastStepAt || 0));
+        if (wait > 0) {
+            return res.json({
+                success: false,
+                code: "too_fast",
+                waitMs: wait,
+                error: "Please watch the full ad before continuing."
+            });
+        }
+
+        // Atomic increment (prevents double-click / replay race)
+        const updated = await col.findOneAndUpdate(
+            { token: session.token, step: session.step, completed: false },
+            { $set: { lastStepAt: now }, $inc: { step: 1 } },
+            { returnDocument: "after" }
+        );
+        const doc = updated && (updated.value !== undefined ? updated.value : updated);
+        if (!doc) {
+            return res.json({ success: false, code: "race", error: "Please try again." });
+        }
+
+        res.json({
+            success: true,
+            step: doc.step,
+            required: FORWARD_AD_REQUIRED,
+            done: doc.step >= FORWARD_AD_REQUIRED
+        });
+    } catch (e) {
+        console.error("Forward-ad step error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// Complete API: final verification before the file is forwarded
+app.post("/api/forward-ad/complete", async (req, res) => {
+    try {
+        const { token, userId, fileId } = req.body || {};
+        if (!token || !userId || !fileId) {
+            return res.status(400).json({ success: false, error: "Invalid request" });
+        }
+        const col = getForwardAdCollection();
+        const result = await col.findOneAndUpdate(
+            {
+                token: String(token),
+                user_id: String(userId),
+                file_id: String(fileId),
+                step: { $gte: FORWARD_AD_REQUIRED },
+                completed: false,
+                expiresAt: { $gt: Date.now() }
+            },
+            { $set: { completed: true, completedAt: new Date() } },
+            { returnDocument: "after" }
+        );
+        const doc = result && (result.value !== undefined ? result.value : result);
+        if (!doc) {
+            return res.json({ success: false, error: "Ads not completed yet." });
+        }
+
+        try {
+            await mpHistoryCollection.insertOne({
+                user_id: parseInt(userId),
+                amount: 0,
+                type: "EARNED",
+                reason: "Watched 3 Ads to Forward File",
+                date: new Date()
+            });
+        } catch (_) {}
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Forward-ad complete error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
 app.get("/forward-ad/:userId/:fileId", async (req, res) => {
-    const { userId, fileId } = req.params;
+    const userId = String(req.params.userId).replace(/[^0-9]/g, "");
+    const fileId = String(req.params.fileId).replace(/[^A-Za-z0-9_\-]/g, "");
+
     res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -3873,56 +4040,240 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
-        <title>Watch Ad to Forward</title>
+        <title>Watch Ads to Forward</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
         ${THEME_CSS}
+        <style>
+            .fa-steps { display:flex; align-items:center; justify-content:center; gap:0; margin:6px 0 22px; }
+            .fa-dot {
+                width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+                font-weight:700; font-size:15px; color:rgba(235,235,245,0.5);
+                background:rgba(255,255,255,0.06); border:1.5px solid rgba(255,255,255,0.14);
+                transition: all .4s cubic-bezier(0.34,1.56,0.64,1); flex:0 0 auto;
+            }
+            .fa-dot.active { color:#fff; border-color:#bf5af2; box-shadow:0 0 0 4px rgba(191,90,242,0.18); transform:scale(1.08); }
+            .fa-dot.done { color:#fff; background:linear-gradient(135deg,#00e676,#00b359); border-color:transparent; }
+            .fa-line { height:3px; width:44px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; flex:0 0 auto; }
+            .fa-line > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#00e676,#00b359); transition:width .5s ease; }
+            .fa-line.done > i { width:100%; }
+            .fa-counter { font-size:13px; color:#bf5af2; font-weight:700; letter-spacing:.4px; text-transform:uppercase; margin-bottom:6px; }
+            .fa-bar { height:8px; border-radius:8px; background:rgba(255,255,255,0.08); overflow:hidden; margin:0 0 20px; }
+            .fa-bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#b74bff,#00e676); border-radius:8px; transition:width .6s cubic-bezier(.32,.72,0,1); }
+            .btn[disabled] { opacity:.55; cursor:not-allowed; filter:grayscale(.3); }
+            .fa-note { margin-top:18px; padding:12px; background:rgba(255,255,255,0.05); border:0.5px solid rgba(255,255,255,0.1); border-radius:12px; font-size:12px; color:#aaa; line-height:1.5; }
+            .fa-status { min-height:20px; margin-top:14px; font-size:13px; font-weight:600; color:#ea80fc; }
+            .fa-status.err { color:#ff453a; }
+            .fa-status.ok { color:#30d158; }
+            .fa-check { width:64px; height:64px; margin:0 auto 12px; border-radius:50%; background:linear-gradient(135deg,#00e676,#00b359); display:flex; align-items:center; justify-content:center; animation: faPop .5s cubic-bezier(.34,1.56,.64,1); }
+            @keyframes faPop { from { transform:scale(0); } to { transform:scale(1); } }
+            .hidden { display:none !important; }
+        </style>
     </head>
     <body>
         <div class="container">
-            <div style="font-size:40px; margin-bottom:10px;">🍋</div>
-            <h2>Unlock Forward</h2>
-            <p>Watch a short ad to instantly get the forwarded file without spending any Mythopoints!</p>
-            <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad</button>
-            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
-                Verifying... Please wait ⚙️
+
+            <!-- LOADING -->
+            <div id="view-loading">
+                <div class="loader"></div>
+                <p style="margin-bottom:0;">Preparing your unlock session...</p>
+            </div>
+
+            <!-- ADS FLOW -->
+            <div id="view-ads" class="hidden">
+                <div style="font-size:40px; margin-bottom:6px;">🍋</div>
+                <h2>Unlock Forward</h2>
+                <div class="fa-counter" id="fa-counter">Ad 1 of 3</div>
+
+                <div class="fa-steps" id="fa-steps">
+                    <div class="fa-dot" data-i="1">1</div>
+                    <div class="fa-line" data-l="1"><i></i></div>
+                    <div class="fa-dot" data-i="2">2</div>
+                    <div class="fa-line" data-l="2"><i></i></div>
+                    <div class="fa-dot" data-i="3">3</div>
+                </div>
+
+                <div class="fa-bar"><i id="fa-bar-fill"></i></div>
+
+                <p id="fa-desc">Watch <b>3 short ads</b> one by one to get your file without spending any Mythopoints.</p>
+
+                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad 1 of 3</button>
+
+                <div class="fa-status" id="fa-status"></div>
+                <div class="fa-note">Watch each ad until it finishes. Closing an ad early will not count as a step. Your progress is saved if you leave and come back.</div>
+            </div>
+
+            <!-- DONE -->
+            <div id="view-done" class="hidden">
+                <div class="fa-check">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+                <h2>All 3 Ads Completed</h2>
+                <p>Verified. Sending your file to the bot...</p>
+                <div class="fa-bar"><i style="width:100%"></i></div>
+                <button class="btn" id="open-bot-btn">Open Bot &amp; Get File</button>
+            </div>
+
+            <!-- ERROR -->
+            <div id="view-error" class="hidden">
+                <h2 class="error-title">Something went wrong</h2>
+                <p id="fa-error-msg">Please try again.</p>
+                <button class="btn" onclick="location.reload()">Retry</button>
             </div>
         </div>
 
         <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
-            
-            console.log("Telegram WebApp state:", tg);
 
-            document.getElementById('watch-ad-btn').addEventListener('click', function() {
-                alert("⚙️ System: Click detected successfully!");
+            const USER_ID = "${userId}";
+            const FILE_ID = "${fileId}";
+            const REQUIRED = ${FORWARD_AD_REQUIRED};
+            const BOT_LINK = "https://t.me/MythoSerialBot?start=adfwd_" + FILE_ID;
 
-                if (typeof show_9055307 !== 'function') {
-                    alert("❌ SDK Error: Monetag script failed to load as a function. Type found: " + typeof show_9055307);
+            let sessionToken = null;
+            let currentStep = 0;     // ads already completed (server-verified)
+            let busy = false;
+
+            const $ = (id) => document.getElementById(id);
+            const show = (name) => {
+                ['view-loading','view-ads','view-done','view-error'].forEach(v => $(v).classList.add('hidden'));
+                $(name).classList.remove('hidden');
+            };
+            const setStatus = (msg, cls) => {
+                const el = $('fa-status');
+                el.textContent = msg || '';
+                el.className = 'fa-status' + (cls ? ' ' + cls : '');
+            };
+            const haptic = (type) => { try { tg.HapticFeedback.notificationOccurred(type); } catch (_) {} };
+
+            function render() {
+                const next = Math.min(currentStep + 1, REQUIRED);
+                $('fa-counter').textContent = 'Ad ' + next + ' of ' + REQUIRED;
+                $('watch-ad-btn').textContent = '▶ Watch Ad ' + next + ' of ' + REQUIRED;
+                $('fa-bar-fill').style.width = ((currentStep / REQUIRED) * 100) + '%';
+
+                document.querySelectorAll('.fa-dot').forEach(d => {
+                    const i = parseInt(d.dataset.i);
+                    d.classList.remove('done', 'active');
+                    if (i <= currentStep) { d.classList.add('done'); d.innerHTML = '&#10003;'; }
+                    else if (i === currentStep + 1) { d.classList.add('active'); d.textContent = i; }
+                    else { d.textContent = i; }
+                });
+                document.querySelectorAll('.fa-line').forEach(l => {
+                    const i = parseInt(l.dataset.l);
+                    l.classList.toggle('done', i <= currentStep);
+                });
+
+                if (currentStep > 0 && currentStep < REQUIRED) {
+                    $('fa-desc').innerHTML = '<b>' + currentStep + ' of ' + REQUIRED + '</b> ads completed. ' + (REQUIRED - currentStep) + ' more to go!';
+                }
+            }
+
+            async function api(url, body) {
+                const r = await fetch(url, {
+                    method: body ? 'POST' : 'GET',
+                    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                    body: body ? JSON.stringify(body) : undefined
+                });
+                return r.json();
+            }
+
+            async function finish() {
+                show('view-done');
+                haptic('success');
+                try {
+                    const r = await api('/api/forward-ad/complete', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+                    if (!r.success) throw new Error(r.error || 'Verification failed');
+                } catch (e) {
+                    $('fa-error-msg').textContent = e.message || 'Verification failed.';
+                    show('view-error');
                     return;
                 }
-                
-                try {
-                    alert("🚀 Calling Monetag SDK Engine...");
-                    
-                    show_9055307().then(() => {
-                        tg.HapticFeedback.notificationOccurred('success');
-                        document.getElementById('watch-ad-btn').style.display = 'none';
-                        document.getElementById('loading-msg').style.display = 'block';
-                        
-                        tg.openTelegramLink("https://t.me/MythoSerialBot?start=adfwd_${fileId}");
-                        
-                        setTimeout(() => {
-                            tg.close();
-                        }, 1200);
-                    }).catch((error) => {
-                        alert("⚠️ Monetag Promise Error: " + JSON.stringify(error));
-                    });
-                } catch (e) {
-                    alert("💥 Runtime Crash Error: " + e.message);
+                openBot();
+            }
+
+            function openBot() {
+                tg.openTelegramLink(BOT_LINK);
+                setTimeout(() => { tg.close(); }, 1200);
+            }
+
+            async function onWatch() {
+                if (busy) return;
+                if (typeof show_9055307 !== 'function') {
+                    setStatus('Ad service is still loading. Try again in a few seconds.', 'err');
+                    return;
                 }
-            });
+                busy = true;
+                const btn = $('watch-ad-btn');
+                btn.disabled = true;
+                setStatus('Loading ad ' + (currentStep + 1) + ' of ' + REQUIRED + '...');
+
+                try {
+                    await show_9055307();   // resolves only when the ad is completed
+                } catch (err) {
+                    console.error('Monetag Error:', err);
+                    setStatus('Ad was closed early or failed. Please try again.', 'err');
+                    btn.disabled = false;
+                    busy = false;
+                    return;
+                }
+
+                try {
+                    setStatus('Verifying...');
+                    let r = await api('/api/forward-ad/step', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+
+                    // Server asked us to slow down - wait and retry once
+                    if (!r.success && r.code === 'too_fast' && r.waitMs) {
+                        await new Promise(res => setTimeout(res, r.waitMs + 200));
+                        r = await api('/api/forward-ad/step', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+                    }
+
+                    if (!r.success) {
+                        if (r.code === 'expired') {
+                            $('fa-error-msg').textContent = r.error;
+                            show('view-error');
+                            return;
+                        }
+                        throw new Error(r.error || 'Verification failed');
+                    }
+
+                    currentStep = r.step;
+                    haptic('success');
+                    render();
+
+                    if (r.done || currentStep >= REQUIRED) {
+                        setStatus('');
+                        await finish();
+                    } else {
+                        setStatus('Ad ' + currentStep + ' of ' + REQUIRED + ' completed. Next ad ready!', 'ok');
+                        btn.disabled = false;
+                    }
+                } catch (e) {
+                    setStatus(e.message || 'Network error. Please try again.', 'err');
+                    btn.disabled = false;
+                } finally {
+                    busy = false;
+                }
+            }
+
+            $('watch-ad-btn').addEventListener('click', onWatch);
+            $('open-bot-btn').addEventListener('click', openBot);
+
+            (async function init() {
+                try {
+                    const s = await api('/api/forward-ad/status/' + USER_ID + '/' + FILE_ID);
+                    if (!s.success) throw new Error(s.error || 'Could not start session');
+                    sessionToken = s.token;
+                    currentStep = s.step || 0;
+                    render();
+                    if (currentStep >= REQUIRED) { await finish(); }
+                    else { show('view-ads'); }
+                } catch (e) {
+                    $('fa-error-msg').textContent = e.message || 'Could not load. Please try again.';
+                    show('view-error');
+                }
+            })();
         </script>
     </body>
     </html>
