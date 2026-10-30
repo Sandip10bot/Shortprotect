@@ -16,7 +16,8 @@ import zlib from "zlib";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // ========================
 // AI QUIZ GENERATION (prexzyapis.com Gemini proxy)
@@ -10938,6 +10939,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         }
 
         .opt-body { flex: 1; min-width: 0; }
+        .opt-drag-handle { width: 24px; height: 34px; display: grid; place-items: center; color: var(--hint); cursor: grab; flex-shrink: 0; opacity: 0.75; touch-action: none; user-select: none; -webkit-user-select: none; }
+        .opt-drag-handle:active { cursor: grabbing; }
+        .option-card.opt-dragging { opacity: 0.95; background: rgba(42,171,238,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.18); position: relative; z-index: 5; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
         .option-card .opt-val::placeholder { color: var(--hint); }
@@ -11336,7 +11340,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             status.textContent = 'Starting AI generation…';
 
             // Progressive chunks so we can reach 100 without one huge reply
-            const CHUNK = totalWant <= 8 ? totalWant : 6;
+            const CHUNK = Math.min(totalWant, 4); // 1 AI call per request -> no proxy timeout
             const allQs = [];
             const seen = new Set();
             let title = '';
@@ -11360,13 +11364,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             try {
                 let offset = 0;
                 let round = 0;
-                while (allQs.length < totalWant && round < 25) {
+                while (allQs.length < totalWant && round < 80) {
                     round++;
                     const need = Math.min(CHUNK, totalWant - allQs.length);
                     const pctBase = (allQs.length / totalWant) * 100;
                     setAIProgress(Math.min(96, pctBase + 3), 'Generating ' + (allQs.length + 1) + '–' + (allQs.length + need) + ' of ' + totalWant + '…');
                     status.textContent = 'AI working… ' + allQs.length + '/' + totalWant + ' questions';
 
+                    let data;
+                    try {
                     const res = await fetch('/api/quiz/generate-ai', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -11379,13 +11385,19 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                             offset: allQs.length
                         })
                     });
-                    const data = await res.json();
+                    data = await safeJson(res);
+                    } catch (netErr) {
+                        data = { success: false, error: netErr.message };
+                    }
                     if (!data.success) {
                         failedStreak++;
-                        if (allQs.length === 0) throw new Error(data.error || 'Generation failed');
-                        if (failedStreak >= 3) break;
+                        if (failedStreak >= 4) {
+                            if (allQs.length === 0) throw new Error(data.error || 'Generation failed');
+                            break;
+                        }
+                        status.textContent = 'Retrying… (' + (data.error || 'server busy') + ')';
                         // retry same window once
-                        await new Promise(function (r) { setTimeout(r, 800); });
+                        await new Promise(function (r) { setTimeout(r, 1500); });
                         continue;
                     }
                     failedStreak = 0;
@@ -11473,6 +11485,79 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }());
         }
 
+        // ---- Safe JSON parse: server HTML error pages (413/502/504) no longer crash with "Unexpected token '<'" ----
+        async function safeJson(res) {
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                let msg;
+                if (res.status === 413) msg = 'Data is too large for the server (413).';
+                else if (res.status === 502 || res.status === 503 || res.status === 504) msg = 'Server timed out or is busy (' + res.status + '). Please try again.';
+                else msg = 'Server returned an invalid response (HTTP ' + res.status + ').';
+                const err = new Error(msg);
+                err.status = res.status;
+                throw err;
+            }
+        }
+
+        // ---- Drag to reorder options inside a question (drag the handle on the left of an option) ----
+        (function setupOptionReorder() {
+            let dragEl = null;
+            let group = null;
+
+            document.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('.opt-drag-handle')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            document.addEventListener('pointerdown', function (e) {
+                const h = e.target && e.target.closest ? e.target.closest('.opt-drag-handle') : null;
+                if (!h) return;
+                const card = h.closest('.option-card');
+                if (!card) return;
+                e.preventDefault();
+                dragEl = card;
+                group = card.parentElement;
+                card.classList.add('opt-dragging');
+                try { h.setPointerCapture(e.pointerId); } catch (err) {}
+                try { tg.HapticFeedback.impactOccurred('light'); } catch (err) {}
+            });
+
+            document.addEventListener('pointermove', function (e) {
+                if (!dragEl) return;
+                e.preventDefault();
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const over = el && el.closest ? el.closest('.option-card') : null;
+                if (!over || over === dragEl || over.parentElement !== group) return;
+                const cards = Array.from(group.querySelectorAll('.option-card'));
+                if (cards.indexOf(dragEl) < cards.indexOf(over)) group.insertBefore(dragEl, over.nextSibling);
+                else group.insertBefore(dragEl, over);
+            }, { passive: false });
+
+            function finish() {
+                if (!dragEl) return;
+                const qCard = dragEl.closest('.q-card');
+                dragEl.classList.remove('opt-dragging');
+                // keep placeholders / radio values in the new visual order
+                Array.from(group.querySelectorAll('.option-card')).forEach(function (oc, i) {
+                    const inp = oc.querySelector('.opt-val');
+                    if (inp) inp.placeholder = 'Option ' + (i + 1);
+                    const r = oc.querySelector('input[type="radio"]');
+                    if (r) r.value = String(i);
+                });
+                dragEl = null;
+                group = null;
+                if (qCard && qCard.id && typeof updateOptionStyles === 'function') updateOptionStyles(qCard.id);
+                if (typeof triggerAutoSave === 'function') triggerAutoSave();
+                try { tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
+        })();
+
         function updateOptionStyles(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
@@ -11523,7 +11608,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 <div class="options-group">
                     <label class="option-card selected">
                         <input type="radio" name="q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 1" required>
@@ -11534,7 +11619,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 2" required>
@@ -11545,7 +11630,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 3" required>
@@ -11556,7 +11641,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 4" required>
@@ -11980,7 +12065,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -12257,6 +12342,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
         .option-card.selected .radio-custom::after { content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -55%) rotate(45deg); }
         .opt-body { flex: 1; min-width: 0; }
+        .opt-drag-handle { width: 24px; height: 34px; display: grid; place-items: center; color: var(--hint); cursor: grab; flex-shrink: 0; opacity: 0.75; touch-action: none; user-select: none; -webkit-user-select: none; }
+        .opt-drag-handle:active { cursor: grabbing; }
+        .option-card.opt-dragging { opacity: 0.95; background: rgba(42,171,238,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.18); position: relative; z-index: 5; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
         .option-card .opt-val::placeholder { color: var(--hint); }
@@ -12541,7 +12629,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             const subEl = document.getElementById('profile-sub');
             try {
                 const res = await fetch('/api/quiz/manage/list/' + userId);
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success && data.quizzes.length > 0) {
                     quizzes = data.quizzes;
@@ -12605,7 +12693,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             try {
                 const res = await fetch('/api/quiz/manage/detail/' + userId + '/' + quizId);
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     currentEditQuizId = quizId;
@@ -12710,7 +12798,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <div class="options-group">
                     <label class="option-card selected">
                         <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 1" required>
@@ -12721,7 +12809,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 2" required>
@@ -12732,7 +12820,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 3" required>
@@ -12743,7 +12831,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 4" required>
@@ -12847,6 +12935,79 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             tg.HapticFeedback.impactOccurred('medium');
         }
 
+        // ---- Safe JSON parse: server HTML error pages (413/502/504) no longer crash with "Unexpected token '<'" ----
+        async function safeJson(res) {
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                let msg;
+                if (res.status === 413) msg = 'Data is too large for the server (413).';
+                else if (res.status === 502 || res.status === 503 || res.status === 504) msg = 'Server timed out or is busy (' + res.status + '). Please try again.';
+                else msg = 'Server returned an invalid response (HTTP ' + res.status + ').';
+                const err = new Error(msg);
+                err.status = res.status;
+                throw err;
+            }
+        }
+
+        // ---- Drag to reorder options inside a question (drag the handle on the left of an option) ----
+        (function setupOptionReorder() {
+            let dragEl = null;
+            let group = null;
+
+            document.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('.opt-drag-handle')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            document.addEventListener('pointerdown', function (e) {
+                const h = e.target && e.target.closest ? e.target.closest('.opt-drag-handle') : null;
+                if (!h) return;
+                const card = h.closest('.option-card');
+                if (!card) return;
+                e.preventDefault();
+                dragEl = card;
+                group = card.parentElement;
+                card.classList.add('opt-dragging');
+                try { h.setPointerCapture(e.pointerId); } catch (err) {}
+                try { tg.HapticFeedback.impactOccurred('light'); } catch (err) {}
+            });
+
+            document.addEventListener('pointermove', function (e) {
+                if (!dragEl) return;
+                e.preventDefault();
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const over = el && el.closest ? el.closest('.option-card') : null;
+                if (!over || over === dragEl || over.parentElement !== group) return;
+                const cards = Array.from(group.querySelectorAll('.option-card'));
+                if (cards.indexOf(dragEl) < cards.indexOf(over)) group.insertBefore(dragEl, over.nextSibling);
+                else group.insertBefore(dragEl, over);
+            }, { passive: false });
+
+            function finish() {
+                if (!dragEl) return;
+                const qCard = dragEl.closest('.q-card');
+                dragEl.classList.remove('opt-dragging');
+                // keep placeholders / radio values in the new visual order
+                Array.from(group.querySelectorAll('.option-card')).forEach(function (oc, i) {
+                    const inp = oc.querySelector('.opt-val');
+                    if (inp) inp.placeholder = 'Option ' + (i + 1);
+                    const r = oc.querySelector('input[type="radio"]');
+                    if (r) r.value = String(i);
+                });
+                dragEl = null;
+                group = null;
+                if (qCard && qCard.id && typeof updateOptionStyles === 'function') updateOptionStyles(qCard.id);
+                if (typeof triggerAutoSave === 'function') triggerAutoSave();
+                try { tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
+        })();
+
         function updateOptionStyles(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
@@ -12943,7 +13104,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -12963,7 +13124,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 tg.HapticFeedback.impactOccurred('heavy');
                 try {
                     const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
-                    const data = await res.json();
+                    const data = await safeJson(res);
                     if(data.success) {
                         document.getElementById('card-' + quizId).style.display = 'none';
                         tg.HapticFeedback.notificationOccurred('success');
@@ -13003,7 +13164,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             try {
                 const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success && data.users.length > 0) {
                     let html = '';
@@ -13051,7 +13212,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
                 });
 
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -15160,6 +15321,18 @@ app.get("*", (req, res) => {
       </body>
       </html>
     `);
+});
+
+// JSON 404 + JSON error handler for API routes (prevents HTML error pages)
+app.use("/api", (req, res) => {
+  res.status(404).json({ success: false, error: "API route not found." });
+});
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  const msg = err.type === "entity.too.large" ? "Request is too large." : (err.message || "Server error");
+  console.error("Express error:", msg);
+  res.status(status).json({ success: false, error: msg });
 });
 
 // Start Server – Wait for DB connection first
