@@ -8,6 +8,8 @@ import { ObjectId } from "mongodb";
 import crypto from "crypto";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import http from "http";
+import https from "https";
 
 
 const app = express();
@@ -14032,6 +14034,122 @@ const LIFELINE_HTML = `<!DOCTYPE html>
 </html>`;
 
 registerQuizLifeline(app, client);
+
+// ==========================================================
+// MYTHOSTREAM SITE -> SAME DOMAIN (reverse proxy to Python stream server)
+// Streaming / watch / reels / login / admin pages now open on THIS site.
+// Needs env:  STREAM_SERVER_URL=https://your-python-stream-server.example.com
+// Optional:   STREAM_PROXY_ROOT=false  (keep the old "/" welcome page)
+// ==========================================================
+const STREAM_SERVER_URL = (process.env.STREAM_SERVER_URL || "").trim().replace(/\/+$/, "");
+const STREAM_PROXY_ROOT = (process.env.STREAM_PROXY_ROOT || "true").toLowerCase() !== "false";
+let STREAM_UPSTREAM = null;
+if (STREAM_SERVER_URL) {
+    try {
+        STREAM_UPSTREAM = new URL(STREAM_SERVER_URL);
+    } catch (e) {
+        console.error("❌ Invalid STREAM_SERVER_URL:", STREAM_SERVER_URL);
+    }
+} else {
+    console.warn("⚠️ STREAM_SERVER_URL not set - stream site proxy is disabled.");
+}
+
+const streamHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 256 });
+const streamHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 256 });
+
+// Every route that exists in stream_routes.py
+const STREAM_PATH_PATTERNS = [
+    /^\/(login|search|trending|reels|livetv|profile|history|playlists|favorites|settings|admin)\/?$/,
+    /^\/admin\/(stats|dashboard)\/?$/,
+    /^\/livetv\/watch\/[^/]+\/?$/,
+    /^\/playlist\/[^/]+\/?$/,
+    /^\/series\/[^/]+\/?$/,
+    /^\/(watch|stream)\/[^/]+(\/[^/]+)?$/,
+    /^\/reel_stream\/[^/]+$/,
+    /^\/\d+(\/[^/]+)?$/,
+    /^\/api\/(logout|tg-login|check-auth|add-view|like|dislike|add-comment|upload-reel|get-reels|reel-like|reel-view|save-progress|create-playlist|add-to-playlist|get-playlists|update-setting|get-notifications|upload-reel-file)$/,
+    /^\/api\/(get-comments|get-progress)\/[^/]+$/,
+    /^\/api\/get-quality-variants\/[^/]+\/[^/]+\/[^/]+$/
+];
+
+function isStreamPath(p) {
+    if (p === "/") return STREAM_PROXY_ROOT;
+    return STREAM_PATH_PATTERNS.some((re) => re.test(p));
+}
+
+function streamProxyHandler(req, res, next) {
+    if (!STREAM_UPSTREAM) return next();
+    if (!isStreamPath(req.path)) return next();
+
+    const isHttps = STREAM_UPSTREAM.protocol === "https:";
+    const headers = { ...req.headers };
+    delete headers.connection;
+    delete headers["keep-alive"];
+    delete headers["proxy-connection"];
+    headers.host = STREAM_UPSTREAM.host;
+    headers["x-forwarded-host"] = req.headers.host || "";
+    headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+    const remoteIp = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : "";
+    headers["x-forwarded-for"] = (req.headers["x-forwarded-for"] ? req.headers["x-forwarded-for"] + ", " : "") + remoteIp;
+
+    // express.json() may already have consumed a JSON body -> send it again
+    let bodyBuf = null;
+    if (req._body && req.body !== undefined) {
+        bodyBuf = Buffer.from(JSON.stringify(req.body));
+        headers["content-length"] = bodyBuf.length;
+        delete headers["transfer-encoding"];
+    }
+
+    const proxyReq = (isHttps ? https : http).request(
+        {
+            protocol: STREAM_UPSTREAM.protocol,
+            hostname: STREAM_UPSTREAM.hostname,
+            port: STREAM_UPSTREAM.port || (isHttps ? 443 : 80),
+            path: req.originalUrl || req.url,
+            method: req.method,
+            headers,
+            agent: isHttps ? streamHttpsAgent : streamHttpAgent
+        },
+        (proxyRes) => {
+            proxyReq.setTimeout(0); // no idle timeout while streaming video
+            const out = { ...proxyRes.headers };
+
+            // Keep redirects on this domain
+            if (out.location && out.location.startsWith(STREAM_SERVER_URL)) {
+                out.location = out.location.slice(STREAM_SERVER_URL.length) || "/";
+            }
+            // Cookies must belong to this domain
+            if (out["set-cookie"]) {
+                out["set-cookie"] = out["set-cookie"].map((c) => c.replace(/;\s*Domain=[^;]*/i, ""));
+            }
+
+            res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
+            proxyRes.pipe(res);
+            proxyRes.on("error", () => res.destroy());
+        }
+    );
+
+    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error("Upstream timeout")));
+
+    proxyReq.on("error", (err) => {
+        console.error("Stream proxy error:", req.method, req.originalUrl, err.message);
+        if (!res.headersSent) {
+            res.status(502).send("Stream server is not reachable right now. Please try again in a moment.");
+        } else {
+            res.destroy();
+        }
+    });
+
+    // Viewer closed the tab / seeked in the video -> stop pulling data from Telegram
+    res.on("close", () => {
+        if (!res.writableFinished) proxyReq.destroy();
+    });
+
+    if (bodyBuf) proxyReq.end(bodyBuf);
+    else req.pipe(proxyReq);
+}
+
+app.use(streamProxyHandler);
 
 // ========================
 // HOME & FALLBACK ROUTE
