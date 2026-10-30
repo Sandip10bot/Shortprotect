@@ -29,7 +29,12 @@ async function callAI(prompt) {
       { prompt: String(prompt) },
       {
         timeout: 90000,
-        headers: { "Content-Type": "application/json" }
+        headers: {
+          "Content-Type": "application/json",
+          // Cloudflare on prexzyapis blocks requests without a normal browser UA (403 / error 1010)
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*"
+        }
       }
     );
     const data = resp.data;
@@ -4809,17 +4814,25 @@ Rules:
         let parsed;
         try {
             let cleaned = String(raw).trim();
-            // Strip markdown fences / leading prose if present
+            // Strip ```json ... ``` fences if the model wrapped the payload
             const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
             if (fence) cleaned = fence[1].trim();
-            else {
-                const start = cleaned.indexOf("{");
-                const end = cleaned.lastIndexOf("}");
-                if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+            // Keep only the outermost JSON object
+            const startBrace = cleaned.indexOf("{");
+            const endBrace = cleaned.lastIndexOf("}");
+            if (startBrace !== -1 && endBrace > startBrace) {
+                cleaned = cleaned.slice(startBrace, endBrace + 1);
+            }
+            // prexzyapis often returns literal \" instead of real quotes
+            if (cleaned.includes('\\"')) {
+                cleaned = cleaned.replace(/\\"/g, '"');
+            }
+            if (cleaned.includes('\\n')) {
+                cleaned = cleaned.replace(/\\n/g, '\n');
             }
             parsed = JSON.parse(cleaned);
         } catch (e) {
-            console.error("AI JSON parse failed:", raw?.slice?.(0, 400));
+            console.error("AI JSON parse failed:", String(raw).slice(0, 400));
             return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
         }
 
