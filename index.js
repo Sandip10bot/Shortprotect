@@ -16,56 +16,43 @@ import zlib from "zlib";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // ========================
-// GEMINI AI (Quiz Generation) – key rotation from env
+// AI QUIZ GENERATION (prexzyapis.com Gemini proxy)
 // ========================
-// Set env: GEMINI_API_KEYS=key1,key2,key3
-// Optional: GEMINI_MODELS=gemini-2.0-flash,gemini-1.5-flash
-const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS || "")
-  .split(",")
-  .map((k) => k.trim())
-  .filter(Boolean);
-const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-2.0-flash,gemini-1.5-flash,gemini-1.5-flash-latest,gemini-1.5-pro")
-  .split(",")
-  .map((m) => m.trim())
-  .filter(Boolean);
-
-async function callGemini(prompt) {
-  if (!GEMINI_API_KEYS.length) {
-    throw new Error("GEMINI_API_KEYS env var is missing or empty");
-  }
-  const maxRetries = GEMINI_API_KEYS.length * GEMINI_MODELS.length;
-  let lastError = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const key = GEMINI_API_KEYS[attempt % GEMINI_API_KEYS.length];
-    const model = GEMINI_MODELS[Math.floor(attempt / GEMINI_API_KEYS.length) % GEMINI_MODELS.length];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    try {
-      const resp = await axios.post(url, {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topP: 0.95,
-          maxOutputTokens: 8192,
-          responseMimeType: "application/json"
+async function callAI(prompt) {
+  const url = "https://prexzyapis.com/ai/gemini";
+  try {
+    const resp = await axios.post(
+      url,
+      { prompt: String(prompt) },
+      {
+        timeout: 90000,
+        headers: {
+          "Content-Type": "application/json",
+          // Cloudflare on prexzyapis blocks requests without a normal browser UA (403 / error 1010)
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*"
         }
-      }, { timeout: 45000 });
-
-      const text = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("Empty response from Gemini");
-      return text;
-    } catch (err) {
-      lastError = err;
-      const status = err.response?.status;
-      const msg = err.response?.data?.error?.message || err.message;
-      console.warn(`[Gemini] key#${attempt % GEMINI_API_KEYS.length} model=${model} failed (${status}): ${msg}`);
-      if (status === 429 || status === 403 || status === 400 || status === 404) continue;
-      if (attempt >= maxRetries - 1) break;
+      }
+    );
+    const data = resp.data;
+    if (!data || data.status !== true) {
+      throw new Error(data?.message || data?.error || "AI service returned an error");
     }
+    const text = data.response;
+    if (!text || typeof text !== "string") {
+      throw new Error("Empty response from AI");
+    }
+    return text;
+  } catch (err) {
+    const status = err.response?.status;
+    const msg = err.response?.data?.message || err.response?.data?.error || err.message;
+    console.warn(`[AI] prexzyapis failed (${status}): ${msg}`);
+    throw err;
   }
-  throw lastError || new Error("All Gemini keys/models exhausted");
 }
 
 // ========================
@@ -4782,87 +4769,161 @@ app.post("/api/quiz/create", async (req, res) => {
 });
 
 // ==========================================
-// AI QUIZ GENERATOR (Gemini with key rotation)
+// AI QUIZ GENERATOR (prexzyapis.com)
 // ==========================================
-app.post("/api/quiz/generate-ai", async (req, res) => {
+async function generateAiHandler(req, res) {
     try {
-        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body;
+        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15, offset = 0, seed = "" } = req.body;
         if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
             return res.status(400).json({ success: false, error: "Please provide a valid topic." });
         }
-        const numQ = Math.min(Math.max(parseInt(count, 10) || 5, 1), 20);
+        // Single request max batch size (client loops for 100)
+        const want = Math.min(Math.max(parseInt(count, 10) || 5, 1), 12);
+        const startOffset = Math.max(0, parseInt(offset, 10) || 0);
         const diff = ["easy", "medium", "hard"].includes(String(difficulty).toLowerCase())
             ? String(difficulty).toLowerCase()
             : "medium";
         const lang = String(language || "English").slice(0, 40);
         const tPerQ = Math.min(Math.max(parseInt(time_per_question, 10) || 15, 5), 120);
+        const topicClean = topic.trim().slice(0, 120);
 
-        const prompt = `You are an expert quiz creator. Generate exactly ${numQ} multiple-choice quiz questions about: "${topic.trim()}".
-
-Difficulty: ${diff}
-Language for all text: ${lang}
-Each question must have exactly 4 options.
-Return ONLY a valid JSON object (no markdown, no code fences) with this exact structure:
-{
-  "title": "Short catchy quiz title",
-  "description": "One sentence description of the quiz",
-  "time_per_question": ${tPerQ},
-  "questions": [
-    {
-      "question": "Question text here?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "answer": 0,
-      "explanation": "Brief explanation why the correct answer is right",
-      "time_limit": ${tPerQ}
-    }
-  ]
-}
-Rules:
-- "answer" is the 0-based index of the correct option (0, 1, 2 or 3).
-- Make questions clear, factual and non-ambiguous.
-- Options should be plausible; only one is correct.
-- Do not include any text outside the JSON object.`;
-
-        const raw = await callGemini(prompt);
-        let parsed;
-        try {
-            // Strip accidental markdown fences if model ignored mime type
-            const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-            parsed = JSON.parse(cleaned);
-        } catch (e) {
-            console.error("Gemini JSON parse failed:", raw?.slice?.(0, 400));
-            return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
+        const BATCH = 4;
+        const batches = [];
+        let left = want;
+        while (left > 0) {
+            batches.push(Math.min(BATCH, left));
+            left -= BATCH;
         }
 
-        if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
-            return res.status(502).json({ success: false, error: "AI did not return any questions." });
+        function buildPrompt(n, batchNo) {
+            const qStart = startOffset + batchNo * BATCH + 1;
+            return `Quiz topic: "${topicClean}"
+Difficulty:${diff} Language:${lang}
+Make exactly ${n} unique MCQ questions (numbers ${qStart}-${qStart + n - 1}). Vary subtopics.
+Each: 4 short options, question <= 100 chars, explanation <= 30 chars.
+ONLY JSON no markdown:
+{"title":"Short title","description":"One line","questions":[{"question":"?","options":["A","B","C","D"],"answer":0,"explanation":"Why"}]}
+answer=0-based index. No text outside JSON.`;
         }
 
-        // Normalize & validate
-        const questions = parsed.questions.slice(0, numQ).map((q, i) => {
-            const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
-            while (options.length < 4) options.push(`Option ${options.length + 1}`);
-            let answer = Number(q.answer);
-            if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
-            return {
-                question: String(q.question || `Question ${i + 1}`).trim(),
-                options,
-                answer,
-                explanation: String(q.explanation || "Good job!").trim(),
-                time_limit: Number(q.time_limit) || tPerQ,
-                media_url: null,
-                media_file_id: null,
-                media_type: null,
-                is_rapid_fire: false
-            };
-        });
+        function normalizeRaw(raw) {
+            let cleaned = String(raw || "").trim();
+            const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            if (fence) cleaned = fence[1].trim();
+            if (cleaned.includes('\\"')) cleaned = cleaned.replace(/\\"/g, '"');
+            if (cleaned.includes('\\n')) cleaned = cleaned.replace(/\\n/g, '\n');
+            return cleaned;
+        }
+
+        function tryParseObject(cleaned) {
+            const a = cleaned.indexOf("{");
+            const b = cleaned.lastIndexOf("}");
+            if (a === -1) return null;
+            try { return JSON.parse(b > a ? cleaned.slice(a, b + 1) : cleaned.slice(a)); } catch (_) { return null; }
+        }
+
+        function recoverQuestions(cleaned) {
+            const out = [];
+            const re = /\{\s*"question"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"options"\s*:\s*(\[[\s\S]*?\])\s*,\s*"answer"\s*:\s*(\d+)/g;
+            let m;
+            while ((m = re.exec(cleaned)) !== null) {
+                try {
+                    const question = JSON.parse('"' + m[1].replace(/"/g, '\\"') + '"');
+                    const options = JSON.parse(m[2]).map(String).slice(0, 4);
+                    while (options.length < 4) options.push("Option " + (options.length + 1));
+                    let answer = parseInt(m[3], 10);
+                    if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+                    let explanation = "Good job!";
+                    const tail = cleaned.slice(m.index, m.index + 500);
+                    const em = tail.match(/"explanation"\s*:\s*"((?:\\.|[^"\\])*)"/);
+                    if (em) { try { explanation = JSON.parse('"' + em[1].replace(/"/g, '\\"') + '"'); } catch (_) {} }
+                    out.push({ question: String(question).trim(), options, answer, explanation: String(explanation).trim().slice(0, 120), time_limit: tPerQ, media_url: null, media_file_id: null, media_type: null, is_rapid_fire: false });
+                } catch (_) {}
+            }
+            return out;
+        }
+
+        function normalizeQuestions(list, limit) {
+            return (list || []).slice(0, limit).map((q, i) => {
+                const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
+                while (options.length < 4) options.push(`Option ${options.length + 1}`);
+                let answer = Number(q.answer);
+                if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+                return {
+                    question: String(q.question || `Question ${i + 1}`).trim(),
+                    options,
+                    answer,
+                    explanation: String(q.explanation || "Good job!").trim().slice(0, 120),
+                    time_limit: Number(q.time_limit) || tPerQ,
+                    media_url: null, media_file_id: null, media_type: null, is_rapid_fire: false
+                };
+            }).filter((q) => q.question.length > 2);
+        }
+
+        // Run batches with limited concurrency (API is fragile)
+        const CONCURRENCY = 2;
+        let title = `${topicClean} Quiz`.slice(0, 120);
+        let description = "";
+        const collected = [];
+        const seen = new Set();
+
+        async function runBatch(batchNo, n) {
+            const prompt = buildPrompt(n, batchNo);
+            const raw = await callAI(prompt);
+            const cleaned = normalizeRaw(raw);
+            let parsed = tryParseObject(cleaned);
+            let qs = [];
+            if (parsed && Array.isArray(parsed.questions)) {
+                if (parsed.title && batchNo === 0 && startOffset === 0) title = String(parsed.title).slice(0, 120);
+                if (parsed.description && batchNo === 0 && startOffset === 0) description = String(parsed.description).slice(0, 300);
+                qs = normalizeQuestions(parsed.questions, n);
+            }
+            if (qs.length < n) {
+                for (const q of recoverQuestions(cleaned)) {
+                    if (qs.length >= n) break;
+                    qs.push(q);
+                }
+            }
+            return qs;
+        }
+
+        // sequential pairs for stability
+        for (let i = 0; i < batches.length; i += CONCURRENCY) {
+            const slice = batches.slice(i, i + CONCURRENCY);
+            const results = await Promise.allSettled(slice.map((n, j) => runBatch(i + j, n)));
+            for (const r of results) {
+                if (r.status !== "fulfilled") {
+                    console.warn("AI batch failed:", r.reason?.message || r.reason);
+                    continue;
+                }
+                for (const q of r.value) {
+                    const key = q.question.toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    collected.push(q);
+                    if (collected.length >= want) break;
+                }
+                if (collected.length >= want) break;
+            }
+            if (collected.length >= want) break;
+        }
+
+        if (!collected.length) {
+            return res.status(502).json({
+                success: false,
+                error: "AI response was empty or cut off. Try again or use a shorter topic."
+            });
+        }
 
         res.json({
             success: true,
-            title: String(parsed.title || `${topic.trim()} Quiz`).slice(0, 120),
-            description: String(parsed.description || "").slice(0, 300),
-            time_per_question: Number(parsed.time_per_question) || tPerQ,
-            questions
+            title,
+            description,
+            time_per_question: tPerQ,
+            questions: collected.slice(0, want),
+            offset: startOffset,
+            got: Math.min(collected.length, want),
+            partial: collected.length < want
         });
     } catch (e) {
         console.error("AI Quiz Generate Error:", e.message || e);
@@ -4871,7 +4932,86 @@ Rules:
             error: e.response?.data?.error?.message || e.message || "Failed to generate quiz with AI."
         });
     }
+}
+app.post("/api/quiz/generate-ai", generateAiHandler);
+
+// ---- Background AI jobs (start + poll) so no HTTP request runs long enough to hit a proxy timeout ----
+const aiJobs = new Map();
+setInterval(() => {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [id, j] of aiJobs) if (j.created < cutoff) aiJobs.delete(id);
+}, 5 * 60 * 1000).unref();
+
+function runGenerateOnce(body) {
+    return new Promise((resolve) => {
+        const fakeRes = {
+            _s: 200,
+            status(c) { this._s = c; return this; },
+            json(o) { resolve({ status: this._s, body: o }); }
+        };
+        generateAiHandler({ body }, fakeRes).catch((e) => resolve({ status: 500, body: { success: false, error: e.message } }));
+    });
+}
+
+async function runAiJob(job, p) {
+    const seen = new Set();
+    let fails = 0, rounds = 0, gotMeta = false;
+    try {
+        while (job.questions.length < job.total && rounds < 80 && fails < 5) {
+            rounds++;
+            const need = Math.min(4, job.total - job.questions.length);
+            const r = await runGenerateOnce({ ...p, count: need, offset: job.questions.length });
+            if (r.body && r.body.success) {
+                if (!gotMeta) { job.title = r.body.title || job.title; job.description = r.body.description || ""; gotMeta = true; }
+                let added = 0;
+                for (const q of r.body.questions || []) {
+                    const key = String(q.question).toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    job.questions.push(q);
+                    added++;
+                    if (job.questions.length >= job.total) break;
+                }
+                fails = added ? 0 : fails + 1;
+            } else {
+                fails++;
+                job.lastError = (r.body && r.body.error) || "AI service error";
+                await new Promise((r2) => setTimeout(r2, 1500));
+            }
+        }
+    } catch (e) {
+        job.lastError = e.message;
+    }
+    job.done = true;
+    if (!job.questions.length) job.error = job.lastError || "AI returned no questions. Try again.";
+}
+
+app.post("/api/quiz/generate-ai/start", (req, res) => {
+    const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body || {};
+    if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
+        return res.status(400).json({ success: false, error: "Please provide a valid topic." });
+    }
+    const total = Math.min(Math.max(parseInt(count, 10) || 5, 1), 100);
+    const jobId = crypto.randomBytes(8).toString("hex");
+    const job = { created: Date.now(), done: false, total, questions: [], title: `${topic.trim().slice(0, 100)} Quiz`, description: "", error: null, lastError: null };
+    aiJobs.set(jobId, job);
+    runAiJob(job, { topic, difficulty, language, time_per_question });
+    res.json({ success: true, jobId, total });
 });
+
+app.get("/api/quiz/generate-ai/status/:jobId", (req, res) => {
+    const job = aiJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: "AI job expired or server restarted. Please try again." });
+    res.json({
+        success: true, done: job.done, got: job.questions.length, total: job.total,
+        title: job.title, description: job.description, error: job.error, lastError: job.lastError,
+        questions: job.done ? job.questions : []
+    });
+});
+
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e && e.message ? e.message : e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e && e.message ? e.message : e));
+
 
 // ==========================================
 // USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
@@ -10827,6 +10967,29 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
         .btn-remove:active { transform: scale(0.95); }
+        .q-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+        .q-header-left { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+        .q-drag {
+            width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+            color: var(--hint); background: rgba(0,0,0,0.04); border: 1px solid var(--border);
+            cursor: grab; touch-action: none; flex-shrink: 0;
+        }
+        [data-theme="dark"] .q-drag { background: rgba(255,255,255,0.06); }
+        .q-drag:active { cursor: grabbing; }
+        .q-card.dragging {
+            opacity: 0.92; transform: scale(1.02);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+            z-index: 20; position: relative;
+        }
+        .q-card.drag-over {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(42,171,238,0.25);
+        }
+        .opt-row-draggable { touch-action: none; }
+        .opt-drag-handle {
+            width: 22px; height: 22px; display: grid; place-items: center; color: var(--hint);
+            cursor: grab; flex-shrink: 0; opacity: 0.7;
+        }
 
         .btn-add { background: rgba(42,171,238,0.08); color: var(--accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .btn-add:active { transform: scale(0.98); }
@@ -10855,6 +11018,9 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         }
 
         .opt-body { flex: 1; min-width: 0; }
+        .opt-drag-handle { width: 24px; height: 34px; display: grid; place-items: center; color: var(--hint); cursor: grab; flex-shrink: 0; opacity: 0.75; touch-action: none; user-select: none; -webkit-user-select: none; }
+        .opt-drag-handle:active { cursor: grabbing; }
+        .option-card.opt-dragging { opacity: 0.95; background: rgba(42,171,238,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.18); position: relative; z-index: 5; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
         .option-card .opt-val::placeholder { color: var(--hint); }
@@ -10902,12 +11068,42 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .top-bar-save.show { opacity: 1; }
         .top-bar-save svg { width: 14px; height: 14px; fill: var(--success); }
 
-        /* AI Generate panel */
+        /* AI Generate panel – collapsible (Telegram-style expandable) */
         .ai-panel {
             background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-            padding: 16px; margin-bottom: 20px; box-shadow: var(--shadow);
+            margin-bottom: 16px; box-shadow: var(--shadow); overflow: hidden;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
         }
-        .ai-panel-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--accent); }
+        .ai-panel.expanded { border-color: rgba(124,58,237,0.35); box-shadow: 0 6px 20px rgba(124,58,237,0.12); }
+        .ai-panel-header {
+            display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+            cursor: pointer; user-select: none; -webkit-user-select: none;
+            transition: background 0.2s;
+        }
+        .ai-panel-header:active { background: rgba(124,58,237,0.06); }
+        .ai-panel-title {
+            font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;
+            color: var(--accent); flex: 1; margin: 0;
+        }
+        .ai-panel-title .badge-ai {
+            font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase;
+            padding: 3px 8px; border-radius: 99px;
+            background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(42,171,238,0.18));
+            color: var(--accent); border: 1px solid rgba(124,58,237,0.25);
+        }
+        .ai-chevron {
+            width: 22px; height: 22px; flex-shrink: 0; color: var(--hint);
+            transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .ai-panel.expanded .ai-chevron { transform: rotate(180deg); color: var(--accent); }
+        .ai-panel-body {
+            max-height: 0; overflow: hidden; opacity: 0;
+            transition: max-height 0.35s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.25s ease, padding 0.25s;
+            padding: 0 16px;
+        }
+        .ai-panel.expanded .ai-panel-body {
+            max-height: 520px; opacity: 1; padding: 0 16px 16px;
+        }
         .ai-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .ai-row .form-control { flex: 1; min-width: 120px; }
         .btn-ai {
@@ -10921,6 +11117,43 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .ai-status { font-size: 12px; color: var(--hint); text-align: center; margin-top: 8px; min-height: 18px; }
         .ai-status.err { color: var(--destructive); }
         .ai-status.ok { color: var(--success); }
+        .ai-progress-wrap { margin-top: 10px; display: none; }
+        .ai-progress-wrap.show { display: block; }
+        .ai-progress-meta {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 11px; font-weight: 600; color: var(--hint); margin-bottom: 6px;
+        }
+        .ai-progress-bar {
+            height: 6px; border-radius: 99px; background: rgba(124,58,237,0.12);
+            overflow: hidden; border: 1px solid rgba(124,58,237,0.15);
+        }
+        .ai-progress-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: linear-gradient(90deg, #7c3aed, #2AABEE);
+            transition: width 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+            box-shadow: 0 0 10px rgba(124,58,237,0.35);
+        }
+        /* Quiz completeness status bar */
+        .quiz-status-bar {
+            background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+            padding: 12px 14px; margin-bottom: 16px; box-shadow: var(--shadow);
+        }
+        .quiz-status-top {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+        }
+        .quiz-status-label { font-size: 12px; font-weight: 700; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+        .quiz-status-pct { font-size: 15px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+        .quiz-status-track {
+            height: 8px; border-radius: 99px; background: rgba(0,0,0,0.06);
+            overflow: hidden; border: 1px solid var(--border);
+        }
+        [data-theme="dark"] .quiz-status-track { background: rgba(255,255,255,0.06); }
+        .quiz-status-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: linear-gradient(90deg, #31b545, #2AABEE, #7c3aed);
+            transition: width 0.45s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .quiz-status-hint { font-size: 11px; color: var(--hint); margin-top: 6px; line-height: 1.4; }
 
         .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -10963,38 +11196,60 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         </div>
 
         <div id="quiz-form">
-            <div class="ai-panel">
-                <div class="ai-panel-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
-                    Generate with AI
-                </div>
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label>Topic</label>
-                    <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
-                </div>
-                <div class="ai-row">
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Questions</label>
-                        <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+            <div class="ai-panel" id="aiPanel">
+                <div class="ai-panel-header" onclick="toggleAIPanel()" role="button" aria-expanded="false" id="aiPanelHeader">
+                    <div class="ai-panel-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
+                        Generate with AI
+                        <span class="badge-ai">Beta</span>
                     </div>
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Difficulty</label>
-                        <select id="ai-diff" class="form-control">
-                            <option value="easy">Easy</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="hard">Hard</option>
-                        </select>
+                    <svg class="ai-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+                <div class="ai-panel-body" id="aiPanelBody">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>Topic</label>
+                        <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
                     </div>
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Language</label>
-                        <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                    <div class="ai-row">
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Questions</label>
+                            <input type="number" id="ai-count" class="form-control" value="5" min="1" max="100">
+                        </div>
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Difficulty</label>
+                            <select id="ai-diff" class="form-control">
+                                <option value="easy">Easy</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="hard">Hard</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Language</label>
+                            <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                        </div>
+                    </div>
+                    <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+                        Generate Quiz
+                    </button>
+                    <div class="ai-status" id="ai-status"></div>
+                    <div class="ai-progress-wrap" id="aiProgressWrap">
+                        <div class="ai-progress-meta">
+                            <span id="aiProgressLabel">Generating…</span>
+                            <span id="aiProgressPct">0%</span>
+                        </div>
+                        <div class="ai-progress-bar"><div class="ai-progress-fill" id="aiProgressFill"></div></div>
                     </div>
                 </div>
-                <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
-                    Generate Quiz
-                </button>
-                <div class="ai-status" id="ai-status"></div>
+            </div>
+
+            <div class="quiz-status-bar" id="quizStatusBar">
+                <div class="quiz-status-top">
+                    <span class="quiz-status-label">Quiz readiness</span>
+                    <span class="quiz-status-pct" id="quizStatusPct">0%</span>
+                </div>
+                <div class="quiz-status-track"><div class="quiz-status-fill" id="quizStatusFill"></div></div>
+                <div class="quiz-status-hint" id="quizStatusHint">Add a title and at least one complete question to publish.</div>
             </div>
 
             <div class="q-card" style="margin-bottom: 24px; border-color: rgba(42,171,238,0.3); background: rgba(42,171,238,0.04);">
@@ -11070,10 +11325,85 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         let questionCount = 0;
         let saveTimeout;
 
+        // ---- AI panel expand / collapse (Telegram-style) ----
+        function toggleAIPanel() {
+            const panel = document.getElementById('aiPanel');
+            const header = document.getElementById('aiPanelHeader');
+            if (!panel) return;
+            const open = panel.classList.toggle('expanded');
+            if (header) header.setAttribute('aria-expanded', open ? 'true' : 'false');
+            try { tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {}
+        }
+
+        // ---- Quiz readiness % ----
+        function updateQuizStatus() {
+            const title = (document.getElementById('q-title')?.value || '').trim();
+            const desc = (document.getElementById('q-desc')?.value || '').trim();
+            const timeOk = parseInt(document.getElementById('q-time')?.value, 10) > 0;
+            const cards = document.querySelectorAll('#questions-container .q-card');
+            let completeQs = 0;
+            let partialQs = 0;
+            cards.forEach(function (card) {
+                const qText = (card.querySelector('.q-text')?.value || '').trim();
+                const opts = Array.from(card.querySelectorAll('.opt-val')).map(function (o) { return (o.value || '').trim(); });
+                const filledOpts = opts.filter(Boolean).length;
+                const hasAnswer = !!card.querySelector('input[type="radio"]:checked');
+                if (qText && filledOpts >= 4 && hasAnswer) completeQs++;
+                else if (qText || filledOpts > 0) partialQs++;
+            });
+
+            let score = 0;
+            if (title) score += 15;
+            if (desc) score += 10;
+            if (timeOk) score += 5;
+            const qTarget = Math.max(cards.length, 1);
+            const qWeight = 70;
+            score += Math.round((completeQs / qTarget) * qWeight);
+            if (partialQs > 0 && completeQs < qTarget) {
+                score = Math.min(score + Math.round((partialQs / qTarget) * 10), 95);
+            }
+            if (completeQs >= 1 && title) score = Math.max(score, 40);
+            score = Math.min(100, Math.max(0, score));
+
+            const pctEl = document.getElementById('quizStatusPct');
+            const fillEl = document.getElementById('quizStatusFill');
+            const hintEl = document.getElementById('quizStatusHint');
+            if (pctEl) pctEl.textContent = score + '%';
+            if (fillEl) fillEl.style.width = score + '%';
+            if (hintEl) {
+                if (score >= 100) hintEl.textContent = 'Ready to publish! Review once more, then hit Publish.';
+                else if (!title) hintEl.textContent = 'Start with a quiz title.';
+                else if (cards.length === 0) hintEl.textContent = 'Add at least one question (or generate with AI).';
+                else if (completeQs === 0) hintEl.textContent = 'Fill question text, all 4 options, and mark the correct answer.';
+                else if (completeQs < cards.length) hintEl.textContent = completeQs + '/' + cards.length + ' questions complete. Finish the rest or remove empties.';
+                else if (!desc) hintEl.textContent = 'Optional: add a short description before publishing.';
+                else hintEl.textContent = 'Almost there — double-check answers and publish.';
+            }
+        }
+
         // ---- AI Generate ----
+        let aiProgressTimer = null;
+        function setAIProgress(pct, label) {
+            const wrap = document.getElementById('aiProgressWrap');
+            const fill = document.getElementById('aiProgressFill');
+            const pctEl = document.getElementById('aiProgressPct');
+            const lab = document.getElementById('aiProgressLabel');
+            if (!wrap) return;
+            wrap.classList.add('show');
+            if (fill) fill.style.width = Math.min(100, Math.max(0, pct)) + '%';
+            if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+            if (lab && label) lab.textContent = label;
+        }
+        function clearAIProgress() {
+            if (aiProgressTimer) { clearInterval(aiProgressTimer); aiProgressTimer = null; }
+            const wrap = document.getElementById('aiProgressWrap');
+            if (wrap) wrap.classList.remove('show');
+        }
+
         async function generateWithAI() {
             const topic = (document.getElementById('ai-topic').value || '').trim();
-            const count = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            let totalWant = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            totalWant = Math.min(Math.max(totalWant, 1), 100);
             const difficulty = document.getElementById('ai-diff').value || 'medium';
             const language = (document.getElementById('ai-lang').value || 'English').trim();
             const timePer = parseInt(document.getElementById('q-time').value, 10) || 15;
@@ -11086,21 +11416,73 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
             btn.disabled = true;
             status.className = 'ai-status';
-            status.textContent = 'Generating with AI… this may take a few seconds.';
+            status.textContent = 'Starting AI generation…';
+
+            // Progressive chunks so we can reach 100 without one huge reply
+            const CHUNK = Math.min(totalWant, 4); // 1 AI call per request -> no proxy timeout
+            const allQs = [];
+            const seen = new Set();
+            let title = '';
+            let description = '';
+            let tPer = timePer;
+            let failedStreak = 0;
+
+            function pushUnique(list) {
+                for (const q of list || []) {
+                    const key = String(q.question || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    allQs.push(q);
+                    if (allQs.length >= totalWant) break;
+                }
+            }
+
+            if (aiProgressTimer) { clearInterval(aiProgressTimer); aiProgressTimer = null; }
+            setAIProgress(2, 'Connecting…');
+
             try {
-                const res = await fetch('/api/quiz/generate-ai', {
+                const startResp = await fetch('/api/quiz/generate-ai/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ topic, count, difficulty, language, time_per_question: timePer })
+                    body: JSON.stringify({ topic: topic, count: totalWant, difficulty: difficulty, language: language, time_per_question: timePer })
                 });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || 'Generation failed');
-                document.getElementById('q-title').value = data.title || '';
-                document.getElementById('q-desc').value = data.description || '';
-                if (data.time_per_question) document.getElementById('q-time').value = data.time_per_question;
+                const startData = await safeJson(startResp);
+                if (!startData.success) throw new Error(startData.error || 'Could not start AI generation');
+                const jobId = startData.jobId;
+                let pollFails = 0;
+                while (true) {
+                    await new Promise(function (r) { setTimeout(r, 2000); });
+                    let st;
+                    try {
+                        const pr = await fetch('/api/quiz/generate-ai/status/' + jobId);
+                        st = await safeJson(pr);
+                        pollFails = 0;
+                    } catch (pe) {
+                        pollFails++;
+                        if (pollFails >= 10) throw pe;
+                        continue;
+                    }
+                    if (!st.success) throw new Error(st.error || 'AI job lost. Please try again.');
+                    setAIProgress(Math.min(99, ((st.got || 0) / totalWant) * 100), (st.got || 0) + '/' + totalWant + ' ready');
+                    status.textContent = 'AI working… ' + (st.got || 0) + '/' + totalWant + ' questions';
+                    if (st.done) {
+                        title = st.title || title;
+                        description = st.description || description;
+                        pushUnique(st.questions);
+                        if (!allQs.length) throw new Error(st.error || 'AI did not return any questions.');
+                        break;
+                    }
+                }
+
+                if (!allQs.length) throw new Error('AI did not return any questions.');
+
+                setAIProgress(100, 'Done! ' + allQs.length + ' questions');
+                document.getElementById('q-title').value = title || (topic + ' Quiz');
+                document.getElementById('q-desc').value = description || '';
+                if (tPer) document.getElementById('q-time').value = tPer;
                 document.getElementById('questions-container').innerHTML = '';
                 questionCount = 0;
-                (data.questions || []).forEach(function (q) {
+                allQs.forEach(function (q) {
                     addQuestion();
                     const card = document.getElementById('questions-container').lastElementChild;
                     if (!card) return;
@@ -11120,11 +11502,16 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     const tLim = card.querySelector('.q-time-limit');
                     if (tLim && q.time_limit) tLim.value = q.time_limit;
                 });
+                renumberQuestions();
                 status.className = 'ai-status ok';
-                status.textContent = 'Generated ' + (data.questions || []).length + ' questions. Review & edit if needed.';
+                const short = allQs.length < totalWant;
+                status.textContent = 'Generated ' + allQs.length + ' / ' + totalWant + ' questions' + (short ? ' (API limited — run Generate again to add more)' : '') + '. You can long-press ⋮⋮ to reorder.';
                 triggerAutoSave();
+                updateQuizStatus();
                 try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
+                setTimeout(clearAIProgress, 1500);
             } catch (err) {
+                clearAIProgress();
                 status.className = 'ai-status err';
                 status.textContent = err.message || 'AI generation failed. Try again.';
                 try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
@@ -11132,6 +11519,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 btn.disabled = false;
             }
         }
+
 
         const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
 
@@ -11155,6 +11543,79 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }());
         }
 
+        // ---- Safe JSON parse: server HTML error pages (413/502/504) no longer crash with "Unexpected token '<'" ----
+        async function safeJson(res) {
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                let msg;
+                if (res.status === 413) msg = 'Data is too large for the server (413).';
+                else if (res.status === 502 || res.status === 503 || res.status === 504) msg = 'Server timed out or is busy (' + res.status + '). Please try again.';
+                else msg = 'Server returned an invalid response (HTTP ' + res.status + ').';
+                const err = new Error(msg);
+                err.status = res.status;
+                throw err;
+            }
+        }
+
+        // ---- Drag to reorder options inside a question (drag the handle on the left of an option) ----
+        (function setupOptionReorder() {
+            let dragEl = null;
+            let group = null;
+
+            document.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('.opt-drag-handle')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            document.addEventListener('pointerdown', function (e) {
+                const h = e.target && e.target.closest ? e.target.closest('.opt-drag-handle') : null;
+                if (!h) return;
+                const card = h.closest('.option-card');
+                if (!card) return;
+                e.preventDefault();
+                dragEl = card;
+                group = card.parentElement;
+                card.classList.add('opt-dragging');
+                try { h.setPointerCapture(e.pointerId); } catch (err) {}
+                try { tg.HapticFeedback.impactOccurred('light'); } catch (err) {}
+            });
+
+            document.addEventListener('pointermove', function (e) {
+                if (!dragEl) return;
+                e.preventDefault();
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const over = el && el.closest ? el.closest('.option-card') : null;
+                if (!over || over === dragEl || over.parentElement !== group) return;
+                const cards = Array.from(group.querySelectorAll('.option-card'));
+                if (cards.indexOf(dragEl) < cards.indexOf(over)) group.insertBefore(dragEl, over.nextSibling);
+                else group.insertBefore(dragEl, over);
+            }, { passive: false });
+
+            function finish() {
+                if (!dragEl) return;
+                const qCard = dragEl.closest('.q-card');
+                dragEl.classList.remove('opt-dragging');
+                // keep placeholders / radio values in the new visual order
+                Array.from(group.querySelectorAll('.option-card')).forEach(function (oc, i) {
+                    const inp = oc.querySelector('.opt-val');
+                    if (inp) inp.placeholder = 'Option ' + (i + 1);
+                    const r = oc.querySelector('input[type="radio"]');
+                    if (r) r.value = String(i);
+                });
+                dragEl = null;
+                group = null;
+                if (qCard && qCard.id && typeof updateOptionStyles === 'function') updateOptionStyles(qCard.id);
+                if (typeof triggerAutoSave === 'function') triggerAutoSave();
+                try { tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
+        })();
+
         function updateOptionStyles(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
@@ -11175,7 +11636,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
             qDiv.innerHTML = \`
                 <div class="q-header">
-                    <span>Question \${id}</span>
+                    <div class="q-header-left">
+                        <div class="q-drag" title="Long-press & drag to reorder" aria-label="Drag to reorder">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg>
+                        </div>
+                        <span class="q-num">Question \${id}</span>
+                    </div>
                     <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
                 </div>
 
@@ -11200,7 +11666,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 <div class="options-group">
                     <label class="option-card selected">
                         <input type="radio" name="q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 1" required>
@@ -11211,7 +11677,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 2" required>
@@ -11222,7 +11688,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 3" required>
@@ -11233,7 +11699,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 4" required>
@@ -11343,6 +11809,82 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
         }
 
+        function renumberQuestions() {
+            const cards = document.querySelectorAll('#questions-container .q-card');
+            cards.forEach(function (card, i) {
+                const num = card.querySelector('.q-num');
+                if (num) num.textContent = 'Question ' + (i + 1);
+            });
+        }
+
+        // Long-press drag handle to reorder questions
+        (function setupQuestionReorder() {
+            const container = document.getElementById('questions-container');
+            if (!container) return;
+            let dragEl = null;
+            let startY = 0;
+            let dragging = false;
+            let longPressTimer = null;
+
+            function cardFromHandle(t) {
+                const h = t && t.closest ? t.closest('.q-drag') : null;
+                return h ? h.closest('.q-card') : null;
+            }
+            function clearTimer() {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            }
+            function onPointerDown(e) {
+                const card = cardFromHandle(e.target);
+                if (!card) return;
+                startY = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+                clearTimer();
+                longPressTimer = setTimeout(function () {
+                    dragEl = card;
+                    dragging = true;
+                    card.classList.add('dragging');
+                    try { tg.HapticFeedback && tg.HapticFeedback.impactOccurred('medium'); } catch (err) {}
+                }, 280);
+            }
+            function onPointerMove(e) {
+                if (!dragging || !dragEl) {
+                    const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+                    if (longPressTimer && Math.abs(y - startY) > 10) clearTimer();
+                    return;
+                }
+                e.preventDefault();
+                const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY);
+                const x = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+                const el = document.elementFromPoint(x, y);
+                const over = el && el.closest ? el.closest('#questions-container .q-card') : null;
+                container.querySelectorAll('.q-card.drag-over').forEach(function (c) { c.classList.remove('drag-over'); });
+                if (over && over !== dragEl) {
+                    over.classList.add('drag-over');
+                    const rect = over.getBoundingClientRect();
+                    const before = y < rect.top + rect.height / 2;
+                    if (before) container.insertBefore(dragEl, over);
+                    else container.insertBefore(dragEl, over.nextSibling);
+                }
+            }
+            function onPointerUp() {
+                clearTimer();
+                if (!dragging) return;
+                container.querySelectorAll('.q-card.drag-over, .q-card.dragging').forEach(function (c) {
+                    c.classList.remove('drag-over', 'dragging');
+                });
+                dragEl = null;
+                dragging = false;
+                renumberQuestions();
+                triggerAutoSave();
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            container.addEventListener('mousedown', onPointerDown);
+            container.addEventListener('touchstart', onPointerDown, { passive: true });
+            window.addEventListener('mousemove', onPointerMove);
+            window.addEventListener('touchmove', onPointerMove, { passive: false });
+            window.addEventListener('mouseup', onPointerUp);
+            window.addEventListener('touchend', onPointerUp);
+        })();
+
         function removeQuestion(id) {
             const el = document.getElementById(\`q-card-\${id}\`);
             if (el) {
@@ -11350,6 +11892,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 el.style.opacity = '0';
                 setTimeout(() => {
                     el.remove();
+                    renumberQuestions();
                     triggerAutoSave();
                 }, 200);
             }
@@ -11409,6 +11952,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         function triggerAutoSave() {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(saveState, 400);
+            try { updateQuizStatus(); } catch (e) {}
         }
 
         function loadState() {
@@ -11579,7 +12123,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -11631,6 +12175,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         }
 
         loadState();
+
+        // Bind readiness meter
+        ['q-title', 'q-desc', 'q-time'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', function () { try { updateQuizStatus(); } catch (e) {} });
+            el.addEventListener('change', function () { try { updateQuizStatus(); } catch (e) {} });
+        });
+        try { updateQuizStatus(); } catch (e) {}
     </script>
 </body>
 </html>
@@ -11847,6 +12400,9 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
         .option-card.selected .radio-custom::after { content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -55%) rotate(45deg); }
         .opt-body { flex: 1; min-width: 0; }
+        .opt-drag-handle { width: 24px; height: 34px; display: grid; place-items: center; color: var(--hint); cursor: grab; flex-shrink: 0; opacity: 0.75; touch-action: none; user-select: none; -webkit-user-select: none; }
+        .opt-drag-handle:active { cursor: grabbing; }
+        .option-card.opt-dragging { opacity: 0.95; background: rgba(42,171,238,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.18); position: relative; z-index: 5; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
         .option-card .opt-val::placeholder { color: var(--hint); }
@@ -12131,7 +12687,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             const subEl = document.getElementById('profile-sub');
             try {
                 const res = await fetch('/api/quiz/manage/list/' + userId);
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success && data.quizzes.length > 0) {
                     quizzes = data.quizzes;
@@ -12195,7 +12751,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             try {
                 const res = await fetch('/api/quiz/manage/detail/' + userId + '/' + quizId);
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     currentEditQuizId = quizId;
@@ -12300,7 +12856,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 <div class="options-group">
                     <label class="option-card selected">
                         <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 1" required>
@@ -12311,7 +12867,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="1">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 2" required>
@@ -12322,7 +12878,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="2">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 3" required>
@@ -12333,7 +12889,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     </label>
                     <label class="option-card">
                         <input type="radio" name="edit-q-\${id}-ans" value="3">
-                        <span class="radio-custom"></span>
+                        <span class="opt-drag-handle" title="Drag to reorder option" aria-label="Drag to reorder option"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg></span><span class="radio-custom"></span>
                         <div class="opt-body">
                             <div class="opt-main-row">
                                 <input type="text" class="opt-val" placeholder="Option 4" required>
@@ -12437,6 +12993,79 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             tg.HapticFeedback.impactOccurred('medium');
         }
 
+        // ---- Safe JSON parse: server HTML error pages (413/502/504) no longer crash with "Unexpected token '<'" ----
+        async function safeJson(res) {
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                let msg;
+                if (res.status === 413) msg = 'Data is too large for the server (413).';
+                else if (res.status === 502 || res.status === 503 || res.status === 504) msg = 'Server timed out or is busy (' + res.status + '). Please try again.';
+                else msg = 'Server returned an invalid response (HTTP ' + res.status + ').';
+                const err = new Error(msg);
+                err.status = res.status;
+                throw err;
+            }
+        }
+
+        // ---- Drag to reorder options inside a question (drag the handle on the left of an option) ----
+        (function setupOptionReorder() {
+            let dragEl = null;
+            let group = null;
+
+            document.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('.opt-drag-handle')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            document.addEventListener('pointerdown', function (e) {
+                const h = e.target && e.target.closest ? e.target.closest('.opt-drag-handle') : null;
+                if (!h) return;
+                const card = h.closest('.option-card');
+                if (!card) return;
+                e.preventDefault();
+                dragEl = card;
+                group = card.parentElement;
+                card.classList.add('opt-dragging');
+                try { h.setPointerCapture(e.pointerId); } catch (err) {}
+                try { tg.HapticFeedback.impactOccurred('light'); } catch (err) {}
+            });
+
+            document.addEventListener('pointermove', function (e) {
+                if (!dragEl) return;
+                e.preventDefault();
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const over = el && el.closest ? el.closest('.option-card') : null;
+                if (!over || over === dragEl || over.parentElement !== group) return;
+                const cards = Array.from(group.querySelectorAll('.option-card'));
+                if (cards.indexOf(dragEl) < cards.indexOf(over)) group.insertBefore(dragEl, over.nextSibling);
+                else group.insertBefore(dragEl, over);
+            }, { passive: false });
+
+            function finish() {
+                if (!dragEl) return;
+                const qCard = dragEl.closest('.q-card');
+                dragEl.classList.remove('opt-dragging');
+                // keep placeholders / radio values in the new visual order
+                Array.from(group.querySelectorAll('.option-card')).forEach(function (oc, i) {
+                    const inp = oc.querySelector('.opt-val');
+                    if (inp) inp.placeholder = 'Option ' + (i + 1);
+                    const r = oc.querySelector('input[type="radio"]');
+                    if (r) r.value = String(i);
+                });
+                dragEl = null;
+                group = null;
+                if (qCard && qCard.id && typeof updateOptionStyles === 'function') updateOptionStyles(qCard.id);
+                if (typeof triggerAutoSave === 'function') triggerAutoSave();
+                try { tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
+        })();
+
         function updateOptionStyles(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
@@ -12533,7 +13162,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -12553,7 +13182,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                 tg.HapticFeedback.impactOccurred('heavy');
                 try {
                     const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
-                    const data = await res.json();
+                    const data = await safeJson(res);
                     if(data.success) {
                         document.getElementById('card-' + quizId).style.display = 'none';
                         tg.HapticFeedback.notificationOccurred('success');
@@ -12593,7 +13222,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
             try {
                 const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success && data.users.length > 0) {
                     let html = '';
@@ -12641,7 +13270,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
                     body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
                 });
 
-                const data = await res.json();
+                const data = await safeJson(res);
 
                 if (data.success) {
                     tg.HapticFeedback.notificationOccurred('success');
@@ -14750,6 +15379,18 @@ app.get("*", (req, res) => {
       </body>
       </html>
     `);
+});
+
+// JSON 404 + JSON error handler for API routes (prevents HTML error pages)
+app.use("/api", (req, res) => {
+  res.status(404).json({ success: false, error: "API route not found." });
+});
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  const msg = err.type === "entity.too.large" ? "Request is too large." : (err.message || "Server error");
+  console.error("Express error:", msg);
+  res.status(status).json({ success: false, error: msg });
 });
 
 // Start Server – Wait for DB connection first
