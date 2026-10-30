@@ -19,53 +19,34 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // ========================
-// GEMINI AI (Quiz Generation) – key rotation from env
+// AI QUIZ GENERATION (prexzyapis.com Gemini proxy)
 // ========================
-// Set env: GEMINI_API_KEYS=key1,key2,key3
-// Optional: GEMINI_MODELS=gemini-2.0-flash,gemini-1.5-flash
-const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS || "")
-  .split(",")
-  .map((k) => k.trim())
-  .filter(Boolean);
-const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-2.0-flash,gemini-1.5-flash,gemini-1.5-flash-latest,gemini-1.5-pro")
-  .split(",")
-  .map((m) => m.trim())
-  .filter(Boolean);
-
-async function callGemini(prompt) {
-  if (!GEMINI_API_KEYS.length) {
-    throw new Error("GEMINI_API_KEYS env var is missing or empty");
-  }
-  const maxRetries = GEMINI_API_KEYS.length * GEMINI_MODELS.length;
-  let lastError = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const key = GEMINI_API_KEYS[attempt % GEMINI_API_KEYS.length];
-    const model = GEMINI_MODELS[Math.floor(attempt / GEMINI_API_KEYS.length) % GEMINI_MODELS.length];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    try {
-      const resp = await axios.post(url, {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topP: 0.95,
-          maxOutputTokens: 8192,
-          responseMimeType: "application/json"
-        }
-      }, { timeout: 45000 });
-
-      const text = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("Empty response from Gemini");
-      return text;
-    } catch (err) {
-      lastError = err;
-      const status = err.response?.status;
-      const msg = err.response?.data?.error?.message || err.message;
-      console.warn(`[Gemini] key#${attempt % GEMINI_API_KEYS.length} model=${model} failed (${status}): ${msg}`);
-      if (status === 429 || status === 403 || status === 400 || status === 404) continue;
-      if (attempt >= maxRetries - 1) break;
+async function callAI(prompt) {
+  const url = "https://prexzyapis.com/ai/gemini";
+  try {
+    const resp = await axios.post(
+      url,
+      { prompt: String(prompt) },
+      {
+        timeout: 90000,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+    const data = resp.data;
+    if (!data || data.status !== true) {
+      throw new Error(data?.message || data?.error || "AI service returned an error");
     }
+    const text = data.response;
+    if (!text || typeof text !== "string") {
+      throw new Error("Empty response from AI");
+    }
+    return text;
+  } catch (err) {
+    const status = err.response?.status;
+    const msg = err.response?.data?.message || err.response?.data?.error || err.message;
+    console.warn(`[AI] prexzyapis failed (${status}): ${msg}`);
+    throw err;
   }
-  throw lastError || new Error("All Gemini keys/models exhausted");
 }
 
 // ========================
@@ -4782,7 +4763,7 @@ app.post("/api/quiz/create", async (req, res) => {
 });
 
 // ==========================================
-// AI QUIZ GENERATOR (Gemini with key rotation)
+// AI QUIZ GENERATOR (prexzyapis.com)
 // ==========================================
 app.post("/api/quiz/generate-ai", async (req, res) => {
     try {
@@ -4802,7 +4783,8 @@ app.post("/api/quiz/generate-ai", async (req, res) => {
 Difficulty: ${diff}
 Language for all text: ${lang}
 Each question must have exactly 4 options.
-Return ONLY a valid JSON object (no markdown, no code fences) with this exact structure:
+IMPORTANT: Reply with ONLY a valid JSON object. No markdown, no code fences, no extra text before or after.
+Use this exact structure:
 {
   "title": "Short catchy quiz title",
   "description": "One sentence description of the quiz",
@@ -4823,14 +4805,21 @@ Rules:
 - Options should be plausible; only one is correct.
 - Do not include any text outside the JSON object.`;
 
-        const raw = await callGemini(prompt);
+        const raw = await callAI(prompt);
         let parsed;
         try {
-            // Strip accidental markdown fences if model ignored mime type
-            const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+            let cleaned = String(raw).trim();
+            // Strip markdown fences / leading prose if present
+            const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            if (fence) cleaned = fence[1].trim();
+            else {
+                const start = cleaned.indexOf("{");
+                const end = cleaned.lastIndexOf("}");
+                if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+            }
             parsed = JSON.parse(cleaned);
         } catch (e) {
-            console.error("Gemini JSON parse failed:", raw?.slice?.(0, 400));
+            console.error("AI JSON parse failed:", raw?.slice?.(0, 400));
             return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
         }
 
@@ -10902,12 +10891,42 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .top-bar-save.show { opacity: 1; }
         .top-bar-save svg { width: 14px; height: 14px; fill: var(--success); }
 
-        /* AI Generate panel */
+        /* AI Generate panel – collapsible (Telegram-style expandable) */
         .ai-panel {
             background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-            padding: 16px; margin-bottom: 20px; box-shadow: var(--shadow);
+            margin-bottom: 16px; box-shadow: var(--shadow); overflow: hidden;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
         }
-        .ai-panel-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--accent); }
+        .ai-panel.expanded { border-color: rgba(124,58,237,0.35); box-shadow: 0 6px 20px rgba(124,58,237,0.12); }
+        .ai-panel-header {
+            display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+            cursor: pointer; user-select: none; -webkit-user-select: none;
+            transition: background 0.2s;
+        }
+        .ai-panel-header:active { background: rgba(124,58,237,0.06); }
+        .ai-panel-title {
+            font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;
+            color: var(--accent); flex: 1; margin: 0;
+        }
+        .ai-panel-title .badge-ai {
+            font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase;
+            padding: 3px 8px; border-radius: 99px;
+            background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(42,171,238,0.18));
+            color: var(--accent); border: 1px solid rgba(124,58,237,0.25);
+        }
+        .ai-chevron {
+            width: 22px; height: 22px; flex-shrink: 0; color: var(--hint);
+            transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .ai-panel.expanded .ai-chevron { transform: rotate(180deg); color: var(--accent); }
+        .ai-panel-body {
+            max-height: 0; overflow: hidden; opacity: 0;
+            transition: max-height 0.35s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.25s ease, padding 0.25s;
+            padding: 0 16px;
+        }
+        .ai-panel.expanded .ai-panel-body {
+            max-height: 520px; opacity: 1; padding: 0 16px 16px;
+        }
         .ai-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .ai-row .form-control { flex: 1; min-width: 120px; }
         .btn-ai {
@@ -10921,6 +10940,43 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .ai-status { font-size: 12px; color: var(--hint); text-align: center; margin-top: 8px; min-height: 18px; }
         .ai-status.err { color: var(--destructive); }
         .ai-status.ok { color: var(--success); }
+        .ai-progress-wrap { margin-top: 10px; display: none; }
+        .ai-progress-wrap.show { display: block; }
+        .ai-progress-meta {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 11px; font-weight: 600; color: var(--hint); margin-bottom: 6px;
+        }
+        .ai-progress-bar {
+            height: 6px; border-radius: 99px; background: rgba(124,58,237,0.12);
+            overflow: hidden; border: 1px solid rgba(124,58,237,0.15);
+        }
+        .ai-progress-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: linear-gradient(90deg, #7c3aed, #2AABEE);
+            transition: width 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+            box-shadow: 0 0 10px rgba(124,58,237,0.35);
+        }
+        /* Quiz completeness status bar */
+        .quiz-status-bar {
+            background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+            padding: 12px 14px; margin-bottom: 16px; box-shadow: var(--shadow);
+        }
+        .quiz-status-top {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+        }
+        .quiz-status-label { font-size: 12px; font-weight: 700; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+        .quiz-status-pct { font-size: 15px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+        .quiz-status-track {
+            height: 8px; border-radius: 99px; background: rgba(0,0,0,0.06);
+            overflow: hidden; border: 1px solid var(--border);
+        }
+        [data-theme="dark"] .quiz-status-track { background: rgba(255,255,255,0.06); }
+        .quiz-status-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: linear-gradient(90deg, #31b545, #2AABEE, #7c3aed);
+            transition: width 0.45s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .quiz-status-hint { font-size: 11px; color: var(--hint); margin-top: 6px; line-height: 1.4; }
 
         .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -10963,38 +11019,60 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         </div>
 
         <div id="quiz-form">
-            <div class="ai-panel">
-                <div class="ai-panel-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
-                    Generate with AI
-                </div>
-                <div class="form-group" style="margin-bottom: 10px;">
-                    <label>Topic</label>
-                    <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
-                </div>
-                <div class="ai-row">
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Questions</label>
-                        <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+            <div class="ai-panel" id="aiPanel">
+                <div class="ai-panel-header" onclick="toggleAIPanel()" role="button" aria-expanded="false" id="aiPanelHeader">
+                    <div class="ai-panel-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
+                        Generate with AI
+                        <span class="badge-ai">Beta</span>
                     </div>
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Difficulty</label>
-                        <select id="ai-diff" class="form-control">
-                            <option value="easy">Easy</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="hard">Hard</option>
-                        </select>
+                    <svg class="ai-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+                <div class="ai-panel-body" id="aiPanelBody">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>Topic</label>
+                        <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
                     </div>
-                    <div class="form-group" style="flex:1; margin:0;">
-                        <label>Language</label>
-                        <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                    <div class="ai-row">
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Questions</label>
+                            <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+                        </div>
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Difficulty</label>
+                            <select id="ai-diff" class="form-control">
+                                <option value="easy">Easy</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="hard">Hard</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1; margin:0;">
+                            <label>Language</label>
+                            <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                        </div>
+                    </div>
+                    <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+                        Generate Quiz
+                    </button>
+                    <div class="ai-status" id="ai-status"></div>
+                    <div class="ai-progress-wrap" id="aiProgressWrap">
+                        <div class="ai-progress-meta">
+                            <span id="aiProgressLabel">Generating…</span>
+                            <span id="aiProgressPct">0%</span>
+                        </div>
+                        <div class="ai-progress-bar"><div class="ai-progress-fill" id="aiProgressFill"></div></div>
                     </div>
                 </div>
-                <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
-                    Generate Quiz
-                </button>
-                <div class="ai-status" id="ai-status"></div>
+            </div>
+
+            <div class="quiz-status-bar" id="quizStatusBar">
+                <div class="quiz-status-top">
+                    <span class="quiz-status-label">Quiz readiness</span>
+                    <span class="quiz-status-pct" id="quizStatusPct">0%</span>
+                </div>
+                <div class="quiz-status-track"><div class="quiz-status-fill" id="quizStatusFill"></div></div>
+                <div class="quiz-status-hint" id="quizStatusHint">Add a title and at least one complete question to publish.</div>
             </div>
 
             <div class="q-card" style="margin-bottom: 24px; border-color: rgba(42,171,238,0.3); background: rgba(42,171,238,0.04);">
@@ -11070,7 +11148,81 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         let questionCount = 0;
         let saveTimeout;
 
+        // ---- AI panel expand / collapse (Telegram-style) ----
+        function toggleAIPanel() {
+            const panel = document.getElementById('aiPanel');
+            const header = document.getElementById('aiPanelHeader');
+            if (!panel) return;
+            const open = panel.classList.toggle('expanded');
+            if (header) header.setAttribute('aria-expanded', open ? 'true' : 'false');
+            try { tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {}
+        }
+
+        // ---- Quiz readiness % ----
+        function updateQuizStatus() {
+            const title = (document.getElementById('q-title')?.value || '').trim();
+            const desc = (document.getElementById('q-desc')?.value || '').trim();
+            const timeOk = parseInt(document.getElementById('q-time')?.value, 10) > 0;
+            const cards = document.querySelectorAll('#questions-container .q-card');
+            let completeQs = 0;
+            let partialQs = 0;
+            cards.forEach(function (card) {
+                const qText = (card.querySelector('.q-text')?.value || '').trim();
+                const opts = Array.from(card.querySelectorAll('.opt-val')).map(function (o) { return (o.value || '').trim(); });
+                const filledOpts = opts.filter(Boolean).length;
+                const hasAnswer = !!card.querySelector('input[type="radio"]:checked');
+                if (qText && filledOpts >= 4 && hasAnswer) completeQs++;
+                else if (qText || filledOpts > 0) partialQs++;
+            });
+
+            let score = 0;
+            if (title) score += 15;
+            if (desc) score += 10;
+            if (timeOk) score += 5;
+            const qTarget = Math.max(cards.length, 1);
+            const qWeight = 70;
+            score += Math.round((completeQs / qTarget) * qWeight);
+            if (partialQs > 0 && completeQs < qTarget) {
+                score = Math.min(score + Math.round((partialQs / qTarget) * 10), 95);
+            }
+            if (completeQs >= 1 && title) score = Math.max(score, 40);
+            score = Math.min(100, Math.max(0, score));
+
+            const pctEl = document.getElementById('quizStatusPct');
+            const fillEl = document.getElementById('quizStatusFill');
+            const hintEl = document.getElementById('quizStatusHint');
+            if (pctEl) pctEl.textContent = score + '%';
+            if (fillEl) fillEl.style.width = score + '%';
+            if (hintEl) {
+                if (score >= 100) hintEl.textContent = 'Ready to publish! Review once more, then hit Publish.';
+                else if (!title) hintEl.textContent = 'Start with a quiz title.';
+                else if (cards.length === 0) hintEl.textContent = 'Add at least one question (or generate with AI).';
+                else if (completeQs === 0) hintEl.textContent = 'Fill question text, all 4 options, and mark the correct answer.';
+                else if (completeQs < cards.length) hintEl.textContent = completeQs + '/' + cards.length + ' questions complete. Finish the rest or remove empties.';
+                else if (!desc) hintEl.textContent = 'Optional: add a short description before publishing.';
+                else hintEl.textContent = 'Almost there — double-check answers and publish.';
+            }
+        }
+
         // ---- AI Generate ----
+        let aiProgressTimer = null;
+        function setAIProgress(pct, label) {
+            const wrap = document.getElementById('aiProgressWrap');
+            const fill = document.getElementById('aiProgressFill');
+            const pctEl = document.getElementById('aiProgressPct');
+            const lab = document.getElementById('aiProgressLabel');
+            if (!wrap) return;
+            wrap.classList.add('show');
+            if (fill) fill.style.width = Math.min(100, Math.max(0, pct)) + '%';
+            if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+            if (lab && label) lab.textContent = label;
+        }
+        function clearAIProgress() {
+            if (aiProgressTimer) { clearInterval(aiProgressTimer); aiProgressTimer = null; }
+            const wrap = document.getElementById('aiProgressWrap');
+            if (wrap) wrap.classList.remove('show');
+        }
+
         async function generateWithAI() {
             const topic = (document.getElementById('ai-topic').value || '').trim();
             const count = parseInt(document.getElementById('ai-count').value, 10) || 5;
@@ -11086,7 +11238,17 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
             btn.disabled = true;
             status.className = 'ai-status';
-            status.textContent = 'Generating with AI… this may take a few seconds.';
+            status.textContent = 'Contacting AI…';
+            let fake = 8;
+            setAIProgress(fake, 'Preparing prompt…');
+            if (aiProgressTimer) clearInterval(aiProgressTimer);
+            aiProgressTimer = setInterval(function () {
+                if (fake < 88) {
+                    fake += Math.random() * 6 + 1;
+                    const labels = ['Preparing prompt…', 'Generating questions…', 'Writing options…', 'Validating answers…', 'Almost done…'];
+                    setAIProgress(fake, labels[Math.min(labels.length - 1, Math.floor(fake / 20))]);
+                }
+            }, 450);
             try {
                 const res = await fetch('/api/quiz/generate-ai', {
                     method: 'POST',
@@ -11095,6 +11257,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 });
                 const data = await res.json();
                 if (!data.success) throw new Error(data.error || 'Generation failed');
+                setAIProgress(100, 'Done!');
                 document.getElementById('q-title').value = data.title || '';
                 document.getElementById('q-desc').value = data.description || '';
                 if (data.time_per_question) document.getElementById('q-time').value = data.time_per_question;
@@ -11123,8 +11286,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 status.className = 'ai-status ok';
                 status.textContent = 'Generated ' + (data.questions || []).length + ' questions. Review & edit if needed.';
                 triggerAutoSave();
+                updateQuizStatus();
                 try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
+                setTimeout(clearAIProgress, 1200);
             } catch (err) {
+                clearAIProgress();
                 status.className = 'ai-status err';
                 status.textContent = err.message || 'AI generation failed. Try again.';
                 try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
@@ -11409,6 +11575,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         function triggerAutoSave() {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(saveState, 400);
+            try { updateQuizStatus(); } catch (e) {}
         }
 
         function loadState() {
@@ -11631,6 +11798,15 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         }
 
         loadState();
+
+        // Bind readiness meter
+        ['q-title', 'q-desc', 'q-time'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', function () { try { updateQuizStatus(); } catch (e) {} });
+            el.addEventListener('change', function () { try { updateQuizStatus(); } catch (e) {} });
+        });
+        try { updateQuizStatus(); } catch (e) {}
     </script>
 </body>
 </html>
