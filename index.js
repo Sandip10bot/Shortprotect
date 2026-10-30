@@ -19,6 +19,56 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // ========================
+// GEMINI AI (Quiz Generation) – key rotation from env
+// ========================
+// Set env: GEMINI_API_KEYS=key1,key2,key3
+// Optional: GEMINI_MODELS=gemini-2.0-flash,gemini-1.5-flash
+const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS || "")
+  .split(",")
+  .map((k) => k.trim())
+  .filter(Boolean);
+const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-2.0-flash,gemini-1.5-flash,gemini-1.5-flash-latest,gemini-1.5-pro")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+
+async function callGemini(prompt) {
+  if (!GEMINI_API_KEYS.length) {
+    throw new Error("GEMINI_API_KEYS env var is missing or empty");
+  }
+  const maxRetries = GEMINI_API_KEYS.length * GEMINI_MODELS.length;
+  let lastError = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const key = GEMINI_API_KEYS[attempt % GEMINI_API_KEYS.length];
+    const model = GEMINI_MODELS[Math.floor(attempt / GEMINI_API_KEYS.length) % GEMINI_MODELS.length];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    try {
+      const resp = await axios.post(url, {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json"
+        }
+      }, { timeout: 45000 });
+
+      const text = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Empty response from Gemini");
+      return text;
+    } catch (err) {
+      lastError = err;
+      const status = err.response?.status;
+      const msg = err.response?.data?.error?.message || err.message;
+      console.warn(`[Gemini] key#${attempt % GEMINI_API_KEYS.length} model=${model} failed (${status}): ${msg}`);
+      if (status === 429 || status === 403 || status === 400 || status === 404) continue;
+      if (attempt >= maxRetries - 1) break;
+    }
+  }
+  throw lastError || new Error("All Gemini keys/models exhausted");
+}
+
+// ========================
 // MONGODB SETUP
 // ========================
 const MONGO_URI = process.env.DATABASE_URI;
@@ -1303,7 +1353,7 @@ app.post("/api/spin/do/:userId", async (req, res) => {
         }
 
         // Generate random roll 1-6
-        const roll = crypto.randomInt(1, 7); // fair 1-6 (CSPRNG)
+        const roll = Math.floor(Math.random() * 6) + 1;
 
         // Streak logic – matches cspin.py (keep streak, bonus every 7 days, no reset)
         let streak = user?.streak || 0;
@@ -4732,6 +4782,98 @@ app.post("/api/quiz/create", async (req, res) => {
 });
 
 // ==========================================
+// AI QUIZ GENERATOR (Gemini with key rotation)
+// ==========================================
+app.post("/api/quiz/generate-ai", async (req, res) => {
+    try {
+        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body;
+        if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
+            return res.status(400).json({ success: false, error: "Please provide a valid topic." });
+        }
+        const numQ = Math.min(Math.max(parseInt(count, 10) || 5, 1), 20);
+        const diff = ["easy", "medium", "hard"].includes(String(difficulty).toLowerCase())
+            ? String(difficulty).toLowerCase()
+            : "medium";
+        const lang = String(language || "English").slice(0, 40);
+        const tPerQ = Math.min(Math.max(parseInt(time_per_question, 10) || 15, 5), 120);
+
+        const prompt = `You are an expert quiz creator. Generate exactly ${numQ} multiple-choice quiz questions about: "${topic.trim()}".
+
+Difficulty: ${diff}
+Language for all text: ${lang}
+Each question must have exactly 4 options.
+Return ONLY a valid JSON object (no markdown, no code fences) with this exact structure:
+{
+  "title": "Short catchy quiz title",
+  "description": "One sentence description of the quiz",
+  "time_per_question": ${tPerQ},
+  "questions": [
+    {
+      "question": "Question text here?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": 0,
+      "explanation": "Brief explanation why the correct answer is right",
+      "time_limit": ${tPerQ}
+    }
+  ]
+}
+Rules:
+- "answer" is the 0-based index of the correct option (0, 1, 2 or 3).
+- Make questions clear, factual and non-ambiguous.
+- Options should be plausible; only one is correct.
+- Do not include any text outside the JSON object.`;
+
+        const raw = await callGemini(prompt);
+        let parsed;
+        try {
+            // Strip accidental markdown fences if model ignored mime type
+            const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+            parsed = JSON.parse(cleaned);
+        } catch (e) {
+            console.error("Gemini JSON parse failed:", raw?.slice?.(0, 400));
+            return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
+        }
+
+        if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+            return res.status(502).json({ success: false, error: "AI did not return any questions." });
+        }
+
+        // Normalize & validate
+        const questions = parsed.questions.slice(0, numQ).map((q, i) => {
+            const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
+            while (options.length < 4) options.push(`Option ${options.length + 1}`);
+            let answer = Number(q.answer);
+            if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+            return {
+                question: String(q.question || `Question ${i + 1}`).trim(),
+                options,
+                answer,
+                explanation: String(q.explanation || "Good job!").trim(),
+                time_limit: Number(q.time_limit) || tPerQ,
+                media_url: null,
+                media_file_id: null,
+                media_type: null,
+                is_rapid_fire: false
+            };
+        });
+
+        res.json({
+            success: true,
+            title: String(parsed.title || `${topic.trim()} Quiz`).slice(0, 120),
+            description: String(parsed.description || "").slice(0, 300),
+            time_per_question: Number(parsed.time_per_question) || tPerQ,
+            questions
+        });
+    } catch (e) {
+        console.error("AI Quiz Generate Error:", e.message || e);
+        res.status(500).json({
+            success: false,
+            error: e.response?.data?.error?.message || e.message || "Failed to generate quiz with AI."
+        });
+    }
+});
+
+// ==========================================
 // USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
 // ==========================================
 app.post("/api/user_shorten", async (req, res) => {
@@ -6697,22 +6839,6 @@ app.get("/mini/:userId", (req, res) => {
       box-shadow: none; 
       text-shadow: none;
     }
-    .spin-pointer.flick { animation: pointerFlick 0.16s ease-out; transform-origin: 50% 0%; }
-    @keyframes pointerFlick {
-      0% { transform: translateX(-50%) rotate(180deg); }
-      35% { transform: translateX(-50%) rotate(202deg); }
-      100% { transform: translateX(-50%) rotate(180deg); }
-    }
-    .spin-center:not(.disabled) { animation: spinIdle 2.4s ease-in-out infinite; }
-    @keyframes spinIdle {
-      0%, 100% { box-shadow: 0 0 22px rgba(255,215,0,0.5), inset 0 0 10px rgba(255,215,0,0.3); }
-      50% { box-shadow: 0 0 42px rgba(255,215,0,0.9), inset 0 0 14px rgba(255,215,0,0.45); }
-    }
-    .spin-result-box.reveal { animation: resultPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
-    @keyframes resultPop {
-      0% { opacity: 0; transform: scale(0.85) translateY(8px); }
-      100% { opacity: 1; transform: none; }
-    }
     .spin-btn, .spin-double-btn {
       display: none !important;
     }
@@ -8660,58 +8786,39 @@ app.get("/mini/:userId", (req, res) => {
                 const targetSegmentIndex = data.roll - 1; 
                 const currentRotMod = currentRotation % (2 * Math.PI);
                 
-                const jitterFrac = (Math.random() - 0.5) * 0.6; // land anywhere in the slice, not always dead-center
-                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5 + jitterFrac) * segmentAngle;
-
+                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
+                
                 let rotationNeeded = offsetAngle - currentRotMod;
                 while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
-
-                const extraTurns = 4 + Math.floor(Math.random() * 2); // 4 or 5 full turns
-                const targetRotation = currentRotation + rotationNeeded + extraTurns * 2 * Math.PI;
-                const overshootRot = targetRotation + segmentAngle * 0.16; // runs a little past, then settles back
-
-                const duration = 5200;
-                const pullAt = 0.84; // share of the time spent coasting before the settle
+                
+                const extraSpins = 25 * 2 * Math.PI; 
+                const targetRotation = currentRotation + rotationNeeded + extraSpins;
+                
+                const duration = 15000;
                 const start = performance.now();
                 const startRot = currentRotation;
-                lastSegment = -1;
-
-                const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-                const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
-
-                function wheelAt(p) {
-                    if (p < pullAt) return startRot + (overshootRot - startRot) * easeOutCubic(p / pullAt);
-                    return overshootRot + (targetRotation - overshootRot) * easeInOutSine((p - pullAt) / (1 - pullAt));
-                }
-
-                function flickPointer() {
-                    const el = document.querySelector('.spin-pointer');
-                    if (!el) return;
-                    el.classList.remove('flick');
-                    void el.offsetWidth; // restart the CSS animation
-                    el.classList.add('flick');
-                }
-
+                
                 function animateSpin(time) {
                     const progress = Math.min((time - start) / duration, 1);
-                    const rot = wheelAt(progress);
+                    
+                    const eased = 1 - Math.pow(1 - progress, 5); 
+                    const rot = startRot + (targetRotation - startRot) * eased;
+                    
                     drawWheel(rot);
-
+                    
                     let topAngle = (3 * Math.PI / 2 - rot) % (2 * Math.PI);
                     if (topAngle < 0) topAngle += 2 * Math.PI;
                     const currentSegment = Math.floor(topAngle / segmentAngle);
-
-                    if (currentSegment !== lastSegment && progress < 0.995) {
-                        if (lastSegment !== -1) flickPointer(); // peg tick each time a slice passes the pointer
-                        tg.HapticFeedback.impactOccurred(progress > 0.8 ? 'medium' : 'light');
+                    
+                    if (currentSegment !== lastSegment && progress < 0.99) {
+                        tg.HapticFeedback.impactOccurred('light');
                         lastSegment = currentSegment;
                     }
-
+                    
                     if (progress < 1) {
                         requestAnimationFrame(animateSpin);
                     } else {
                         currentRotation = targetRotation;
-                        drawWheel(currentRotation);
                         tg.HapticFeedback.impactOccurred('heavy');
                         showSpinResult(data);
                     }
@@ -8772,12 +8879,6 @@ app.get("/mini/:userId", (req, res) => {
         updateUI();
         
         spinResult.style.display = 'block';
-        spinResult.classList.remove('reveal');
-        void spinResult.offsetWidth;
-        spinResult.classList.add('reveal');
-        if ((data.roll === 6 || data.bonus > 0) && window.confetti) {
-          confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
-        }
         spinRoll.innerText = '🎲 ' + data.roll;
         
         let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
@@ -10647,6 +10748,25 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             --destructive: #e53935;
             --success: #31b545;
             --warning: #f5a623;
+            --input-bg: #ffffff;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04);
+            --topbar-bg: rgba(255,255,255,0.92);
+        }
+
+        [data-theme="dark"] {
+            --bg: #0b0c0f;
+            --card: #1c1c1e;
+            --text: #f5f5f7;
+            --hint: #98989d;
+            --accent: #64d2ff;
+            --accent-dark: #2AABEE;
+            --border: rgba(255,255,255,0.12);
+            --destructive: #ff453a;
+            --success: #30d158;
+            --warning: #ffd60a;
+            --input-bg: #1c1c1e;
+            --shadow: 0 4px 16px rgba(0,0,0,0.35);
+            --topbar-bg: rgba(28,28,30,0.92);
         }
 
         body {
@@ -10657,7 +10777,23 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             min-height: 100vh;
             -webkit-font-smoothing: antialiased;
             letter-spacing: -0.01em;
+            transition: background 0.25s ease, color 0.25s ease;
         }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed; top: 14px; right: 14px; z-index: 200;
+            width: 42px; height: 42px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: var(--shadow);
+            transition: transform 0.2s ease, background 0.2s;
+        }
+        .theme-toggle:active { transform: scale(0.92); }
+        .theme-toggle svg { width: 20px; height: 20px; }
+        .theme-toggle .icon-sun { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
 
         .container { width: 100%; max-width: 500px; margin: 0 auto; padding: 20px 16px; animation: fadeUp 0.35s ease; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -10675,17 +10811,17 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             color: var(--text); font-size: 15px; outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
+        .form-control:focus { border-color: var(--accent); background: var(--input-bg); box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
         textarea.form-control { resize: none; font-family: inherit; }
 
         .q-card {
-            background: var(--bg);
+            background: var(--card);
             border: 1px solid var(--border);
             padding: 16px;
             border-radius: 16px;
             margin-bottom: 16px;
             position: relative;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            box-shadow: var(--shadow);
         }
         .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
 
@@ -10702,13 +10838,13 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         }
         .option-card {
             display: flex; align-items: center; gap: 12px; padding: 0 12px;
-            background: var(--bg); cursor: pointer; transition: background 0.15s;
+            background: var(--input-bg); cursor: pointer; transition: background 0.15s;
         }
         .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
         .option-card input[type="radio"] { display: none; }
 
         .radio-custom {
-            width: 22px; height: 22px; border-radius: 50%; border: 2px solid #c0c0c0;
+            width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--hint);
             display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease;
         }
         .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
@@ -10721,11 +10857,11 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .opt-body { flex: 1; min-width: 0; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
-        .option-card .opt-val::placeholder { color: #a0a0a0; }
+        .option-card .opt-val::placeholder { color: var(--hint); }
 
         .opt-attach-btn {
             background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0;
-            display: flex; align-items: center; justify-content: center; color: #a0a0a0; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; color: var(--hint); cursor: pointer;
         }
         .opt-attach-btn svg { width: 20px; height: 20px; }
         .opt-attach-btn.has-media { color: var(--accent); }
@@ -10736,19 +10872,20 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             padding: 8px 0 10px; cursor: text;
         }
         .option-card .opt-media-val.show { display: block; }
-        .option-card .opt-media-val::placeholder { color: #b0b0b0; }
+        .option-card .opt-media-val::placeholder { color: var(--hint); }
 
         .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
 
         .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e0e0e0; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: var(--border); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
         .toggle-switch:checked { background: var(--accent); box-shadow: 0 0 8px rgba(42,171,238,0.35); }
         .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         .toggle-switch:checked::after { transform: translateX(20px); }
 
         .sticky-action-bar {
             position: fixed; bottom: 0; left: 0; width: 100%;
-            background: #ffffff;
+            background: var(--topbar-bg);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
             border-top: 1px solid var(--border);
             padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
             display: flex; gap: 10px; z-index: 100;
@@ -10761,9 +10898,29 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .sticky-action-bar .btn-publish:active { background: var(--accent-dark); }
         .sticky-action-bar .btn-clear { flex: 1; background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); border-radius: 12px; color: var(--destructive); font-weight: 700; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
 
-        .top-bar-save { position: fixed; top: 10px; right: 12px; background: #fff; padding: 4px 12px; border-radius: 16px; font-size: 10px; color: var(--success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 4px; }
+        .top-bar-save { position: fixed; top: 10px; right: 60px; background: var(--card); padding: 4px 12px; border-radius: 16px; font-size: 10px; color: var(--success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: var(--shadow); display: flex; align-items: center; gap: 4px; }
         .top-bar-save.show { opacity: 1; }
         .top-bar-save svg { width: 14px; height: 14px; fill: var(--success); }
+
+        /* AI Generate panel */
+        .ai-panel {
+            background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+            padding: 16px; margin-bottom: 20px; box-shadow: var(--shadow);
+        }
+        .ai-panel-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--accent); }
+        .ai-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .ai-row .form-control { flex: 1; min-width: 120px; }
+        .btn-ai {
+            width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
+            background: linear-gradient(135deg, #7c3aed, #2AABEE); color: #fff; font-weight: 700; font-size: 14px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 4px 14px rgba(124,58,237,0.3); transition: transform 0.15s, opacity 0.2s;
+        }
+        .btn-ai:active { transform: scale(0.97); }
+        .btn-ai:disabled { opacity: 0.6; cursor: wait; }
+        .ai-status { font-size: 12px; color: var(--hint); text-align: center; margin-top: 8px; min-height: 18px; }
+        .ai-status.err { color: var(--destructive); }
+        .ai-status.ok { color: var(--success); }
 
         .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -10784,68 +10941,19 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .time-per-q .hint { font-size: 11px; color: var(--hint); }
 
         .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
-    <style id="mytho-theme-css">
-    :root[data-theme="dark"] {
-        color-scheme: dark;
-        --bg: #0e0f12; --surface: #17181d; --card: #1c1d23; --text: #f2f3f5; --hint: #9aa0ab;
-        --accent: #3fb8f5; --accent-dark: #2aa3e0; --accent-soft: rgba(63,184,245,0.14);
-        --border: #2a2c33; --destructive: #ff5a7a; --destructive-soft: rgba(255,90,122,0.12);
-        --success: #34d37a; --success-soft: rgba(52,211,122,0.12);
-        --warning: #f5a524; --warning-soft: rgba(245,165,36,0.12);
-        --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
-        --shadow-md: 0 6px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
-        --shadow-lift: 0 16px 32px rgba(0,0,0,0.55), 0 4px 10px rgba(0,0,0,0.4);
-    }
-    :root[data-theme="dark"] .form-control:focus,
-    :root[data-theme="dark"] .search-input-box:focus-within { background: var(--card) !important; }
-    :root[data-theme="dark"] .top-bar-save { background: var(--surface); }
-    :root[data-theme="dark"] .profile-avatar-img { border-color: var(--surface); }
-    :root[data-theme="dark"] .media-preview .file-id-label { background: rgba(0,0,0,0.6); color: #e5e7eb; }
-
-    .theme-row { display: flex; justify-content: flex-end; margin: 0 0 14px; }
-    .theme-toggle {
-        display: inline-flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px;
-        border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
-        color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600;
-        cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .theme-toggle:active { transform: scale(0.96); }
-    .theme-toggle .track {
-        position: relative; width: 40px; height: 22px; border-radius: 999px;
-        background: #d4d6dc; transition: background 0.25s ease; flex-shrink: 0;
-    }
-    .theme-toggle .knob {
-        position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
-        background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-    :root[data-theme="dark"] .theme-toggle .track { background: var(--accent); }
-    :root[data-theme="dark"] .theme-toggle .knob { transform: translateX(18px); }
-</style>
-    
+    </style>
 </head>
 <body>
-<script>
-(function () {
-    try {
-        if (localStorage.getItem("mytho_quiz_theme") === "dark") {
-            document.documentElement.setAttribute("data-theme", "dark");
-        }
-    } catch (e) {}
-})();
-</script>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
     <div class="top-bar-save" id="save-indicator">
         <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
         Saved
     </div>
 
     <div class="container" id="main-content">
-        <div class="theme-row">
-            <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleMythoTheme()" aria-label="Switch light or dark theme">
-                <span class="track"><span class="knob"></span></span>
-                <span id="themeLabel">Dark mode</span>
-            </button>
-        </div>
         <div style="text-align: center;">
             <img src="https://i.ibb.co/hxH7P7Jk/photo-2026-09-02-12-17-37-7680911038748819472.jpg" 
                  alt="Quiz Creator Banner" 
@@ -10855,6 +10963,40 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         </div>
 
         <div id="quiz-form">
+            <div class="ai-panel">
+                <div class="ai-panel-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
+                    Generate with AI
+                </div>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label>Topic</label>
+                    <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
+                </div>
+                <div class="ai-row">
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Questions</label>
+                        <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+                    </div>
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Difficulty</label>
+                        <select id="ai-diff" class="form-control">
+                            <option value="easy">Easy</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="hard">Hard</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Language</label>
+                        <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                    </div>
+                </div>
+                <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+                    Generate Quiz
+                </button>
+                <div class="ai-status" id="ai-status"></div>
+            </div>
+
             <div class="q-card" style="margin-bottom: 24px; border-color: rgba(42,171,238,0.3); background: rgba(42,171,238,0.04);">
                 <div class="form-group">
                     <label>Quiz Title</label>
@@ -10899,12 +11041,97 @@ app.get("/create-quiz-app/:userId", (req, res) => {
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
-        tg.setHeaderColor('#ffffff');
+
+        // ---- Theme (light / dark) ----
+        (function initTheme() {
+            const stored = localStorage.getItem('mytho_quiz_theme');
+            const preferDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = stored || (preferDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            try {
+                tg.setHeaderColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+            } catch (e) {}
+        })();
+        document.getElementById('themeToggle').addEventListener('click', function () {
+            const cur = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('mytho_quiz_theme', next);
+            try {
+                tg.setHeaderColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
+            } catch (e) {}
+        });
 
         const userId = \`${userId}\`;
         const storageKey = \`mytho_quiz_draft_\${userId}\`;
         let questionCount = 0;
         let saveTimeout;
+
+        // ---- AI Generate ----
+        async function generateWithAI() {
+            const topic = (document.getElementById('ai-topic').value || '').trim();
+            const count = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            const difficulty = document.getElementById('ai-diff').value || 'medium';
+            const language = (document.getElementById('ai-lang').value || 'English').trim();
+            const timePer = parseInt(document.getElementById('q-time').value, 10) || 15;
+            const status = document.getElementById('ai-status');
+            const btn = document.getElementById('btnGenerateAI');
+            if (!topic || topic.length < 2) {
+                status.className = 'ai-status err';
+                status.textContent = 'Please enter a topic.';
+                return;
+            }
+            btn.disabled = true;
+            status.className = 'ai-status';
+            status.textContent = 'Generating with AI… this may take a few seconds.';
+            try {
+                const res = await fetch('/api/quiz/generate-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, count, difficulty, language, time_per_question: timePer })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Generation failed');
+                document.getElementById('q-title').value = data.title || '';
+                document.getElementById('q-desc').value = data.description || '';
+                if (data.time_per_question) document.getElementById('q-time').value = data.time_per_question;
+                document.getElementById('questions-container').innerHTML = '';
+                questionCount = 0;
+                (data.questions || []).forEach(function (q) {
+                    addQuestion();
+                    const card = document.getElementById('questions-container').lastElementChild;
+                    if (!card) return;
+                    card.querySelector('.q-text').value = q.question || '';
+                    const opts = card.querySelectorAll('.opt-val');
+                    (q.options || []).forEach(function (opt, i) {
+                        if (opts[i]) opts[i].value = opt;
+                    });
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    const ans = Number(q.answer);
+                    if (radios[ans]) {
+                        radios[ans].checked = true;
+                        updateOptionStyles(card.id);
+                    }
+                    const exp = card.querySelector('.q-exp');
+                    if (exp) exp.value = q.explanation || '';
+                    const tLim = card.querySelector('.q-time-limit');
+                    if (tLim && q.time_limit) tLim.value = q.time_limit;
+                });
+                status.className = 'ai-status ok';
+                status.textContent = 'Generated ' + (data.questions || []).length + ' questions. Review & edit if needed.';
+                triggerAutoSave();
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
+            } catch (err) {
+                status.className = 'ai-status err';
+                status.textContent = err.message || 'AI generation failed. Try again.';
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
+            } finally {
+                btn.disabled = false;
+            }
+        }
 
         const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
 
@@ -11405,34 +11632,6 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         loadState();
     </script>
-<script>
-(function () {
-    function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
-    function syncLabel() {
-        var l = document.getElementById("themeLabel");
-        if (l) l.textContent = isDark() ? "Light mode" : "Dark mode";
-    }
-    function paintTelegram() {
-        try {
-            var c = isDark() ? "#0e0f12" : "#ffffff";
-            if (window.Telegram && Telegram.WebApp) {
-                Telegram.WebApp.setHeaderColor(c);
-                if (Telegram.WebApp.setBackgroundColor) Telegram.WebApp.setBackgroundColor(c);
-            }
-        } catch (e) {}
-    }
-    window.toggleMythoTheme = function () {
-        var next = isDark() ? "light" : "dark";
-        if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
-        else document.documentElement.removeAttribute("data-theme");
-        try { localStorage.setItem("mytho_quiz_theme", next); } catch (e) {}
-        syncLabel();
-        paintTelegram();
-    };
-    syncLabel();
-    paintTelegram();
-})();
-</script>
 </body>
 </html>
     `);
@@ -11478,6 +11677,29 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             --shadow-sm: 0 1px 2px rgba(15,15,20,0.04), 0 1px 3px rgba(15,15,20,0.05);
             --shadow-md: 0 6px 16px rgba(15,15,20,0.06), 0 2px 4px rgba(15,15,20,0.04);
             --shadow-lift: 0 16px 32px rgba(15,15,20,0.10), 0 4px 10px rgba(15,15,20,0.06);
+            --input-bg: #ffffff;
+        }
+
+        [data-theme="dark"] {
+            --bg: #0b0c0f;
+            --surface: #1c1c1e;
+            --card: #1c1c1e;
+            --text: #f5f5f7;
+            --hint: #98989d;
+            --accent: #64d2ff;
+            --accent-dark: #2AABEE;
+            --accent-soft: rgba(100,210,255,0.12);
+            --border: rgba(255,255,255,0.12);
+            --destructive: #ff453a;
+            --destructive-soft: rgba(255,69,58,0.12);
+            --success: #30d158;
+            --success-soft: rgba(48,209,88,0.12);
+            --warning: #ffd60a;
+            --warning-soft: rgba(255,214,10,0.12);
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.35);
+            --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
+            --shadow-lift: 0 16px 40px rgba(0,0,0,0.5);
+            --input-bg: #2c2c2e;
         }
 
         body {
@@ -11488,7 +11710,22 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             min-height: 100vh;
             -webkit-font-smoothing: antialiased;
             letter-spacing: -0.01em;
+            transition: background 0.25s ease, color 0.25s ease;
         }
+
+        .theme-toggle {
+            position: fixed; top: 14px; right: 14px; z-index: 200;
+            width: 42px; height: 42px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: var(--shadow-sm);
+            transition: transform 0.2s ease, background 0.2s;
+        }
+        .theme-toggle:active { transform: scale(0.92); }
+        .theme-toggle svg { width: 20px; height: 20px; }
+        .theme-toggle .icon-sun { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
 
         .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
 
@@ -11544,7 +11781,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; letter-spacing: -0.2px; }
         .quiz-card-desc { font-size: 13.5px; color: var(--hint); margin-bottom: 14px; line-height: 1.5; }
 
-        .quiz-date { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #a3a5ab; margin-bottom: 16px; font-weight: 600; letter-spacing: 0.2px; }
+        .quiz-date { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--hint); margin-bottom: 16px; font-weight: 600; letter-spacing: 0.2px; }
         .quiz-date svg { width: 13px; height: 13px; flex-shrink: 0; }
 
         .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
@@ -11586,7 +11823,7 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             font-weight: 700; font-size: 15px; cursor: pointer;
             transition: background 0.2s ease, transform 0.15s ease;
         }
-        .btn-close-app:hover { background: #ececef; }
+        .btn-close-app:hover { background: var(--card); }
         .btn-close-app:active { transform: scale(0.98); }
 
         /* ---------- Empty state ---------- */
@@ -11596,8 +11833,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
 
         .form-group { margin-bottom: 14px; text-align: left; }
         .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
-        .form-control { width: 100%; padding: 14px; border-radius: var(--radius-md); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
-        .form-control:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px var(--accent-soft); }
+        .form-control { width: 100%; padding: 14px; border-radius: var(--radius-md); background: var(--input-bg); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .form-control:focus { border-color: var(--accent); background: var(--input-bg); box-shadow: 0 0 0 3px var(--accent-soft); }
         textarea.form-control { resize: none; font-family: inherit; }
 
         .q-card { background: var(--surface); border: 1px solid var(--border); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px; box-shadow: var(--shadow-sm); }
@@ -11612,8 +11849,8 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .opt-body { flex: 1; min-width: 0; }
         .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
         .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
-        .option-card .opt-val::placeholder { color: #a3a5ab; }
-        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #a3a5ab; cursor: pointer; transition: color 0.2s; }
+        .option-card .opt-val::placeholder { color: var(--hint); }
+        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--hint); cursor: pointer; transition: color 0.2s; }
         .opt-attach-btn svg { width: 19px; height: 19px; }
         .opt-attach-btn.has-media { color: var(--accent); }
         .option-card .opt-media-val { display: none; width: 100%; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 8px 0 10px; cursor: text; }
@@ -11645,15 +11882,15 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
         .search-header h3 { margin: 0; color: var(--text); font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
         .close-icon-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); width: 34px; height: 34px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; transition: background 0.2s, transform 0.15s; }
-        .close-icon-btn:hover { background: #ececef; }
+        .close-icon-btn:hover { background: var(--card); }
         .close-icon-btn:active { transform: scale(0.92); }
         .close-icon-btn svg { width: 16px; height: 16px; }
 
         .search-input-box { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; transition: border 0.2s; }
-        .search-input-box:focus-within { border-color: var(--accent); background: #fff; }
+        .search-input-box:focus-within { border-color: var(--accent); background: var(--input-bg); }
         .search-input-box svg { width: 18px; height: 18px; color: var(--hint); flex-shrink: 0; }
         .search-input-box input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 16px; outline: none; }
-        .search-input-box input::placeholder { color: #a3a5ab; }
+        .search-input-box input::placeholder { color: var(--hint); }
 
         .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
         .search-hint { text-align: center; color: var(--hint); margin-top: 40px; font-size: 14px; }
@@ -11712,66 +11949,17 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
             flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
             color: var(--text); font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.15s;
         }
-        .btn-cancel-edit:hover { background: #ececef; }
+        .btn-cancel-edit:hover { background: var(--card); }
         .btn-cancel-edit:active { transform: scale(0.98); }
-    <style id="mytho-theme-css">
-    :root[data-theme="dark"] {
-        color-scheme: dark;
-        --bg: #0e0f12; --surface: #17181d; --card: #1c1d23; --text: #f2f3f5; --hint: #9aa0ab;
-        --accent: #3fb8f5; --accent-dark: #2aa3e0; --accent-soft: rgba(63,184,245,0.14);
-        --border: #2a2c33; --destructive: #ff5a7a; --destructive-soft: rgba(255,90,122,0.12);
-        --success: #34d37a; --success-soft: rgba(52,211,122,0.12);
-        --warning: #f5a524; --warning-soft: rgba(245,165,36,0.12);
-        --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
-        --shadow-md: 0 6px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
-        --shadow-lift: 0 16px 32px rgba(0,0,0,0.55), 0 4px 10px rgba(0,0,0,0.4);
-    }
-    :root[data-theme="dark"] .form-control:focus,
-    :root[data-theme="dark"] .search-input-box:focus-within { background: var(--card) !important; }
-    :root[data-theme="dark"] .top-bar-save { background: var(--surface); }
-    :root[data-theme="dark"] .profile-avatar-img { border-color: var(--surface); }
-    :root[data-theme="dark"] .media-preview .file-id-label { background: rgba(0,0,0,0.6); color: #e5e7eb; }
-
-    .theme-row { display: flex; justify-content: flex-end; margin: 0 0 14px; }
-    .theme-toggle {
-        display: inline-flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px;
-        border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
-        color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600;
-        cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .theme-toggle:active { transform: scale(0.96); }
-    .theme-toggle .track {
-        position: relative; width: 40px; height: 22px; border-radius: 999px;
-        background: #d4d6dc; transition: background 0.25s ease; flex-shrink: 0;
-    }
-    .theme-toggle .knob {
-        position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
-        background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-    :root[data-theme="dark"] .theme-toggle .track { background: var(--accent); }
-    :root[data-theme="dark"] .theme-toggle .knob { transform: translateX(18px); }
-</style>
-    
+    </style>
 </head>
 <body>
-<script>
-(function () {
-    try {
-        if (localStorage.getItem("mytho_quiz_theme") === "dark") {
-            document.documentElement.setAttribute("data-theme", "dark");
-        }
-    } catch (e) {}
-})();
-</script>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
 
     <div class="container" id="main-content">
-        <div class="theme-row">
-            <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleMythoTheme()" aria-label="Switch light or dark theme">
-                <span class="track"><span class="knob"></span></span>
-                <span id="themeLabel">Dark mode</span>
-            </button>
-        </div>
         <!-- Quiz List View -->
         <div id="list-view">
             <div class="profile-header">
@@ -11860,7 +12048,29 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
-        tg.setHeaderColor('#ffffff');
+
+        // ---- Theme (light / dark) ----
+        (function initTheme() {
+            const stored = localStorage.getItem('mytho_quiz_theme');
+            const preferDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = stored || (preferDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            try {
+                tg.setHeaderColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+            } catch (e) {}
+        })();
+        document.getElementById('themeToggle').addEventListener('click', function () {
+            const cur = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('mytho_quiz_theme', next);
+            try {
+                tg.setHeaderColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
+            } catch (e) {}
+        });
 
         const userId = ${userId};
         let quizzes = [];
@@ -12452,34 +12662,6 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         initProfile();
         loadQuizzes();
     </script>
-<script>
-(function () {
-    function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
-    function syncLabel() {
-        var l = document.getElementById("themeLabel");
-        if (l) l.textContent = isDark() ? "Light mode" : "Dark mode";
-    }
-    function paintTelegram() {
-        try {
-            var c = isDark() ? "#0e0f12" : "#ffffff";
-            if (window.Telegram && Telegram.WebApp) {
-                Telegram.WebApp.setHeaderColor(c);
-                if (Telegram.WebApp.setBackgroundColor) Telegram.WebApp.setBackgroundColor(c);
-            }
-        } catch (e) {}
-    }
-    window.toggleMythoTheme = function () {
-        var next = isDark() ? "light" : "dark";
-        if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
-        else document.documentElement.removeAttribute("data-theme");
-        try { localStorage.setItem("mytho_quiz_theme", next); } catch (e) {}
-        syncLabel();
-        paintTelegram();
-    };
-    syncLabel();
-    paintTelegram();
-})();
-</script>
 </body>
 </html>
     `);
