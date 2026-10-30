@@ -10,6 +10,7 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import http from "http";
 import https from "https";
+import zlib from "zlib";
 
 
 const app = express();
@@ -14110,16 +14111,52 @@ const STREAM_SMOOTH_UI = (process.env.STREAM_SMOOTH_UI || "true").toLowerCase() 
 
 const STREAM_SMOOTH_CSS =
     '<style id="__smooth_ui">' +
+    // ---- design tokens (same look as the Mini App dashboard) ----
+    ':root{--m-line:rgba(255,255,255,.12);--m-card:rgba(28,28,30,.72);--m-mut:rgba(235,235,245,.6);--m-p1:#b74bff;--m-p2:#9526e8;--m-ease:cubic-bezier(.34,1.56,.64,1);--plyr-color-main:#b74bff}' +
     '*{-webkit-tap-highlight-color:transparent}' +
     'html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}' +
+    'html body{background:#000 radial-gradient(circle at 25% 0%,rgba(213,0,249,.12),transparent 50%) fixed;background-image:radial-gradient(circle at 25% 0%,rgba(213,0,249,.12),transparent 50%),radial-gradient(circle at 85% 100%,rgba(101,31,255,.10),transparent 50%);background-attachment:fixed;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}' +
+    'html body *:not(.material-symbol):not([class*="material"]){font-family:inherit}' +
+    'html body .top-gradient{display:none}' +
+    'html body h1,html body h2,html body h3{letter-spacing:-.4px;font-weight:700}' +
+    // ---- touch feel ----
     'button,a,[onclick],.nav-item{touch-action:manipulation;-webkit-user-select:none;user-select:none}' +
     'input,textarea{-webkit-user-select:text;user-select:text}' +
-    '.nav-item,.action-pill,.seg-btn,.subscribe-btn,.yt-rec-item,.yt-playlist-item{transition:transform .14s cubic-bezier(.34,1.56,.64,1),opacity .18s ease,background-color .2s ease}' +
-    'button:active,.nav-item:active,.action-pill:active,.seg-btn:active,.subscribe-btn:active,.yt-rec-item:active,.yt-playlist-item:active{transform:scale(.95);opacity:.82}' +
+    // ---- bottom nav: floating glass bar ----
+    'html body .bottom-nav{background:rgba(28,28,30,.72);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);border-top:.5px solid var(--m-line);padding:8px 6px calc(10px + env(safe-area-inset-bottom,0px))}' +
+    'html body .nav-item{color:rgba(235,235,245,.45);transition:transform .2s var(--m-ease),color .2s ease}' +
+    'html body .nav-item.active{color:#d58bff}' +
+    'html body .nav-item.active .material-symbol{filter:drop-shadow(0 0 8px rgba(191,90,242,.65))}' +
+    'html body .nav-item:active{transform:scale(.88)}' +
+    // ---- cards ----
+    'html body .home-item,html body .channel-card,html body .series-hero{background:var(--m-card);border:.5px solid var(--m-line);border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}' +
+    'html body .yt-rec-item,html body .trending-item,html body .episode-item,html body .yt-playlist-item{background:var(--m-card);border:.5px solid var(--m-line);border-radius:16px;padding:8px;margin-bottom:8px}' +
+    'html body .yt-playlist-container,html body .main-layout .video-info-section{border-radius:20px}' +
+    'html body .home-thumb,html body .yt-thumb,html body .trending-thumb,html body .episode-thumb,html body .rec-thumb-container,html body .series-poster{border-radius:14px;background:#1a1226}' +
+    'html body .home-item,html body .yt-rec-item,html body .trending-item,html body .episode-item{content-visibility:auto;contain-intrinsic-size:auto 230px}' +
+    'html body .home-item,html body .yt-rec-item,html body .trending-item,html body .episode-item,html body .channel-card,html body .yt-playlist-item{transition:transform .22s var(--m-ease),box-shadow .22s ease,opacity .18s ease}' +
+    'html body .progress-bar{background:linear-gradient(90deg,#b74bff,#00e676);border-radius:4px}' +
+    // ---- buttons / pills ----
+    'html body .action-pill,html body .seg-btn,html body .filter-btn,html body .page-btn,html body .back-btn{background:rgba(255,255,255,.07);border:.5px solid var(--m-line);color:#fff;border-radius:999px;transition:transform .18s var(--m-ease),background-color .2s ease,opacity .18s ease}' +
+    'html body .filter-btn.active,html body .page-btn.active,html body .subscribe-btn,html body .submit-btn{background:linear-gradient(180deg,#b74bff,#9526e8);color:#fff;border:none;box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 8px 20px rgba(149,38,232,.35)}' +
+    'html body .seg-btn.active{background:rgba(183,75,255,.22);color:#e9c4ff}' +
+    'html body button:active,html body .nav-item:active,html body .action-pill:active,html body .seg-btn:active,html body .home-item:active,html body .yt-rec-item:active,html body .trending-item:active,html body .episode-item:active,html body .channel-card:active,html body .yt-playlist-item:active,html body .back-btn:active{transform:scale(.96);opacity:.88}' +
+    // ---- inputs ----
+    'html body .search-input,html body input[type=text],html body input[type=search]{background:rgba(255,255,255,.06);border:.5px solid var(--m-line);border-radius:14px;color:#fff;transition:border-color .2s,box-shadow .2s}' +
+    'html body .search-input:focus,html body input[type=text]:focus{outline:none;border-color:rgba(191,90,242,.7);box-shadow:0 0 0 3px rgba(191,90,242,.18)}' +
+    // ---- text accents ----
+    'html body .section-title,html body .series-title,html body .home-title,html body .video-title{letter-spacing:-.3px}' +
+    'html body .home-meta,html body .user-greeting,html body .channel-name,html body .stat-label{color:var(--m-mut)}' +
+    'html body .stat-value{background:linear-gradient(180deg,#fff,#d58bff);-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    'html body .empty-state{color:var(--m-mut)}' +
+    // ---- player ----
+    '.plyr{border-radius:18px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.6)}' +
+    '.plyr,.plyr video{will-change:transform;transform:translateZ(0)}' +
+    '.plyr--video .plyr__control--overlaid{background:linear-gradient(180deg,#b74bff,#9526e8);box-shadow:0 8px 24px rgba(149,38,232,.5)}' +
+    // ---- page entry ----
     '@keyframes __pgin{from{opacity:0}to{opacity:1}}' +
     'body{animation:__pgin .22s ease-out}' +
     'video.yt-thumb{background:#1a1226}' +
-    '.plyr,.plyr video{will-change:transform;transform:translateZ(0)}' +
     '</style>';
 
 const STREAM_SMOOTH_JS =
@@ -14150,13 +14187,40 @@ function isStreamHtmlPath(p) {
     return true;
 }
 
+// Material Symbols icon font: only download the icons the pages really use
+const STREAM_ICON_SUBSET = (process.env.STREAM_ICON_SUBSET || "true").toLowerCase() !== "false";
+const STREAM_ICON_NAMES = [
+    "account_circle","add","arrow_back","autoplay","bookmark","check","check_circle","chevron_right","close",
+    "cloud_upload","comment","delete","download","edit","error","expand_more","favorite","fullscreen","group",
+    "hd","history","home","info","language","live_tv","local_fire_department","lock","logout","more_vert",
+    "movie","notifications","notifications_active","pause","person","play_arrow","play_circle","playlist_add",
+    "playlist_play","refresh","schedule","search","search_off","send","settings","share","smart_display",
+    "speed","star","subtitles","thumb_down","thumb_down_off_alt","thumb_up","thumb_up_off_alt","translate",
+    "trending_up","tv","upload","video_file","visibility","volume_off","volume_up","wifi"
+].sort().join(",");
+const STREAM_ICON_HREF =
+    "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&icon_names=" +
+    STREAM_ICON_NAMES + "&display=block";
+
 function streamSmoothify(html) {
     // 1) thumbnails: don't pull metadata from Telegram until the main video is playing
     html = html.split('preload="metadata"').join('preload="none" data-defer-thumb="1"');
-    // 2) CSS before </head>
+    // 2) fonts: drop the Roboto download (system/SF font is used), shrink the icon font
+    html = html.replace(/<link[^>]+fonts\.googleapis\.com\/css2\?family=Roboto[^>]*>/gi, "");
+    html = html.replace(/@import url\([^)]*family=Roboto[^)]*\);?/gi, "");
+    if (STREAM_ICON_SUBSET) {
+        html = html.replace(/href="https:\/\/fonts\.googleapis\.com\/css2\?family=Material\+Symbols\+Outlined[^"]*"/gi, 'href="' + STREAM_ICON_HREF + '"');
+    }
+    // 3) decode images off the main thread
+    html = html.replace(/<img (?![^>]*decoding=)/gi, '<img decoding="async" ');
+    // 4) connection hints + CSS before </head>
+    const hints =
+        '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+        '<link rel="preconnect" href="https://cdn.plyr.io" crossorigin>';
     const h = html.search(/<\/head>/i);
-    html = h >= 0 ? html.slice(0, h) + STREAM_SMOOTH_CSS + html.slice(h) : STREAM_SMOOTH_CSS + html;
-    // 3) JS before the last </body>
+    html = h >= 0 ? html.slice(0, h) + hints + STREAM_SMOOTH_CSS + html.slice(h) : STREAM_SMOOTH_CSS + html;
+    // 5) JS before the last </body>
     const b = html.toLowerCase().lastIndexOf("</body>");
     html = b >= 0 ? html.slice(0, b) + STREAM_SMOOTH_JS + html.slice(b) : html + STREAM_SMOOTH_JS;
     return html;
@@ -14230,9 +14294,20 @@ function streamProxyHandler(req, res, next) {
                         console.error("Smooth UI inject failed:", e.message);
                     }
                     delete out["transfer-encoding"];
-                    out["content-length"] = body.length;
-                    res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
-                    res.end(body);
+                    const send = (buf, enc) => {
+                        if (enc) { out["content-encoding"] = enc; out["vary"] = "Accept-Encoding"; }
+                        out["content-length"] = buf.length;
+                        res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
+                        res.end(buf);
+                    };
+                    const ae = String(req.headers["accept-encoding"] || "");
+                    if (body.length > 1024 && /\bbr\b/.test(ae)) {
+                        zlib.brotliCompress(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }, (err, z) => (err ? send(body) : send(z, "br")));
+                    } else if (body.length > 1024 && /\bgzip\b/.test(ae)) {
+                        zlib.gzip(body, { level: 6 }, (err, z) => (err ? send(body) : send(z, "gzip")));
+                    } else {
+                        send(body);
+                    }
                 });
                 proxyRes.on("error", () => res.destroy());
                 return;
