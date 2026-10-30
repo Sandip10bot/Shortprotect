@@ -7046,7 +7046,7 @@ app.get("/mini/:userId", (req, res) => {
         <p id="ui-id">ID: ${userId}</p>
         <div class="badge" id="ui-verified">Checking...</div>
       </div>
-      <a href="http://t.me/MythoSerialBot/stream" target="_blank" class="switch-btn" title="Open Stream">
+      <a href="/" onclick="openStreamSite('/'); return false;" class="switch-btn" title="Open Stream">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
       </a>
     </div>
@@ -8170,12 +8170,34 @@ app.get("/mini/:userId", (req, res) => {
     let selectedSerial = null;
     let selectedSeason = null;
 
-    // Open search overlay
+    // Open the Stream site (same domain) with automatic Telegram login
+    async function openStreamSite(path) {
+      try { tg.HapticFeedback.impactOccurred('medium'); } catch (e) {}
+      try {
+        const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+        if (u) {
+          await fetch('/api/tg-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initData: tg.initData, user: u })
+          });
+        }
+      } catch (e) { console.error('Stream login failed', e); }
+      window.location.href = path;
+    }
+
+    // Search widget now opens the Stream site search page (old bot-link overlay kept below, unused)
+    searchWidget.addEventListener('click', () => {
+      openStreamSite('/search');
+    });
+
+    /* OLD overlay opener (kept for reference)
     searchWidget.addEventListener('click', () => {
       searchOverlay.classList.add('open');
       setTimeout(() => searchInput.focus(), 300);
       loadSerials();
     });
+    */
 
     // Close search overlay
     searchBackBtn.addEventListener('click', () => {
@@ -14077,6 +14099,69 @@ function isStreamPath(p) {
     return STREAM_PATH_PATTERNS.some((re) => re.test(p));
 }
 
+// ----------------------------------------------------------
+// SMOOTH UI LAYER: injected into every stream-site HTML page (no Python change needed)
+//  - no grey tap flash, press animation, Telegram haptics, soft page fade-in
+//  - recommendation thumbnails (<video preload="metadata">) load AFTER the main
+//    video starts, so they stop fighting the player for Telegram bandwidth
+// Disable with env STREAM_SMOOTH_UI=false
+// ----------------------------------------------------------
+const STREAM_SMOOTH_UI = (process.env.STREAM_SMOOTH_UI || "true").toLowerCase() !== "false";
+
+const STREAM_SMOOTH_CSS =
+    '<style id="__smooth_ui">' +
+    '*{-webkit-tap-highlight-color:transparent}' +
+    'html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}' +
+    'button,a,[onclick],.nav-item{touch-action:manipulation;-webkit-user-select:none;user-select:none}' +
+    'input,textarea{-webkit-user-select:text;user-select:text}' +
+    '.nav-item,.action-pill,.seg-btn,.subscribe-btn,.yt-rec-item,.yt-playlist-item{transition:transform .14s cubic-bezier(.34,1.56,.64,1),opacity .18s ease,background-color .2s ease}' +
+    'button:active,.nav-item:active,.action-pill:active,.seg-btn:active,.subscribe-btn:active,.yt-rec-item:active,.yt-playlist-item:active{transform:scale(.95);opacity:.82}' +
+    '@keyframes __pgin{from{opacity:0}to{opacity:1}}' +
+    'body{animation:__pgin .22s ease-out}' +
+    'video.yt-thumb{background:#1a1226}' +
+    '.plyr,.plyr video{will-change:transform;transform:translateZ(0)}' +
+    '</style>';
+
+const STREAM_SMOOTH_JS =
+    '<script id="__smooth_js">(function(){try{' +
+    'var tg=window.Telegram&&window.Telegram.WebApp;' +
+    'if(tg){try{tg.ready();tg.expand();}catch(e){}}' +
+    'document.addEventListener("click",function(e){' +
+    'var t=e.target&&e.target.closest?e.target.closest("button,[onclick],a,.nav-item"):null;' +
+    'if(t&&tg&&tg.HapticFeedback){try{tg.HapticFeedback.impactOccurred("light");}catch(_){}}' +
+    '},true);' +
+    'window.addEventListener("pageshow",function(ev){if(ev.persisted){document.body.style.animation="none";void document.body.offsetWidth;document.body.style.animation="";}});' +
+    'var vids=[].slice.call(document.querySelectorAll("video[data-defer-thumb]"));' +
+    'if(vids.length){var started=false;' +
+    'var go=function(){if(started)return;started=true;var i=0;' +
+    '(function next(){var batch=vids.slice(i,i+3);batch.forEach(function(v){v.preload="metadata";try{v.load();}catch(_){}});i+=3;if(i<vids.length)setTimeout(next,500);})();};' +
+    'var main=document.getElementById("player");' +
+    'if(main){main.addEventListener("playing",function(){setTimeout(go,1500);},{once:true});setTimeout(go,15000);}' +
+    'else{if(document.readyState==="complete")setTimeout(go,300);else window.addEventListener("load",function(){setTimeout(go,300);});}' +
+    '}' +
+    '}catch(err){}})();</script>';
+
+// Only real HTML pages are touched - never video, API or admin
+function isStreamHtmlPath(p) {
+    if (/^\/(stream|reel_stream)\//.test(p)) return false;
+    if (/^\/api\//.test(p)) return false;
+    if (/^\/admin/.test(p)) return false;
+    if (/^\/\d+(\/|$)/.test(p)) return false;
+    return true;
+}
+
+function streamSmoothify(html) {
+    // 1) thumbnails: don't pull metadata from Telegram until the main video is playing
+    html = html.split('preload="metadata"').join('preload="none" data-defer-thumb="1"');
+    // 2) CSS before </head>
+    const h = html.search(/<\/head>/i);
+    html = h >= 0 ? html.slice(0, h) + STREAM_SMOOTH_CSS + html.slice(h) : STREAM_SMOOTH_CSS + html;
+    // 3) JS before the last </body>
+    const b = html.toLowerCase().lastIndexOf("</body>");
+    html = b >= 0 ? html.slice(0, b) + STREAM_SMOOTH_JS + html.slice(b) : html + STREAM_SMOOTH_JS;
+    return html;
+}
+
 function streamProxyHandler(req, res, next) {
     if (!STREAM_UPSTREAM) return next();
     if (!isStreamPath(req.path)) return next();
@@ -14091,6 +14176,10 @@ function streamProxyHandler(req, res, next) {
     headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
     const remoteIp = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : "";
     headers["x-forwarded-for"] = (req.headers["x-forwarded-for"] ? req.headers["x-forwarded-for"] + ", " : "") + remoteIp;
+
+    // For HTML pages we need plain text so the smooth layer can be injected
+    const transformHtml = STREAM_SMOOTH_UI && req.method === "GET" && isStreamHtmlPath(req.path);
+    if (transformHtml) headers["accept-encoding"] = "identity";
 
     // express.json() may already have consumed a JSON body -> send it again
     let bodyBuf = null;
@@ -14121,6 +14210,32 @@ function streamProxyHandler(req, res, next) {
             // Cookies must belong to this domain
             if (out["set-cookie"]) {
                 out["set-cookie"] = out["set-cookie"].map((c) => c.replace(/;\s*Domain=[^;]*/i, ""));
+            }
+
+            const isHtml =
+                transformHtml &&
+                proxyRes.statusCode === 200 &&
+                !out["content-encoding"] &&
+                /text\/html/i.test(out["content-type"] || "");
+
+            if (isHtml) {
+                const chunks = [];
+                let total = 0;
+                proxyRes.on("data", (c) => { chunks.push(c); total += c.length; });
+                proxyRes.on("end", () => {
+                    let body = Buffer.concat(chunks);
+                    try {
+                        if (total < 5 * 1024 * 1024) body = Buffer.from(streamSmoothify(body.toString("utf8")), "utf8");
+                    } catch (e) {
+                        console.error("Smooth UI inject failed:", e.message);
+                    }
+                    delete out["transfer-encoding"];
+                    out["content-length"] = body.length;
+                    res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
+                    res.end(body);
+                });
+                proxyRes.on("error", () => res.destroy());
+                return;
             }
 
             res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
