@@ -1303,7 +1303,7 @@ app.post("/api/spin/do/:userId", async (req, res) => {
         }
 
         // Generate random roll 1-6
-        const roll = Math.floor(Math.random() * 6) + 1;
+        const roll = crypto.randomInt(1, 7); // fair 1-6 (CSPRNG)
 
         // Streak logic – matches cspin.py (keep streak, bonus every 7 days, no reset)
         let streak = user?.streak || 0;
@@ -6697,6 +6697,22 @@ app.get("/mini/:userId", (req, res) => {
       box-shadow: none; 
       text-shadow: none;
     }
+    .spin-pointer.flick { animation: pointerFlick 0.16s ease-out; transform-origin: 50% 0%; }
+    @keyframes pointerFlick {
+      0% { transform: translateX(-50%) rotate(180deg); }
+      35% { transform: translateX(-50%) rotate(202deg); }
+      100% { transform: translateX(-50%) rotate(180deg); }
+    }
+    .spin-center:not(.disabled) { animation: spinIdle 2.4s ease-in-out infinite; }
+    @keyframes spinIdle {
+      0%, 100% { box-shadow: 0 0 22px rgba(255,215,0,0.5), inset 0 0 10px rgba(255,215,0,0.3); }
+      50% { box-shadow: 0 0 42px rgba(255,215,0,0.9), inset 0 0 14px rgba(255,215,0,0.45); }
+    }
+    .spin-result-box.reveal { animation: resultPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    @keyframes resultPop {
+      0% { opacity: 0; transform: scale(0.85) translateY(8px); }
+      100% { opacity: 1; transform: none; }
+    }
     .spin-btn, .spin-double-btn {
       display: none !important;
     }
@@ -8644,39 +8660,58 @@ app.get("/mini/:userId", (req, res) => {
                 const targetSegmentIndex = data.roll - 1; 
                 const currentRotMod = currentRotation % (2 * Math.PI);
                 
-                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
-                
+                const jitterFrac = (Math.random() - 0.5) * 0.6; // land anywhere in the slice, not always dead-center
+                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5 + jitterFrac) * segmentAngle;
+
                 let rotationNeeded = offsetAngle - currentRotMod;
                 while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
-                
-                const extraSpins = 25 * 2 * Math.PI; 
-                const targetRotation = currentRotation + rotationNeeded + extraSpins;
-                
-                const duration = 15000;
+
+                const extraTurns = 4 + Math.floor(Math.random() * 2); // 4 or 5 full turns
+                const targetRotation = currentRotation + rotationNeeded + extraTurns * 2 * Math.PI;
+                const overshootRot = targetRotation + segmentAngle * 0.16; // runs a little past, then settles back
+
+                const duration = 5200;
+                const pullAt = 0.84; // share of the time spent coasting before the settle
                 const start = performance.now();
                 const startRot = currentRotation;
-                
+                lastSegment = -1;
+
+                const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+                const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+
+                function wheelAt(p) {
+                    if (p < pullAt) return startRot + (overshootRot - startRot) * easeOutCubic(p / pullAt);
+                    return overshootRot + (targetRotation - overshootRot) * easeInOutSine((p - pullAt) / (1 - pullAt));
+                }
+
+                function flickPointer() {
+                    const el = document.querySelector('.spin-pointer');
+                    if (!el) return;
+                    el.classList.remove('flick');
+                    void el.offsetWidth; // restart the CSS animation
+                    el.classList.add('flick');
+                }
+
                 function animateSpin(time) {
                     const progress = Math.min((time - start) / duration, 1);
-                    
-                    const eased = 1 - Math.pow(1 - progress, 5); 
-                    const rot = startRot + (targetRotation - startRot) * eased;
-                    
+                    const rot = wheelAt(progress);
                     drawWheel(rot);
-                    
+
                     let topAngle = (3 * Math.PI / 2 - rot) % (2 * Math.PI);
                     if (topAngle < 0) topAngle += 2 * Math.PI;
                     const currentSegment = Math.floor(topAngle / segmentAngle);
-                    
-                    if (currentSegment !== lastSegment && progress < 0.99) {
-                        tg.HapticFeedback.impactOccurred('light');
+
+                    if (currentSegment !== lastSegment && progress < 0.995) {
+                        if (lastSegment !== -1) flickPointer(); // peg tick each time a slice passes the pointer
+                        tg.HapticFeedback.impactOccurred(progress > 0.8 ? 'medium' : 'light');
                         lastSegment = currentSegment;
                     }
-                    
+
                     if (progress < 1) {
                         requestAnimationFrame(animateSpin);
                     } else {
                         currentRotation = targetRotation;
+                        drawWheel(currentRotation);
                         tg.HapticFeedback.impactOccurred('heavy');
                         showSpinResult(data);
                     }
@@ -8737,6 +8772,12 @@ app.get("/mini/:userId", (req, res) => {
         updateUI();
         
         spinResult.style.display = 'block';
+        spinResult.classList.remove('reveal');
+        void spinResult.offsetWidth;
+        spinResult.classList.add('reveal');
+        if ((data.roll === 6 || data.bonus > 0) && window.confetti) {
+          confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
+        }
         spinRoll.innerText = '🎲 ' + data.roll;
         
         let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
@@ -10743,15 +10784,68 @@ app.get("/create-quiz-app/:userId", (req, res) => {
         .time-per-q .hint { font-size: 11px; color: var(--hint); }
 
         .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
-    </style>
+    <style id="mytho-theme-css">
+    :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #0e0f12; --surface: #17181d; --card: #1c1d23; --text: #f2f3f5; --hint: #9aa0ab;
+        --accent: #3fb8f5; --accent-dark: #2aa3e0; --accent-soft: rgba(63,184,245,0.14);
+        --border: #2a2c33; --destructive: #ff5a7a; --destructive-soft: rgba(255,90,122,0.12);
+        --success: #34d37a; --success-soft: rgba(52,211,122,0.12);
+        --warning: #f5a524; --warning-soft: rgba(245,165,36,0.12);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
+        --shadow-md: 0 6px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+        --shadow-lift: 0 16px 32px rgba(0,0,0,0.55), 0 4px 10px rgba(0,0,0,0.4);
+    }
+    :root[data-theme="dark"] .form-control:focus,
+    :root[data-theme="dark"] .search-input-box:focus-within { background: var(--card) !important; }
+    :root[data-theme="dark"] .top-bar-save { background: var(--surface); }
+    :root[data-theme="dark"] .profile-avatar-img { border-color: var(--surface); }
+    :root[data-theme="dark"] .media-preview .file-id-label { background: rgba(0,0,0,0.6); color: #e5e7eb; }
+
+    .theme-row { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+    .theme-toggle {
+        display: inline-flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px;
+        border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+        color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600;
+        cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .theme-toggle:active { transform: scale(0.96); }
+    .theme-toggle .track {
+        position: relative; width: 40px; height: 22px; border-radius: 999px;
+        background: #d4d6dc; transition: background 0.25s ease; flex-shrink: 0;
+    }
+    .theme-toggle .knob {
+        position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+        background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    :root[data-theme="dark"] .theme-toggle .track { background: var(--accent); }
+    :root[data-theme="dark"] .theme-toggle .knob { transform: translateX(18px); }
+</style>
+    
 </head>
 <body>
+<script>
+(function () {
+    try {
+        if (localStorage.getItem("mytho_quiz_theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+        }
+    } catch (e) {}
+})();
+</script>
     <div class="top-bar-save" id="save-indicator">
         <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
         Saved
     </div>
 
     <div class="container" id="main-content">
+        <div class="theme-row">
+            <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleMythoTheme()" aria-label="Switch light or dark theme">
+                <span class="track"><span class="knob"></span></span>
+                <span id="themeLabel">Dark mode</span>
+            </button>
+        </div>
         <div style="text-align: center;">
             <img src="https://i.ibb.co/hxH7P7Jk/photo-2026-09-02-12-17-37-7680911038748819472.jpg" 
                  alt="Quiz Creator Banner" 
@@ -11311,6 +11405,34 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         loadState();
     </script>
+<script>
+(function () {
+    function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
+    function syncLabel() {
+        var l = document.getElementById("themeLabel");
+        if (l) l.textContent = isDark() ? "Light mode" : "Dark mode";
+    }
+    function paintTelegram() {
+        try {
+            var c = isDark() ? "#0e0f12" : "#ffffff";
+            if (window.Telegram && Telegram.WebApp) {
+                Telegram.WebApp.setHeaderColor(c);
+                if (Telegram.WebApp.setBackgroundColor) Telegram.WebApp.setBackgroundColor(c);
+            }
+        } catch (e) {}
+    }
+    window.toggleMythoTheme = function () {
+        var next = isDark() ? "light" : "dark";
+        if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        else document.documentElement.removeAttribute("data-theme");
+        try { localStorage.setItem("mytho_quiz_theme", next); } catch (e) {}
+        syncLabel();
+        paintTelegram();
+    };
+    syncLabel();
+    paintTelegram();
+})();
+</script>
 </body>
 </html>
     `);
@@ -11592,11 +11714,64 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         }
         .btn-cancel-edit:hover { background: #ececef; }
         .btn-cancel-edit:active { transform: scale(0.98); }
-    </style>
+    <style id="mytho-theme-css">
+    :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #0e0f12; --surface: #17181d; --card: #1c1d23; --text: #f2f3f5; --hint: #9aa0ab;
+        --accent: #3fb8f5; --accent-dark: #2aa3e0; --accent-soft: rgba(63,184,245,0.14);
+        --border: #2a2c33; --destructive: #ff5a7a; --destructive-soft: rgba(255,90,122,0.12);
+        --success: #34d37a; --success-soft: rgba(52,211,122,0.12);
+        --warning: #f5a524; --warning-soft: rgba(245,165,36,0.12);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
+        --shadow-md: 0 6px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+        --shadow-lift: 0 16px 32px rgba(0,0,0,0.55), 0 4px 10px rgba(0,0,0,0.4);
+    }
+    :root[data-theme="dark"] .form-control:focus,
+    :root[data-theme="dark"] .search-input-box:focus-within { background: var(--card) !important; }
+    :root[data-theme="dark"] .top-bar-save { background: var(--surface); }
+    :root[data-theme="dark"] .profile-avatar-img { border-color: var(--surface); }
+    :root[data-theme="dark"] .media-preview .file-id-label { background: rgba(0,0,0,0.6); color: #e5e7eb; }
+
+    .theme-row { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+    .theme-toggle {
+        display: inline-flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px;
+        border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+        color: var(--text); font-family: inherit; font-size: 13px; font-weight: 600;
+        cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .theme-toggle:active { transform: scale(0.96); }
+    .theme-toggle .track {
+        position: relative; width: 40px; height: 22px; border-radius: 999px;
+        background: #d4d6dc; transition: background 0.25s ease; flex-shrink: 0;
+    }
+    .theme-toggle .knob {
+        position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+        background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    :root[data-theme="dark"] .theme-toggle .track { background: var(--accent); }
+    :root[data-theme="dark"] .theme-toggle .knob { transform: translateX(18px); }
+</style>
+    
 </head>
 <body>
+<script>
+(function () {
+    try {
+        if (localStorage.getItem("mytho_quiz_theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+        }
+    } catch (e) {}
+})();
+</script>
 
     <div class="container" id="main-content">
+        <div class="theme-row">
+            <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleMythoTheme()" aria-label="Switch light or dark theme">
+                <span class="track"><span class="knob"></span></span>
+                <span id="themeLabel">Dark mode</span>
+            </button>
+        </div>
         <!-- Quiz List View -->
         <div id="list-view">
             <div class="profile-header">
@@ -12277,6 +12452,34 @@ app.get("/manage-quiz-app/:userId", (req, res) => {
         initProfile();
         loadQuizzes();
     </script>
+<script>
+(function () {
+    function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
+    function syncLabel() {
+        var l = document.getElementById("themeLabel");
+        if (l) l.textContent = isDark() ? "Light mode" : "Dark mode";
+    }
+    function paintTelegram() {
+        try {
+            var c = isDark() ? "#0e0f12" : "#ffffff";
+            if (window.Telegram && Telegram.WebApp) {
+                Telegram.WebApp.setHeaderColor(c);
+                if (Telegram.WebApp.setBackgroundColor) Telegram.WebApp.setBackgroundColor(c);
+            }
+        } catch (e) {}
+    }
+    window.toggleMythoTheme = function () {
+        var next = isDark() ? "light" : "dark";
+        if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        else document.documentElement.removeAttribute("data-theme");
+        try { localStorage.setItem("mytho_quiz_theme", next); } catch (e) {}
+        syncLabel();
+        paintTelegram();
+    };
+    syncLabel();
+    paintTelegram();
+})();
+</script>
 </body>
 </html>
     `);
