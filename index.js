@@ -4772,99 +4772,157 @@ app.post("/api/quiz/create", async (req, res) => {
 // ==========================================
 app.post("/api/quiz/generate-ai", async (req, res) => {
     try {
-        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body;
+        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15, offset = 0, seed = "" } = req.body;
         if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
             return res.status(400).json({ success: false, error: "Please provide a valid topic." });
         }
-        const numQ = Math.min(Math.max(parseInt(count, 10) || 5, 1), 20);
+        // Single request max batch size (client loops for 100)
+        const want = Math.min(Math.max(parseInt(count, 10) || 5, 1), 12);
+        const startOffset = Math.max(0, parseInt(offset, 10) || 0);
         const diff = ["easy", "medium", "hard"].includes(String(difficulty).toLowerCase())
             ? String(difficulty).toLowerCase()
             : "medium";
         const lang = String(language || "English").slice(0, 40);
         const tPerQ = Math.min(Math.max(parseInt(time_per_question, 10) || 15, 5), 120);
+        const topicClean = topic.trim().slice(0, 120);
 
-        const prompt = `You are an expert quiz creator. Generate exactly ${numQ} multiple-choice quiz questions about: "${topic.trim()}".
+        const BATCH = 4;
+        const batches = [];
+        let left = want;
+        while (left > 0) {
+            batches.push(Math.min(BATCH, left));
+            left -= BATCH;
+        }
 
-Difficulty: ${diff}
-Language for all text: ${lang}
-Each question must have exactly 4 options.
-IMPORTANT: Reply with ONLY a valid JSON object. No markdown, no code fences, no extra text before or after.
-Use this exact structure:
-{
-  "title": "Short catchy quiz title",
-  "description": "One sentence description of the quiz",
-  "time_per_question": ${tPerQ},
-  "questions": [
-    {
-      "question": "Question text here?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "answer": 0,
-      "explanation": "Brief explanation why the correct answer is right",
-      "time_limit": ${tPerQ}
-    }
-  ]
-}
-Rules:
-- "answer" is the 0-based index of the correct option (0, 1, 2 or 3).
-- Make questions clear, factual and non-ambiguous.
-- Options should be plausible; only one is correct.
-- Do not include any text outside the JSON object.`;
+        function buildPrompt(n, batchNo) {
+            const qStart = startOffset + batchNo * BATCH + 1;
+            return `Quiz topic: "${topicClean}"
+Difficulty:${diff} Language:${lang}
+Make exactly ${n} unique MCQ questions (numbers ${qStart}-${qStart + n - 1}). Vary subtopics.
+Each: 4 short options, question <= 100 chars, explanation <= 30 chars.
+ONLY JSON no markdown:
+{"title":"Short title","description":"One line","questions":[{"question":"?","options":["A","B","C","D"],"answer":0,"explanation":"Why"}]}
+answer=0-based index. No text outside JSON.`;
+        }
 
-        const raw = await callAI(prompt);
-        let parsed;
-        try {
-            let cleaned = String(raw).trim();
-            // Strip ```json ... ``` fences if the model wrapped the payload
+        function normalizeRaw(raw) {
+            let cleaned = String(raw || "").trim();
             const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
             if (fence) cleaned = fence[1].trim();
-            // Keep only the outermost JSON object
-            const startBrace = cleaned.indexOf("{");
-            const endBrace = cleaned.lastIndexOf("}");
-            if (startBrace !== -1 && endBrace > startBrace) {
-                cleaned = cleaned.slice(startBrace, endBrace + 1);
-            }
-            // prexzyapis often returns literal \" instead of real quotes
-            if (cleaned.includes('\\"')) {
-                cleaned = cleaned.replace(/\\"/g, '"');
-            }
-            if (cleaned.includes('\\n')) {
-                cleaned = cleaned.replace(/\\n/g, '\n');
-            }
-            parsed = JSON.parse(cleaned);
-        } catch (e) {
-            console.error("AI JSON parse failed:", String(raw).slice(0, 400));
-            return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
+            if (cleaned.includes('\\"')) cleaned = cleaned.replace(/\\"/g, '"');
+            if (cleaned.includes('\\n')) cleaned = cleaned.replace(/\\n/g, '\n');
+            return cleaned;
         }
 
-        if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
-            return res.status(502).json({ success: false, error: "AI did not return any questions." });
+        function tryParseObject(cleaned) {
+            const a = cleaned.indexOf("{");
+            const b = cleaned.lastIndexOf("}");
+            if (a === -1) return null;
+            try { return JSON.parse(b > a ? cleaned.slice(a, b + 1) : cleaned.slice(a)); } catch (_) { return null; }
         }
 
-        // Normalize & validate
-        const questions = parsed.questions.slice(0, numQ).map((q, i) => {
-            const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
-            while (options.length < 4) options.push(`Option ${options.length + 1}`);
-            let answer = Number(q.answer);
-            if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
-            return {
-                question: String(q.question || `Question ${i + 1}`).trim(),
-                options,
-                answer,
-                explanation: String(q.explanation || "Good job!").trim(),
-                time_limit: Number(q.time_limit) || tPerQ,
-                media_url: null,
-                media_file_id: null,
-                media_type: null,
-                is_rapid_fire: false
-            };
-        });
+        function recoverQuestions(cleaned) {
+            const out = [];
+            const re = /\{\s*"question"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"options"\s*:\s*(\[[\s\S]*?\])\s*,\s*"answer"\s*:\s*(\d+)/g;
+            let m;
+            while ((m = re.exec(cleaned)) !== null) {
+                try {
+                    const question = JSON.parse('"' + m[1].replace(/"/g, '\\"') + '"');
+                    const options = JSON.parse(m[2]).map(String).slice(0, 4);
+                    while (options.length < 4) options.push("Option " + (options.length + 1));
+                    let answer = parseInt(m[3], 10);
+                    if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+                    let explanation = "Good job!";
+                    const tail = cleaned.slice(m.index, m.index + 500);
+                    const em = tail.match(/"explanation"\s*:\s*"((?:\\.|[^"\\])*)"/);
+                    if (em) { try { explanation = JSON.parse('"' + em[1].replace(/"/g, '\\"') + '"'); } catch (_) {} }
+                    out.push({ question: String(question).trim(), options, answer, explanation: String(explanation).trim().slice(0, 120), time_limit: tPerQ, media_url: null, media_file_id: null, media_type: null, is_rapid_fire: false });
+                } catch (_) {}
+            }
+            return out;
+        }
+
+        function normalizeQuestions(list, limit) {
+            return (list || []).slice(0, limit).map((q, i) => {
+                const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
+                while (options.length < 4) options.push(`Option ${options.length + 1}`);
+                let answer = Number(q.answer);
+                if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+                return {
+                    question: String(q.question || `Question ${i + 1}`).trim(),
+                    options,
+                    answer,
+                    explanation: String(q.explanation || "Good job!").trim().slice(0, 120),
+                    time_limit: Number(q.time_limit) || tPerQ,
+                    media_url: null, media_file_id: null, media_type: null, is_rapid_fire: false
+                };
+            }).filter((q) => q.question.length > 2);
+        }
+
+        // Run batches with limited concurrency (API is fragile)
+        const CONCURRENCY = 2;
+        let title = `${topicClean} Quiz`.slice(0, 120);
+        let description = "";
+        const collected = [];
+        const seen = new Set();
+
+        async function runBatch(batchNo, n) {
+            const prompt = buildPrompt(n, batchNo);
+            const raw = await callAI(prompt);
+            const cleaned = normalizeRaw(raw);
+            let parsed = tryParseObject(cleaned);
+            let qs = [];
+            if (parsed && Array.isArray(parsed.questions)) {
+                if (parsed.title && batchNo === 0 && startOffset === 0) title = String(parsed.title).slice(0, 120);
+                if (parsed.description && batchNo === 0 && startOffset === 0) description = String(parsed.description).slice(0, 300);
+                qs = normalizeQuestions(parsed.questions, n);
+            }
+            if (qs.length < n) {
+                for (const q of recoverQuestions(cleaned)) {
+                    if (qs.length >= n) break;
+                    qs.push(q);
+                }
+            }
+            return qs;
+        }
+
+        // sequential pairs for stability
+        for (let i = 0; i < batches.length; i += CONCURRENCY) {
+            const slice = batches.slice(i, i + CONCURRENCY);
+            const results = await Promise.allSettled(slice.map((n, j) => runBatch(i + j, n)));
+            for (const r of results) {
+                if (r.status !== "fulfilled") {
+                    console.warn("AI batch failed:", r.reason?.message || r.reason);
+                    continue;
+                }
+                for (const q of r.value) {
+                    const key = q.question.toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    collected.push(q);
+                    if (collected.length >= want) break;
+                }
+                if (collected.length >= want) break;
+            }
+            if (collected.length >= want) break;
+        }
+
+        if (!collected.length) {
+            return res.status(502).json({
+                success: false,
+                error: "AI response was empty or cut off. Try again or use a shorter topic."
+            });
+        }
 
         res.json({
             success: true,
-            title: String(parsed.title || `${topic.trim()} Quiz`).slice(0, 120),
-            description: String(parsed.description || "").slice(0, 300),
-            time_per_question: Number(parsed.time_per_question) || tPerQ,
-            questions
+            title,
+            description,
+            time_per_question: tPerQ,
+            questions: collected.slice(0, want),
+            offset: startOffset,
+            got: Math.min(collected.length, want),
+            partial: collected.length < want
         });
     } catch (e) {
         console.error("AI Quiz Generate Error:", e.message || e);
@@ -10829,6 +10887,29 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
         .btn-remove:active { transform: scale(0.95); }
+        .q-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+        .q-header-left { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+        .q-drag {
+            width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+            color: var(--hint); background: rgba(0,0,0,0.04); border: 1px solid var(--border);
+            cursor: grab; touch-action: none; flex-shrink: 0;
+        }
+        [data-theme="dark"] .q-drag { background: rgba(255,255,255,0.06); }
+        .q-drag:active { cursor: grabbing; }
+        .q-card.dragging {
+            opacity: 0.92; transform: scale(1.02);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+            z-index: 20; position: relative;
+        }
+        .q-card.drag-over {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(42,171,238,0.25);
+        }
+        .opt-row-draggable { touch-action: none; }
+        .opt-drag-handle {
+            width: 22px; height: 22px; display: grid; place-items: center; color: var(--hint);
+            cursor: grab; flex-shrink: 0; opacity: 0.7;
+        }
 
         .btn-add { background: rgba(42,171,238,0.08); color: var(--accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .btn-add:active { transform: scale(0.98); }
@@ -11049,7 +11130,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     <div class="ai-row">
                         <div class="form-group" style="flex:1; margin:0;">
                             <label>Questions</label>
-                            <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+                            <input type="number" id="ai-count" class="form-control" value="5" min="1" max="100">
                         </div>
                         <div class="form-group" style="flex:1; margin:0;">
                             <label>Difficulty</label>
@@ -11238,7 +11319,8 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
         async function generateWithAI() {
             const topic = (document.getElementById('ai-topic').value || '').trim();
-            const count = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            let totalWant = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            totalWant = Math.min(Math.max(totalWant, 1), 100);
             const difficulty = document.getElementById('ai-diff').value || 'medium';
             const language = (document.getElementById('ai-lang').value || 'English').trim();
             const timePer = parseInt(document.getElementById('q-time').value, 10) || 15;
@@ -11251,32 +11333,86 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
             btn.disabled = true;
             status.className = 'ai-status';
-            status.textContent = 'Contacting AI…';
-            let fake = 8;
-            setAIProgress(fake, 'Preparing prompt…');
-            if (aiProgressTimer) clearInterval(aiProgressTimer);
-            aiProgressTimer = setInterval(function () {
-                if (fake < 88) {
-                    fake += Math.random() * 6 + 1;
-                    const labels = ['Preparing prompt…', 'Generating questions…', 'Writing options…', 'Validating answers…', 'Almost done…'];
-                    setAIProgress(fake, labels[Math.min(labels.length - 1, Math.floor(fake / 20))]);
+            status.textContent = 'Starting AI generation…';
+
+            // Progressive chunks so we can reach 100 without one huge reply
+            const CHUNK = totalWant <= 8 ? totalWant : 6;
+            const allQs = [];
+            const seen = new Set();
+            let title = '';
+            let description = '';
+            let tPer = timePer;
+            let failedStreak = 0;
+
+            function pushUnique(list) {
+                for (const q of list || []) {
+                    const key = String(q.question || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    allQs.push(q);
+                    if (allQs.length >= totalWant) break;
                 }
-            }, 450);
+            }
+
+            if (aiProgressTimer) { clearInterval(aiProgressTimer); aiProgressTimer = null; }
+            setAIProgress(2, 'Connecting…');
+
             try {
-                const res = await fetch('/api/quiz/generate-ai', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ topic, count, difficulty, language, time_per_question: timePer })
-                });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || 'Generation failed');
-                setAIProgress(100, 'Done!');
-                document.getElementById('q-title').value = data.title || '';
-                document.getElementById('q-desc').value = data.description || '';
-                if (data.time_per_question) document.getElementById('q-time').value = data.time_per_question;
+                let offset = 0;
+                let round = 0;
+                while (allQs.length < totalWant && round < 25) {
+                    round++;
+                    const need = Math.min(CHUNK, totalWant - allQs.length);
+                    const pctBase = (allQs.length / totalWant) * 100;
+                    setAIProgress(Math.min(96, pctBase + 3), 'Generating ' + (allQs.length + 1) + '–' + (allQs.length + need) + ' of ' + totalWant + '…');
+                    status.textContent = 'AI working… ' + allQs.length + '/' + totalWant + ' questions';
+
+                    const res = await fetch('/api/quiz/generate-ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            topic,
+                            count: need,
+                            difficulty,
+                            language,
+                            time_per_question: timePer,
+                            offset: allQs.length
+                        })
+                    });
+                    const data = await res.json();
+                    if (!data.success) {
+                        failedStreak++;
+                        if (allQs.length === 0) throw new Error(data.error || 'Generation failed');
+                        if (failedStreak >= 3) break;
+                        // retry same window once
+                        await new Promise(function (r) { setTimeout(r, 800); });
+                        continue;
+                    }
+                    failedStreak = 0;
+                    if (!title && data.title) title = data.title;
+                    if (!description && data.description) description = data.description;
+                    if (data.time_per_question) tPer = data.time_per_question;
+                    const before = allQs.length;
+                    pushUnique(data.questions);
+                    // If API returned nothing new, stop to avoid infinite loop
+                    if (allQs.length === before) {
+                        failedStreak++;
+                        if (failedStreak >= 2) break;
+                    }
+                    setAIProgress(Math.min(99, (allQs.length / totalWant) * 100), allQs.length + '/' + totalWant + ' ready');
+                    // tiny pause so API is less likely to rate-limit
+                    if (allQs.length < totalWant) await new Promise(function (r) { setTimeout(r, 350); });
+                }
+
+                if (!allQs.length) throw new Error('AI did not return any questions.');
+
+                setAIProgress(100, 'Done! ' + allQs.length + ' questions');
+                document.getElementById('q-title').value = title || (topic + ' Quiz');
+                document.getElementById('q-desc').value = description || '';
+                if (tPer) document.getElementById('q-time').value = tPer;
                 document.getElementById('questions-container').innerHTML = '';
                 questionCount = 0;
-                (data.questions || []).forEach(function (q) {
+                allQs.forEach(function (q) {
                     addQuestion();
                     const card = document.getElementById('questions-container').lastElementChild;
                     if (!card) return;
@@ -11296,12 +11432,14 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                     const tLim = card.querySelector('.q-time-limit');
                     if (tLim && q.time_limit) tLim.value = q.time_limit;
                 });
+                renumberQuestions();
                 status.className = 'ai-status ok';
-                status.textContent = 'Generated ' + (data.questions || []).length + ' questions. Review & edit if needed.';
+                const short = allQs.length < totalWant;
+                status.textContent = 'Generated ' + allQs.length + ' / ' + totalWant + ' questions' + (short ? ' (API limited — run Generate again to add more)' : '') + '. You can long-press ⋮⋮ to reorder.';
                 triggerAutoSave();
                 updateQuizStatus();
                 try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
-                setTimeout(clearAIProgress, 1200);
+                setTimeout(clearAIProgress, 1500);
             } catch (err) {
                 clearAIProgress();
                 status.className = 'ai-status err';
@@ -11311,6 +11449,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 btn.disabled = false;
             }
         }
+
 
         const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
 
@@ -11354,7 +11493,12 @@ app.get("/create-quiz-app/:userId", (req, res) => {
 
             qDiv.innerHTML = \`
                 <div class="q-header">
-                    <span>Question \${id}</span>
+                    <div class="q-header-left">
+                        <div class="q-drag" title="Long-press & drag to reorder" aria-label="Drag to reorder">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="7" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="15" cy="17" r="1.6"/></svg>
+                        </div>
+                        <span class="q-num">Question \${id}</span>
+                    </div>
                     <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
                 </div>
 
@@ -11522,6 +11666,82 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             }
         }
 
+        function renumberQuestions() {
+            const cards = document.querySelectorAll('#questions-container .q-card');
+            cards.forEach(function (card, i) {
+                const num = card.querySelector('.q-num');
+                if (num) num.textContent = 'Question ' + (i + 1);
+            });
+        }
+
+        // Long-press drag handle to reorder questions
+        (function setupQuestionReorder() {
+            const container = document.getElementById('questions-container');
+            if (!container) return;
+            let dragEl = null;
+            let startY = 0;
+            let dragging = false;
+            let longPressTimer = null;
+
+            function cardFromHandle(t) {
+                const h = t && t.closest ? t.closest('.q-drag') : null;
+                return h ? h.closest('.q-card') : null;
+            }
+            function clearTimer() {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            }
+            function onPointerDown(e) {
+                const card = cardFromHandle(e.target);
+                if (!card) return;
+                startY = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+                clearTimer();
+                longPressTimer = setTimeout(function () {
+                    dragEl = card;
+                    dragging = true;
+                    card.classList.add('dragging');
+                    try { tg.HapticFeedback && tg.HapticFeedback.impactOccurred('medium'); } catch (err) {}
+                }, 280);
+            }
+            function onPointerMove(e) {
+                if (!dragging || !dragEl) {
+                    const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+                    if (longPressTimer && Math.abs(y - startY) > 10) clearTimer();
+                    return;
+                }
+                e.preventDefault();
+                const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY);
+                const x = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+                const el = document.elementFromPoint(x, y);
+                const over = el && el.closest ? el.closest('#questions-container .q-card') : null;
+                container.querySelectorAll('.q-card.drag-over').forEach(function (c) { c.classList.remove('drag-over'); });
+                if (over && over !== dragEl) {
+                    over.classList.add('drag-over');
+                    const rect = over.getBoundingClientRect();
+                    const before = y < rect.top + rect.height / 2;
+                    if (before) container.insertBefore(dragEl, over);
+                    else container.insertBefore(dragEl, over.nextSibling);
+                }
+            }
+            function onPointerUp() {
+                clearTimer();
+                if (!dragging) return;
+                container.querySelectorAll('.q-card.drag-over, .q-card.dragging').forEach(function (c) {
+                    c.classList.remove('drag-over', 'dragging');
+                });
+                dragEl = null;
+                dragging = false;
+                renumberQuestions();
+                triggerAutoSave();
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (err) {}
+            }
+            container.addEventListener('mousedown', onPointerDown);
+            container.addEventListener('touchstart', onPointerDown, { passive: true });
+            window.addEventListener('mousemove', onPointerMove);
+            window.addEventListener('touchmove', onPointerMove, { passive: false });
+            window.addEventListener('mouseup', onPointerUp);
+            window.addEventListener('touchend', onPointerUp);
+        })();
+
         function removeQuestion(id) {
             const el = document.getElementById(\`q-card-\${id}\`);
             if (el) {
@@ -11529,6 +11749,7 @@ app.get("/create-quiz-app/:userId", (req, res) => {
                 el.style.opacity = '0';
                 setTimeout(() => {
                     el.remove();
+                    renumberQuestions();
                     triggerAutoSave();
                 }, 200);
             }
