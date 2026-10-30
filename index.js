@@ -4771,7 +4771,7 @@ app.post("/api/quiz/create", async (req, res) => {
 // ==========================================
 // AI QUIZ GENERATOR (prexzyapis.com)
 // ==========================================
-app.post("/api/quiz/generate-ai", async (req, res) => {
+async function generateAiHandler(req, res) {
     try {
         const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15, offset = 0, seed = "" } = req.body;
         if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
@@ -4932,7 +4932,86 @@ answer=0-based index. No text outside JSON.`;
             error: e.response?.data?.error?.message || e.message || "Failed to generate quiz with AI."
         });
     }
+}
+app.post("/api/quiz/generate-ai", generateAiHandler);
+
+// ---- Background AI jobs (start + poll) so no HTTP request runs long enough to hit a proxy timeout ----
+const aiJobs = new Map();
+setInterval(() => {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [id, j] of aiJobs) if (j.created < cutoff) aiJobs.delete(id);
+}, 5 * 60 * 1000).unref();
+
+function runGenerateOnce(body) {
+    return new Promise((resolve) => {
+        const fakeRes = {
+            _s: 200,
+            status(c) { this._s = c; return this; },
+            json(o) { resolve({ status: this._s, body: o }); }
+        };
+        generateAiHandler({ body }, fakeRes).catch((e) => resolve({ status: 500, body: { success: false, error: e.message } }));
+    });
+}
+
+async function runAiJob(job, p) {
+    const seen = new Set();
+    let fails = 0, rounds = 0, gotMeta = false;
+    try {
+        while (job.questions.length < job.total && rounds < 80 && fails < 5) {
+            rounds++;
+            const need = Math.min(4, job.total - job.questions.length);
+            const r = await runGenerateOnce({ ...p, count: need, offset: job.questions.length });
+            if (r.body && r.body.success) {
+                if (!gotMeta) { job.title = r.body.title || job.title; job.description = r.body.description || ""; gotMeta = true; }
+                let added = 0;
+                for (const q of r.body.questions || []) {
+                    const key = String(q.question).toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    job.questions.push(q);
+                    added++;
+                    if (job.questions.length >= job.total) break;
+                }
+                fails = added ? 0 : fails + 1;
+            } else {
+                fails++;
+                job.lastError = (r.body && r.body.error) || "AI service error";
+                await new Promise((r2) => setTimeout(r2, 1500));
+            }
+        }
+    } catch (e) {
+        job.lastError = e.message;
+    }
+    job.done = true;
+    if (!job.questions.length) job.error = job.lastError || "AI returned no questions. Try again.";
+}
+
+app.post("/api/quiz/generate-ai/start", (req, res) => {
+    const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body || {};
+    if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
+        return res.status(400).json({ success: false, error: "Please provide a valid topic." });
+    }
+    const total = Math.min(Math.max(parseInt(count, 10) || 5, 1), 100);
+    const jobId = crypto.randomBytes(8).toString("hex");
+    const job = { created: Date.now(), done: false, total, questions: [], title: `${topic.trim().slice(0, 100)} Quiz`, description: "", error: null, lastError: null };
+    aiJobs.set(jobId, job);
+    runAiJob(job, { topic, difficulty, language, time_per_question });
+    res.json({ success: true, jobId, total });
 });
+
+app.get("/api/quiz/generate-ai/status/:jobId", (req, res) => {
+    const job = aiJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: "AI job expired or server restarted. Please try again." });
+    res.json({
+        success: true, done: job.done, got: job.questions.length, total: job.total,
+        title: job.title, description: job.description, error: job.error, lastError: job.lastError,
+        questions: job.done ? job.questions : []
+    });
+});
+
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e && e.message ? e.message : e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e && e.message ? e.message : e));
+
 
 // ==========================================
 // USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
@@ -11362,58 +11441,37 @@ app.get("/create-quiz-app/:userId", (req, res) => {
             setAIProgress(2, 'Connecting…');
 
             try {
-                let offset = 0;
-                let round = 0;
-                while (allQs.length < totalWant && round < 80) {
-                    round++;
-                    const need = Math.min(CHUNK, totalWant - allQs.length);
-                    const pctBase = (allQs.length / totalWant) * 100;
-                    setAIProgress(Math.min(96, pctBase + 3), 'Generating ' + (allQs.length + 1) + '–' + (allQs.length + need) + ' of ' + totalWant + '…');
-                    status.textContent = 'AI working… ' + allQs.length + '/' + totalWant + ' questions';
-
-                    let data;
+                const startResp = await fetch('/api/quiz/generate-ai/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic: topic, count: totalWant, difficulty: difficulty, language: language, time_per_question: timePer })
+                });
+                const startData = await safeJson(startResp);
+                if (!startData.success) throw new Error(startData.error || 'Could not start AI generation');
+                const jobId = startData.jobId;
+                let pollFails = 0;
+                while (true) {
+                    await new Promise(function (r) { setTimeout(r, 2000); });
+                    let st;
                     try {
-                    const res = await fetch('/api/quiz/generate-ai', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            topic,
-                            count: need,
-                            difficulty,
-                            language,
-                            time_per_question: timePer,
-                            offset: allQs.length
-                        })
-                    });
-                    data = await safeJson(res);
-                    } catch (netErr) {
-                        data = { success: false, error: netErr.message };
-                    }
-                    if (!data.success) {
-                        failedStreak++;
-                        if (failedStreak >= 4) {
-                            if (allQs.length === 0) throw new Error(data.error || 'Generation failed');
-                            break;
-                        }
-                        status.textContent = 'Retrying… (' + (data.error || 'server busy') + ')';
-                        // retry same window once
-                        await new Promise(function (r) { setTimeout(r, 1500); });
+                        const pr = await fetch('/api/quiz/generate-ai/status/' + jobId);
+                        st = await safeJson(pr);
+                        pollFails = 0;
+                    } catch (pe) {
+                        pollFails++;
+                        if (pollFails >= 10) throw pe;
                         continue;
                     }
-                    failedStreak = 0;
-                    if (!title && data.title) title = data.title;
-                    if (!description && data.description) description = data.description;
-                    if (data.time_per_question) tPer = data.time_per_question;
-                    const before = allQs.length;
-                    pushUnique(data.questions);
-                    // If API returned nothing new, stop to avoid infinite loop
-                    if (allQs.length === before) {
-                        failedStreak++;
-                        if (failedStreak >= 2) break;
+                    if (!st.success) throw new Error(st.error || 'AI job lost. Please try again.');
+                    setAIProgress(Math.min(99, ((st.got || 0) / totalWant) * 100), (st.got || 0) + '/' + totalWant + ' ready');
+                    status.textContent = 'AI working… ' + (st.got || 0) + '/' + totalWant + ' questions';
+                    if (st.done) {
+                        title = st.title || title;
+                        description = st.description || description;
+                        pushUnique(st.questions);
+                        if (!allQs.length) throw new Error(st.error || 'AI did not return any questions.');
+                        break;
                     }
-                    setAIProgress(Math.min(99, (allQs.length / totalWant) * 100), allQs.length + '/' + totalWant + ' ready');
-                    // tiny pause so API is less likely to rate-limit
-                    if (allQs.length < totalWant) await new Promise(function (r) { setTimeout(r, 350); });
                 }
 
                 if (!allQs.length) throw new Error('AI did not return any questions.');
