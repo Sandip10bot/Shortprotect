@@ -1,2036 +1,14762 @@
-// index.js
+// ============================================================
+// index.js – Premium Frontend (No Emojis, All SVG, Enhanced UI)
+// ============================================================
+
 import express from "express";
 import { MongoClient } from "mongodb";
+import { ObjectId } from "mongodb";
 import crypto from "crypto";
+import axios from "axios";
+import * as cheerio from "cheerio";
+import http from "http";
+import https from "https";
+import zlib from "zlib";
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// MongoDB setup (use your Koyeb secret or .env variable)
-const MONGO_URI = process.env.DATABASE_URI;  // set this in Koyeb secrets
+app.use(express.json());
+
+// ========================
+// GEMINI AI (Quiz Generation) – key rotation from env
+// ========================
+// Set env: GEMINI_API_KEYS=key1,key2,key3
+// Optional: GEMINI_MODELS=gemini-2.0-flash,gemini-1.5-flash
+const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS || "")
+  .split(",")
+  .map((k) => k.trim())
+  .filter(Boolean);
+const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-2.0-flash,gemini-1.5-flash,gemini-1.5-flash-latest,gemini-1.5-pro")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+
+async function callGemini(prompt) {
+  if (!GEMINI_API_KEYS.length) {
+    throw new Error("GEMINI_API_KEYS env var is missing or empty");
+  }
+  const maxRetries = GEMINI_API_KEYS.length * GEMINI_MODELS.length;
+  let lastError = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const key = GEMINI_API_KEYS[attempt % GEMINI_API_KEYS.length];
+    const model = GEMINI_MODELS[Math.floor(attempt / GEMINI_API_KEYS.length) % GEMINI_MODELS.length];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    try {
+      const resp = await axios.post(url, {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json"
+        }
+      }, { timeout: 45000 });
+
+      const text = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Empty response from Gemini");
+      return text;
+    } catch (err) {
+      lastError = err;
+      const status = err.response?.status;
+      const msg = err.response?.data?.error?.message || err.message;
+      console.warn(`[Gemini] key#${attempt % GEMINI_API_KEYS.length} model=${model} failed (${status}): ${msg}`);
+      if (status === 429 || status === 403 || status === 400 || status === 404) continue;
+      if (attempt >= maxRetries - 1) break;
+    }
+  }
+  throw lastError || new Error("All Gemini keys/models exhausted");
+}
+
+// ========================
+// MONGODB SETUP
+// ========================
+const MONGO_URI = process.env.DATABASE_URI;
 if (!MONGO_URI) {
-  console.error("❌ Missing MONGODB_URI in environment variables");
+  console.error("❌ Missing DATABASE_URI in environment variables");
   process.exit(1);
 }
 
-// Telegram Bot Configuration
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Set in Koyeb secrets
-const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID; // Your personal chat ID
-
 const client = new MongoClient(MONGO_URI);
-let doubleCollection;
-let urlShortenerCollection;
+let doubleCollection, urlShortenerCollection, maskCollection, searchAdsCollection;
+let scratchCollection, usersCollection, mpHistoryCollection, userStatsCollection;
+let bankCollection, couponsCollection, searchLimitCollection, paymentLimitCollection;
+let ipVerificationCollection, ratingsCollection, withdrawsCollection;
+let paymentChatCollection, webSpinSessionsCollection, premiumUsersCollection;
+let userSettingsCollection;
+let userShortenersCollection;
+let userSessionsCollection; // For online status tracking
+let quizCollection;
+let quizMetadataCollection;
 
 async function connectDB() {
-  await client.connect();
-  const db = client.db("mythobot"); // change if you use another DB name
-  doubleCollection = db.collection("double_points");
-  urlShortenerCollection = db.collection("url_shortener");
-  console.log("✅ MongoDB connected");
+  try {
+    await client.connect();
+    const db = client.db("Mytho");
+    
+    doubleCollection = db.collection("double_points");
+    urlShortenerCollection = db.collection("url_shortener");
+    maskCollection = db.collection("masked_links");
+    searchAdsCollection = db.collection("search_ads");
+    scratchCollection = db.collection("scratch_cards");
+    usersCollection = db.collection("users");
+    mpHistoryCollection = db.collection("mphistory");
+    userStatsCollection = db.collection("user_stats");
+    bankCollection = db.collection("bank");
+    couponsCollection = db.collection("coupons");
+    searchLimitCollection = db.collection("search_limits");
+    paymentLimitCollection = db.collection("payment_limits");
+    ipVerificationCollection = db.collection("ip_verification");
+    ratingsCollection = db.collection("ratings");
+    withdrawsCollection = db.collection("withdraws");
+    paymentChatCollection = db.collection("payment_chats");
+    webSpinSessionsCollection = db.collection("web_spin_sessions");
+    premiumUsersCollection = db.collection("premium_users");
+    userSettingsCollection = db.collection("user_settings");
+    userShortenersCollection = db.collection("user_shorteners");
+    userSessionsCollection = db.collection("user_sessions");
+    quizCollection = db.collection("quizdata");
+    quizMetadataCollection = db.collection("quiz_metadata");
+    
+    // Create indexes for performance
+    await paymentChatCollection.createIndex({ senderId: 1, receiverId: 1, timestamp: -1 });
+    await paymentChatCollection.createIndex({ read: 1 });
+    await userSessionsCollection.createIndex({ lastSeen: -1 });
+    
+    console.log("✅ MongoDB connected for all collections");
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error.message);
+    process.exit(1);
+  }
 }
-connectDB();
 
-// 🔹 Test Telegram Notification
-app.get("/test-notification", async (req, res) => {
-  const testMessage = `
-🔔 <b>TEST NOTIFICATION</b>
+// ========================
+// GLOBAL THEME (used by other pages)
+// ========================
+const THEME_CSS = `
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif; 
+      margin: 0; height: 100vh; display: flex; justify-content: center; align-items: center; 
+      background: #000000;
+      background-image: radial-gradient(circle at 30% 10%, rgba(213,0,249,0.10) 0%, transparent 50%),
+                         radial-gradient(circle at 80% 90%, rgba(101,31,255,0.08) 0%, transparent 50%); 
+      color: #ffffff; overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.01em;
+    }
+    body::before { 
+      content: ''; position: absolute; width: 150vw; height: 150vh; 
+      background: radial-gradient(circle, rgba(255, 0, 255, 0.03) 0%, transparent 60%); 
+      z-index: 0; animation: pulse 10s infinite alternate; 
+      pointer-events: none;
+    }
+    @keyframes pulse { 
+      0% { transform: scale(1); opacity: 0.4; } 
+      100% { transform: scale(1.08); opacity: 0.9; } 
+    }
+    .container { 
+      position: relative; z-index: 1;
+      background: rgba(28,28,30,0.72);
+      backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%); 
+      border: 0.5px solid rgba(255, 255, 255, 0.14); 
+      box-shadow: 0 24px 70px 0 rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.08); 
+      padding: 40px 32px; border-radius: 28px; text-align: center; max-width: 400px; width: 90%; 
+      animation: riseIn 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    @keyframes riseIn { from { opacity: 0; transform: translateY(24px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    h1, h2 { 
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+      margin-bottom: 8px; font-size: 22px; font-weight: 700; color: #ffffff; 
+      letter-spacing: -0.4px;
+    }
+    .error-title { color: #ff453a !important; }
+    p { color: rgba(235,235,245,0.6); font-size: 15px; margin-bottom: 26px; line-height: 1.5; font-weight: 400; }
+    .btn { 
+      position: relative; overflow: hidden;
+      background: linear-gradient(180deg, #b74bff, #9526e8); 
+      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 8px 20px rgba(149, 38, 232, 0.35); color: white; border: none; 
+      padding: 16px 28px; font-size: 17px; font-weight: 600; border-radius: 14px; 
+      cursor: pointer; transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s; width: 100%; letter-spacing: -0.2px;
+    }
+    .btn:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 10px 26px rgba(149, 38, 232, 0.5); }
+    .btn:active { transform: scale(0.96); }
+    .loader { 
+      position: relative;
+      border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #ffffff;
+      border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; 
+      margin: 0 auto 20px auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .manual-box { 
+      display: none; background: rgba(255,255,255,0.06); 
+      border: 0.5px solid rgba(255,255,255,0.12); padding: 16px; border-radius: 16px; 
+      margin-top: 20px; text-align: left; 
+    }
+    a { color: #bf5af2; text-decoration: none; font-weight: 600; transition: opacity 0.2s; }
+    a:hover { opacity: 0.7; }
+  </style>
+`;
 
-👤 <b>User ID:</b> <code>5189870730</code>
-📦 <b>Plan:</b> silver
-💵 <b>Amount:</b> ₹55
-🎯 <b>MythoPoints Discount:</b> ₹24 (30% off)
-⏰ <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+// ==========================================
+// RANK TITLE HELPER
+// ==========================================
+function getRankTitle(points) {
+    if (points < 100) return "Novice";
+    if (points < 500) return "Warrior";
+    if (points < 1500) return "Knight";
+    if (points < 3000) return "Dragon Slayer";
+    return "Mythic Lord";
+}
 
-✅ <b>Status:</b> Test Successful!
-  `;
+// ========================
+// HELPER FUNCTIONS
+// ========================
+function renderBypassError(res) {
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <title>System Locked | Anti-Bypass</title>
+          <style>
+              @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+              
+              :root {
+                  --bg: #000000;
+                  --card-bg: rgba(28, 28, 30, 0.68);
+                  --text-main: #ffffff;
+                  --text-muted: #8e8e93;
+                  --accent: #ff453a;
+                  --accent-2: #ff9f0a;
+                  --border: rgba(255, 255, 255, 0.1);
+              }
+              
+              * { 
+                  box-sizing: border-box; 
+                  margin: 0; 
+                  padding: 0; 
+              }
+              
+              body {
+                  background-color: var(--bg);
+                  background-image: 
+                      radial-gradient(circle at 50% 0%, rgba(255, 69, 58, 0.1) 0%, transparent 55%);
+                  color: var(--text-main);
+                  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  min-height: 100vh;
+                  padding: 20px;
+                  overflow-x: hidden;
+                  -webkit-font-smoothing: antialiased;
+              }
+
+              .container {
+                  position: relative;
+                  width: 100%;
+                  max-width: 400px;
+                  animation: slideUp 0.55s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+                  opacity: 0;
+                  transform: translateY(24px) scale(0.97);
+              }
+
+              @keyframes slideUp {
+                  to { transform: translateY(0) scale(1); opacity: 1; }
+              }
+
+              .card {
+                  background: var(--card-bg);
+                  backdrop-filter: blur(40px) saturate(180%);
+                  -webkit-backdrop-filter: blur(40px) saturate(180%);
+                  border: 0.5px solid var(--border);
+                  border-radius: 26px;
+                  padding: 36px 30px;
+                  text-align: center;
+                  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+              }
+
+              .icon-wrapper {
+                  width: 68px;
+                  height: 68px;
+                  background: linear-gradient(180deg, #ff6961, var(--accent));
+                  border-radius: 18px;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  font-size: 30px;
+                  margin: 0 auto 22px;
+                  box-shadow: 0 10px 24px rgba(255, 69, 58, 0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+                  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+                  cursor: pointer;
+              }
+              
+              .icon-wrapper:hover {
+                  transform: scale(1.08);
+              }
+
+              h1 {
+                  font-size: 21px;
+                  font-weight: 700;
+                  letter-spacing: -0.4px;
+                  margin-bottom: 8px;
+                  color: #ffffff;
+              }
+
+              p.subtitle {
+                  font-size: 14.5px;
+                  color: var(--text-muted);
+                  line-height: 1.5;
+                  margin-bottom: 26px;
+                  font-weight: 400;
+              }
+
+              .roast-box {
+                  background: rgba(120, 120, 128, 0.16);
+                  border: 0.5px solid var(--border);
+                  border-radius: 16px;
+                  padding: 16px;
+                  text-align: left;
+                  position: relative;
+                  overflow: hidden;
+              }
+
+              .roast-box::before {
+                  content: '';
+                  position: absolute;
+                  top: 0; left: 0;
+                  width: 3px;
+                  height: 100%;
+                  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+              }
+
+              .roast-title {
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  font-size: 14px;
+                  font-weight: 600;
+                  color: #ffffff;
+                  margin-bottom: 8px;
+              }
+
+              .roast-title span {
+                  color: var(--accent);
+              }
+
+              .roast-text {
+                  font-size: 13px;
+                  color: #aeaeb2;
+                  line-height: 1.55;
+                  font-weight: 400;
+              }
+
+              .footer-text {
+                  margin-top: 22px;
+                  font-size: 11px;
+                  color: #636366;
+                  text-transform: uppercase;
+                  letter-spacing: 1.2px;
+                  font-weight: 600;
+              }
+
+              /* Ultra-Small Mobile Adjustments */
+              @media (max-width: 380px) {
+                  .card { padding: 30px 22px; }
+                  h1 { font-size: 19px; }
+                  .roast-box { padding: 14px; }
+              }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <div class="card">
+                  <div class="icon-wrapper">🚫</div>
+                  <h1>Bypass Detected</h1>
+                  <p class="subtitle">The shortcut era is officially dead. You are secured inside Mytho's Anti-Bypass System.</p>
+                  
+                  <div class="roast-box">
+                      <div class="roast-title"><span>✦</span> Aww, cute attempt! 💅</div>
+                      <div class="roast-text">
+                          You really thought your little bypass trick would work? Bless your heart.<br><br>
+                          Thanks for stopping by (and triggering our ads). Now close this tab and go open the link the honest way, sweetheart! ✨
+                      </div>
+                  </div>
+                  
+                  <div class="footer-text">Protected by MythoserialBot</div>
+              </div>
+          </div>
+
+          <!-- Newly Added Ad Script (Push Notification Removed) -->
+          <script>(function(s){s.dataset.zone='11457391',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
+      </body>
+      </html>
+    `);
+}
+
+
+function isRefererValid(req) {
+    const referer = (req.get("referrer") || req.get("referer") || "").toLowerCase();
+    return referer.includes("shortxlinks");
+}
+
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function base62_encode(data) {
+    try {
+        const buffer = Buffer.from(data, 'utf-8');
+        const hex = buffer.toString('hex');
+        let num = BigInt('0x' + hex);
+        let encoded = '';
+        if (num === 0n) return '0';
+        while (num > 0n) {
+            const remainder = Number(num % 62n);
+            encoded = BASE62_CHARS[remainder] + encoded;
+            num = num / 62n;
+        }
+        return encoded;
+    } catch (error) {
+        return Buffer.from(data, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+}
+
+function base62_decode(encoded) {
+    try {
+        let num = 0n;
+        for (let i = 0; i < encoded.length; i++) {
+            const char = encoded[i];
+            const value = BASE62_CHARS.indexOf(char);
+            num = num * 62n + BigInt(value);
+        }
+        let hex = num.toString(16);
+        if (hex.length % 2 !== 0) hex = '0' + hex;
+        return Buffer.from(hex, 'hex').toString('utf-8');
+    } catch (error) {
+        let padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const padding = 4 - (padded.length % 4);
+        if (padding !== 4) padded += '='.repeat(padding);
+        return Buffer.from(padded, 'base64').toString('utf-8');
+    }
+}
+
+// ========================
+// THE ENTRY SHIELD (Force Chrome -> 5-Sec Wait)
+// ========================
+function renderAntiBypassPage(res, targetUrl) {
+    const b64Url = Buffer.from(targetUrl).toString('base64');
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Secure Link Verification</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+      
+      <div class="container" id="main-box">
+          <div class="loader" id="spinner"></div>
+          <h2 id="title-text">Securing Connection</h2>
+          <p id="status-text">Checking browser environment...</p>
+          
+          <div class="manual-box" id="manual-box">
+              <b style="color:white; font-size:18px; text-shadow: 0 0 10px #ff66ff;">How to open:</b><br><br>
+              1. Tap the three dots <b>(⋮)</b> at the top right corner.<br>
+              2. Select <b>"Open in Chrome"</b> or <b>"Open in Browser"</b>.
+          </div>
+      </div>
+
+      <script>
+      const encodedUrl = "${b64Url}"; 
+      const statusText = document.getElementById('status-text');
+      const titleText = document.getElementById('title-text');
+      const spinner = document.getElementById('spinner');
+      const manualBox = document.getElementById('manual-box');
+
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isTelegram = (userAgent.indexOf("Telegram") > -1);
+
+      if (isTelegram) {
+          titleText.innerHTML = "Opening in Chrome...";
+          statusText.innerHTML = "Redirecting to your main browser for security.";
+          spinner.style.display = "none";
+          manualBox.style.display = "block";
+          
+          const urlParts = window.location.href.split('//');
+          const currentUrl = urlParts.length > 1 ? urlParts[1] : window.location.href;
+          
+          const chromeIntent = "intent://" + currentUrl + "#Intent;scheme=https;package=com.android.chrome;end;";
+          window.location.replace(chromeIntent);
+          
+      } else {
+          statusText.innerHTML = 'Automatically proceeding in <span id="countdown" style="font-weight:bold;color:#ff66ff;font-size:18px;">5</span> seconds...';
+          let timeLeft = 5;
+          const countdownSpan = document.getElementById('countdown');
+
+          const timer = setInterval(() => {
+              timeLeft--;
+              if (countdownSpan) countdownSpan.textContent = timeLeft;
+              
+              if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  titleText.innerHTML = "Verification Complete!";
+                  statusText.innerHTML = "Redirecting to destination...";
+                  
+                  setTimeout(() => {
+                      window.location.replace(atob(encodedUrl));
+                  }, 500);
+              }
+          }, 1000);
+      }
+      </script>
+      </body>
+      </html>
+    `);
+}
+
+// ========================
+// THE EXIT SHIELD (Silent Telegram Launcher)
+// ========================
+function renderSecureFinalPage(res, targetUrl) {
+    const b64Url = Buffer.from(targetUrl).toString('base64');
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Opening Bot...</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+      <div class="container">
+          <h2>Verification Complete!</h2>
+          <p>Your file is ready. Click below to securely open it in Telegram.</p>
+          <button id="open-btn" class="btn">Open in Telegram</button>
+      </div>
+      <script>
+      const encodedUrl = "${b64Url}";
+      
+      function openSecureLink() {
+          const rawUrl = atob(encodedUrl);
+          let finalUrl = rawUrl;
+          
+          if (rawUrl.includes('t.me/')) {
+              try {
+                  const urlObj = new URL(rawUrl);
+                  const domain = urlObj.pathname.replace('/', '');
+                  const startParam = urlObj.searchParams.get('start');
+                  if (domain && startParam) {
+                      finalUrl = 'tg://resolve?domain=' + domain + '&start=' + startParam;
+                  } else if (domain) {
+                      finalUrl = 'tg://resolve?domain=' + domain;
+                  }
+              } catch(e) {}
+          }
+          window.location.replace(finalUrl);
+      }
+      
+      setTimeout(openSecureLink, 1000);
+      document.getElementById('open-btn').addEventListener('click', openSecureLink);
+      </script>
+      </body>
+      </html>
+    `);
+}
+
+// ==========================================
+// MINI APP IP-BASED ANTI-CHEAT VERIFICATION
+// ==========================================
+app.get("/verify-miniapp/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const parsedUserId = parseInt(userId);
   
-  await sendTelegramNotification(testMessage);
-  res.send('✅ Test notification sent! Check your Telegram.');
-});
+  if (isNaN(parsedUserId)) {
+    return res.status(400).send("Invalid User ID format.");
+  }
 
-// 🔹 Send Telegram Notification
-async function sendTelegramNotification(message) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
-    console.log("🔔 Telegram notification (simulated):", message);
-    return;
+  let userIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  if (userIp && userIp.includes(",")) {
+    userIp = userIp.split(",")[0].trim();
   }
 
   try {
-    const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    
-    const response = await fetch(telegramUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_ADMIN_CHAT_ID,
-        text: message,
-        parse_mode: 'HTML'
-      })
+    const db = client.db("Mytho");
+    const ipVerificationCollection = db.collection("ip_verification");
+
+    const duplicateIpRecord = await ipVerificationCollection.findOne({
+      ip: userIp,
+      userId: { $ne: parsedUserId }
     });
 
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('❌ Telegram notification failed:', result);
-    } else {
-      console.log('✅ Telegram notification sent');
+    if (duplicateIpRecord) {
+      return res.send(`
+        ${THEME_CSS}
+        <div class="container">
+          <div class="card" style="border-color: #ff4757; box-shadow: 0 8px 32px 0 rgba(255, 71, 87, 0.37);">
+            <h2 style="color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);">Access Denied</h2>
+            <p>Multiple account usage detected from this network connection.</p>
+            <p style="font-size: 13px; color: #ccc; margin-top: 15px;">Your Activity Has Been Logged.</p>
+            <p style="font-size: 11px; color: #888;">Network Node: ${userIp}</p>
+          </div>
+        </div>
+      `);
     }
+
+    await ipVerificationCollection.updateOne(
+      { userId: parsedUserId },
+      { $set: { ip: userIp, verified_at: new Date() } },
+      { upsert: true }
+    );
+
+    await usersCollection.updateOne(
+      { user_id: parsedUserId },
+      { $set: { is_verified: true, verification_ip: userIp } },
+      { upsert: true }
+    );
+
+    return res.send(`
+      ${THEME_CSS}
+      <div class="container">
+        <div class="card" style="border-color: #00ffcc; box-shadow: 0 8px 32px 0 rgba(0, 255, 204, 0.2);">
+          <h2 style="color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);">Verified Successfully</h2>
+          <p>Your device integrity check passed.</p>
+          <p style="color: #aaa; font-size: 14px;">You can now close this Mini App and return to the bot to continue.</p>
+        </div>
+      </div>
+    `);
+
   } catch (error) {
-    console.error('❌ Telegram notification error:', error);
+    console.error("Error during Mini App validation:", error);
+    return res.status(500).send("Internal Server Error verification check.");
   }
+});
+
+// ==========================================
+// SCRATCH CARD ROUTES (unchanged)
+// ==========================================
+
+app.get("/verify-scratch-ad/:userId/:token", async (req, res) => {
+    const { userId, token } = req.params;
+
+    if (!isRefererValid(req)) {
+        return renderBypassError(res);
+    }
+
+    const finalBotLink = `https://t.me/MythoSerialBot?start=scratch_${token}`;
+    renderSecureFinalPage(res, finalBotLink);
+});
+
+// UPDATED renderScratchAppHTML with Monetag integration
+function renderScratchAppHTML(userId, token, currentPoints, reward) {
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Premium Scratch Card</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --primary: #d500f9;
+                --gold-light: #FFDF00;
+                --gold-dark: #D4AF37;
+                --bg-dark: #000000;
+            }
+            
+            * { box-sizing: border-box; }
+            
+            body {
+                margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Poppins', sans-serif;
+                background: #000000;
+                background-image: radial-gradient(circle at 50% -20%, rgba(213,0,249,0.14) 0%, transparent 55%),
+                                   radial-gradient(circle at 15% 90%, rgba(213,0,249,0.06) 0%, transparent 50%);
+                color: #fff; display: flex; flex-direction: column; align-items: center; 
+                min-height: 100vh; overflow: hidden; user-select: none;
+                -webkit-font-smoothing: antialiased;
+            }
+
+            .bg-glow {
+                position: absolute; width: 100vw; height: 100vh;
+                background: radial-gradient(circle at 50% 40%, rgba(213, 0, 249, 0.14) 0%, transparent 60%);
+                animation: pulseGlow 4s ease-in-out infinite alternate;
+                z-index: 0; pointer-events: none;
+            }
+
+            @keyframes pulseGlow {
+                0% { opacity: 0.5; }
+                100% { opacity: 1; }
+            }
+
+            .profile-card {
+                position: relative; z-index: 10;
+                background: rgba(28,28,30,0.7);
+                backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%);
+                width: 90%; max-width: 400px; border-radius: 22px; 
+                padding: 16px 18px; margin-top: 25px;
+                border: 0.5px solid rgba(255, 255, 255, 0.12);
+                box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+                display: flex; align-items: center; gap: 14px;
+            }
+
+            .profile-img {
+                width: 52px; height: 52px; border-radius: 14px;
+                border: 2px solid rgba(213, 0, 249, 0.5); object-fit: cover;
+                background: #1a1a1a; box-shadow: 0 4px 14px rgba(213, 0, 249, 0.35);
+            }
+
+            .profile-info { flex-grow: 1; }
+            .profile-info h3 { margin: 0 0 2px 0; font-size: 16px; font-weight: 600; letter-spacing: -0.2px; }
+            .profile-info p { margin: 0; font-size: 12px; color: #98989d; }
+            
+            .stats-badge {
+                background: rgba(48, 209, 88, 0.15); border: 0.5px solid rgba(48, 209, 88, 0.3);
+                color: #30d158; padding: 5px 11px; border-radius: 20px;
+                font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;
+                margin-top: 8px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .stats-badge.points-updating {
+                background: rgba(255, 223, 0, 0.2);
+                border-color: var(--gold-light);
+                color: var(--gold-light);
+                box-shadow: 0 0 20px rgba(255, 223, 0, 0.6);
+                transform: scale(1.1);
+            }
+
+            .floating-points {
+                position: absolute; top: 50%; left: 50%;
+                transform: translate(-50%, -50%); z-index: 100;
+                font-size: 28px; font-weight: 800; color: var(--gold-light);
+                text-shadow: 0 0 15px rgba(255, 223, 0, 0.8), 0 5px 15px rgba(0,0,0,0.5);
+                pointer-events: none; opacity: 0;
+            }
+
+            @keyframes floatToWallet {
+                0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+                20% { opacity: 1; transform: translate(-50%, -80%) scale(1.2); }
+                80% { opacity: 1; transform: translate(-50%, -200px) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -250px) scale(0.8); }
+            }
+
+            .scratch-wrapper {
+                position: relative; z-index: 10; margin-top: 50px;
+                width: 280px; height: 280px; border-radius: 28px;
+                background: linear-gradient(135deg, #3a0088, #d500f9 55%, #ff3ec9);
+                padding: 4px; box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 50px rgba(213, 0, 249, 0.35);
+                animation: float 6s ease-in-out infinite;
+            }
+
+            @keyframes float {
+                0%, 100% { transform: translateY(0px); }
+                50% { transform: translateY(-15px); box-shadow: 0 35px 70px rgba(0,0,0,0.9), 0 0 60px rgba(213, 0, 249, 0.55); }
+            }
+
+            .scratch-inner {
+                position: relative; width: 100%; height: 100%;
+                border-radius: 24px; background: radial-gradient(circle at top, #1a0033, #000);
+                overflow: hidden;
+            }
+
+            .reward-layer {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                display: flex; flex-direction: column; justify-content: center; align-items: center;
+                opacity: 0; transform: scale(0.5); transition: all 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            }
+
+            .reward-layer.revealed { opacity: 1; transform: scale(1); }
+
+            .reward-layer h1 { 
+                font-size: 65px; margin: 0; 
+                background: linear-gradient(to bottom, #FFFDE4, #FFDF00, #D4AF37);
+                -webkit-background-clip: text; color: transparent;
+                text-shadow: 0 15px 25px rgba(0,0,0,0.5);
+                line-height: 1;
+            }
+            .reward-layer p { 
+                margin: 8px 0 0 0; font-size: 15px; color: #fff; 
+                letter-spacing: 4px; text-transform: uppercase; font-weight: 800;
+                background: rgba(213, 0, 249, 0.2); padding: 6px 16px; border-radius: 20px;
+                border: 1px solid rgba(213, 0, 249, 0.4);
+            }
+            
+            canvas {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+                z-index: 2; cursor: pointer; border-radius: 20px;
+            }
+
+            .btn-close {
+                position: relative; z-index: 10; margin-top: 45px;
+                background: linear-gradient(180deg, #b74bff, #9526e8);
+                border: none; padding: 15px 36px; color: white; font-weight: 600;
+                border-radius: 16px; font-size: 17px; letter-spacing: -0.2px;
+                box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 10px 24px rgba(149, 38, 232, 0.4);
+                cursor: pointer; display: none;
+                transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s;
+                opacity: 0; transform: translateY(20px);
+            }
+
+            .btn-close.show { display: block; animation: slideUpFade 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
+            @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
+            .btn-close:active { transform: scale(0.95); }
+
+            /* ---- MONETAG OVERLAY ---- */
+            .ad-overlay {
+                position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.85); z-index: 20; border-radius: 20px;
+                display: flex; flex-direction: column; justify-content: center; align-items: center;
+                backdrop-filter: blur(20px) saturate(150%);
+            }
+            .ad-btn {
+                background: linear-gradient(180deg, #32d74b, #248a3d);
+                border: none; padding: 12px 24px; color: white; font-weight: 600;
+                border-radius: 14px; font-size: 15px; cursor: pointer;
+                box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 8px 20px rgba(48, 209, 88, 0.35);
+                transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+            .ad-btn:active { transform: scale(0.95); }
+        </style>
+    </head>
+    <body>
+
+        <div class="bg-glow"></div>
+
+        <div class="profile-card">
+            <img src="" alt="DP" class="profile-img" id="user-dp">
+            <div class="profile-info">
+                <h3 id="user-name">Loading...</h3>
+                <p id="user-username-id">ID: ...</p>
+                <div class="stats-badge" id="stats-badge">
+                    <span id="user-points">${currentPoints}</span> MP
+                </div>
+            </div>
+        </div>
+
+        <div id="floating-reward" class="floating-points">+${reward}</div>
+
+        <div class="scratch-wrapper">
+            <div class="scratch-inner" id="scratch-container">
+                <!-- Monetag overlay -->
+                <div class="ad-overlay" id="ad-overlay">
+                    <h3 style="margin-bottom:15px; font-size:20px; color:white;">Card is Locked 🔒</h3>
+                    <button class="ad-btn" onclick="unlockWithAd()">▶ Watch Ad to Unlock</button>
+                    <p style="margin-top:15px; font-size:12px; color:#aaa;">Complete the ad to scratch your card</p>
+                </div>
+                <div class="reward-layer" id="reward-layer">
+                    <h1 id="reward-text">+${reward}</h1>
+                    <p>Earned</p>
+                </div>
+                <canvas id="scratchCanvas" width="280" height="280"></canvas>
+            </div>
+        </div>
+
+        <button class="btn-close" id="closeBtn" onclick="Telegram.WebApp.close()">Awesome! Return to Bot</button>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            const user = tg.initDataUnsafe?.user;
+            if (user) {
+                document.getElementById('user-name').innerText = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+                
+                if (user.username) {
+                    document.getElementById('user-username-id').innerText = '@' + user.username + ' | ID: ' + user.id;
+                } else {
+                    document.getElementById('user-username-id').innerText = 'ID: ' + user.id;
+                }
+
+                if (user.photo_url) {
+                    document.getElementById('user-dp').src = user.photo_url;
+                }
+            }
+
+            let canScratch = false;
+
+            function unlockWithAd() {
+                show_9055307().then(() => {
+                    document.getElementById('ad-overlay').style.display = 'none';
+                    canScratch = true;
+                    tg.HapticFeedback.notificationOccurred('success');
+                }).catch((error) => {
+                    alert("Ad failed or closed early. Please try again.");
+                    console.error("Monetag Error:", error);
+                });
+            }
+
+            const canvas = document.getElementById('scratchCanvas');
+            const ctx = canvas.getContext('2d');
+            let isDrawing = false;
+            let isRevealed = false;
+            let lastHapticTime = 0;
+            
+            function drawPremiumFoil() {
+                const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                grad.addColorStop(0, "#D4AF37");
+                grad.addColorStop(0.3, "#FFFDE4");
+                grad.addColorStop(0.5, "#AA8000");
+                grad.addColorStop(0.7, "#FFFDE4");
+                grad.addColorStop(1, "#8A6300");
+                
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imgData.data;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const noise = (Math.random() - 0.5) * 40; 
+                    pixels[i] += noise;     
+                    pixels[i+1] += noise;   
+                    pixels[i+2] += noise;   
+                }
+                ctx.putImageData(imgData, 0, 0);
+
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+                ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
+
+                ctx.shadowColor = "rgba(0,0,0,0.6)";
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetY = 4;
+                
+                ctx.font = '800 28px "Poppins", sans-serif';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText('SCRATCH ME', canvas.width/2, canvas.height/2 + 10);
+                
+                ctx.shadowColor = "transparent";
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
+            }
+
+            drawPremiumFoil();
+
+            function getPosition(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            }
+
+            function scratch(e) {
+                if (!isDrawing || isRevealed || !canScratch) return;
+                e.preventDefault();
+                const pos = getPosition(e);
+                
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 24, 0, Math.PI * 2); 
+                ctx.fill();
+                
+                const now = Date.now();
+                if (now - lastHapticTime > 70) {
+                    tg.HapticFeedback.impactOccurred('light');
+                    lastHapticTime = now;
+                }
+                
+                checkReveal();
+            }
+
+            canvas.addEventListener('mousedown', (e) => { isDrawing = true; scratch(e); });
+            canvas.addEventListener('mousemove', scratch);
+            window.addEventListener('mouseup', () => isDrawing = false);
+            canvas.addEventListener('touchstart', (e) => { isDrawing = true; scratch(e); }, {passive: false});
+            canvas.addEventListener('touchmove', scratch, {passive: false});
+            window.addEventListener('touchend', () => isDrawing = false);
+
+            function checkReveal() {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imageData.data;
+                let transparentCount = 0;
+                for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] === 0) transparentCount++; }
+                
+                const percent = (transparentCount / (pixels.length / 4)) * 100;
+                if (percent > 45 && !isRevealed) {
+                    isRevealed = true;
+                    canvas.style.transition = 'opacity 0.4s ease-out';
+                    canvas.style.opacity = '0';
+                    
+                    setTimeout(() => {
+                        canvas.style.display = 'none';
+                        document.getElementById('reward-layer').classList.add('revealed');
+                        triggerCelebration();
+                        claimReward();
+                    }, 400);
+                }
+            }
+
+            function triggerCelebration() {
+                tg.HapticFeedback.notificationOccurred('success');
+                const end = Date.now() + 2000;
+                (function frame() {
+                    confetti({ particleCount: 6, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#FFDF00', '#d500f9', '#00e676'] });
+                    confetti({ particleCount: 6, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#FFDF00', '#d500f9', '#00e676'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
+            }
+
+            async function claimReward() {
+                try {
+                    const response = await fetch('/api/claim-scratch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: ${userId}, token: '${token}' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const badge = document.getElementById('stats-badge');
+                        const pointsEl = document.getElementById('user-points');
+                        const floater = document.getElementById('floating-reward');
+                        const reward = data.reward;
+                        
+                        floater.style.animation = 'floatToWallet 1.8s forwards cubic-bezier(0.2, 0.8, 0.2, 1)';
+                        
+                        setTimeout(() => {
+                            badge.classList.add('points-updating');
+                            
+                            let current = parseInt(pointsEl.innerText);
+                            const target = current + reward;
+                            
+                            const interval = setInterval(() => {
+                                if (current >= target) {
+                                    clearInterval(interval);
+                                    pointsEl.innerText = target;
+                                    
+                                    tg.HapticFeedback.impactOccurred('heavy');
+                                    
+                                    setTimeout(() => badge.classList.remove('points-updating'), 800);
+                                    document.getElementById('closeBtn').classList.add('show');
+                                } else {
+                                    current++;
+                                    pointsEl.innerText = current;
+                                    tg.HapticFeedback.impactOccurred('light');
+                                }
+                            }, 60);
+                        }, 800);
+                    }
+                } catch (error) {
+                    console.error("Failed to claim:", error);
+                }
+            }
+        </script>
+    </body>
+    </html>
+    `;
 }
 
-// 🔹 Calculate discounted price with MythoPoints
-function calculateDiscountedPrice(originalPrice, mythoPointsApplied = false) {
-  if (mythoPointsApplied) {
-    const discount = originalPrice * 0.3; // 30% discount
-    return Math.max(1, Math.round(originalPrice - discount)); // Minimum ₹1
-  }
-  return originalPrice;
+app.get("/scratch-app/:userId/:token", async (req, res) => {
+    const { userId, token } = req.params;
+    const uid = parseInt(userId);
+
+    const session = await scratchCollection.findOne({ user_id: uid, token: token });
+    if (!session || !session.ad_completed) {
+        return res.send(`<h2>Access Denied. Please complete the ad link first.</h2>`);
+    }
+    if (session.scratched) {
+        return res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Already Claimed</title>
+            <script src="https://telegram.org/js/telegram-web-app.js"></script>
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+                
+                * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+                
+                body {
+                    background-color: #000000;
+                    background-image: radial-gradient(circle at 50% 0%, rgba(213, 0, 249, 0.12) 0%, transparent 60%);
+                    color: #ffffff;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+                    display: flex; justify-content: center; align-items: center;
+                    min-height: 100vh; padding: 20px; overflow-x: hidden;
+                }
+
+                .container {
+                    width: 100%; max-width: 400px;
+                    animation: slideUp 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+                }
+
+                @keyframes slideUp {
+                    from { transform: translateY(24px) scale(0.96); opacity: 0; }
+                    to { transform: translateY(0) scale(1); opacity: 1; }
+                }
+
+                .card {
+                    background: rgba(28, 28, 30, 0.75);
+                    backdrop-filter: blur(40px) saturate(180%);
+                    -webkit-backdrop-filter: blur(40px) saturate(180%);
+                    border: 0.5px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 28px;
+                    padding: 36px 30px;
+                    text-align: center;
+                    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+                }
+
+                .icon-wrapper {
+                    width: 72px; height: 72px;
+                    background: linear-gradient(135deg, #FFDF00, #D4AF37);
+                    border-radius: 20px;
+                    display: flex; justify-content: center; align-items: center;
+                    font-size: 34px; margin: 0 auto 22px;
+                    box-shadow: 0 12px 28px rgba(212, 175, 55, 0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+                }
+
+                h1 { 
+                    font-size: 22px; font-weight: 700; 
+                    margin-bottom: 8px; letter-spacing: -0.4px; 
+                }
+                
+                p.subtitle { 
+                    font-size: 14.5px; color: #8e8e93; 
+                    line-height: 1.5; margin-bottom: 26px; 
+                }
+
+                .info-box {
+                    background: rgba(120, 120, 128, 0.16);
+                    border: 0.5px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 16px; padding: 16px; text-align: left;
+                    position: relative; overflow: hidden;
+                }
+
+                .info-box::before {
+                    content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+                    background: linear-gradient(180deg, #bf5af2, #d500f9);
+                }
+
+                .info-title { 
+                    display: flex; align-items: center; gap: 8px; 
+                    font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 6px; 
+                }
+                
+                .info-text { 
+                    font-size: 13px; color: #aeaeb2; line-height: 1.55; 
+                }
+
+                .btn-close {
+                    margin-top: 26px; width: 100%;
+                    background: rgba(255, 255, 255, 0.08); 
+                    border: 0.5px solid rgba(255, 255, 255, 0.12);
+                    padding: 16px; color: white; font-weight: 600; 
+                    border-radius: 16px; font-size: 16px; letter-spacing: -0.2px;
+                    cursor: pointer; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                }
+
+                .btn-close:active { 
+                    transform: scale(0.96); 
+                    background: rgba(255, 255, 255, 0.12); 
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="card">
+                    <div class="icon-wrapper">✨</div>
+                    <h1>Already Claimed</h1>
+                    <p class="subtitle">You have already scratched this card and collected your reward.</p>
+                    
+                    <div class="info-box">
+                        <div class="info-title">💡 What's next?</div>
+                        <div class="info-text">
+                            The MythoPoints were already credited to your wallet. Come back tomorrow for a brand new daily scratch card!
+                        </div>
+                    </div>
+
+                    <button class="btn-close" onclick="Telegram.WebApp.close()">Close App</button>
+                </div>
+            </div>
+            <script>
+                const tg = window.Telegram.WebApp;
+                tg.expand();
+                tg.HapticFeedback.notificationOccurred('warning');
+            </script>
+        </body>
+        </html>
+        `);
+    }
+
+
+    let reward = session.reward;
+    if (!reward) {
+        reward = Math.floor(Math.random() * 15) + 1; 
+        await scratchCollection.updateOne({ _id: session._id }, { $set: { reward } });
+    }
+
+    const user = await usersCollection.findOne({ user_id: uid }) || {};
+    const mythopoints = user.mythopoints || 0;
+
+    res.send(renderScratchAppHTML(uid, token, mythopoints, reward));
+});
+
+app.post("/api/claim-scratch", async (req, res) => {
+    const { userId, token } = req.body;
+    const uid = parseInt(userId);
+
+    const session = await scratchCollection.findOne({ user_id: uid, token: token });
+    
+    if (!session || session.scratched || !session.ad_completed) {
+        return res.status(400).json({ success: false, error: "Invalid session or already claimed." });
+    }
+
+    const reward = session.reward;
+    const today = new Date().toISOString().split('T')[0];
+
+    await scratchCollection.updateOne({ _id: session._id }, { $set: { scratched: true } });
+    
+    await usersCollection.updateOne(
+        { user_id: uid },
+        { 
+            $inc: { mythopoints: reward },
+            $set: { last_scratch_date: today }
+        },
+        { upsert: true }
+    );
+    try {
+        await mpHistoryCollection.insertOne({
+            user_id: parseInt(userId),
+            amount: reward,
+            type: "EARNED",
+            reason: "Daily Scratch Card Reward",
+            date: new Date()
+        });
+        console.log(`✅ Logged ${reward} MythoPoints for user ${uid}`);
+    } catch (err) {
+        console.error("Failed to log transaction:", err);
+    }
+
+    res.json({ success: true, reward: reward });
+});
+
+// ==========================================
+// 1. ADD THIS: SCRATCH CARD HISTORY API
+// (Place this right after your existing "/api/claim-scratch" route)
+// ==========================================
+app.get("/api/scratch/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        // Fetch all scratch cards for the user, newest first
+        const cards = await scratchCollection.find({ user_id: uid }).sort({ _id: -1 }).toArray();
+        res.json({ success: true, cards });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// SPIN & WIN (Web Version) – NEW
+// ==========================================
+
+// ========== IST (UTC+5:30) helpers – must match cspin.py ==========
+function getIstNow() {
+    return new Date(Date.now() + (5 * 60 + 30) * 60 * 1000);
+}
+function getIstDateString(d = getIstNow()) {
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+function getIstYesterdayString() {
+    const d = getIstNow();
+    d.setUTCDate(d.getUTCDate() - 1);
+    return getIstDateString(d);
+}
+// Next spin = midnight IST of the day AFTER last_spin_date
+function getNextSpinTime(lastSpinDate) {
+    if (!lastSpinDate) return new Date();
+    const parts = lastSpinDate.split('-').map(Number);
+    // lastSpinDate is IST calendar date → next available is 00:00 IST of following day
+    // 00:00 IST = 18:30 UTC of previous calendar day
+    const nextMidnightIstAsUtc = Date.UTC(parts[0], parts[1] - 1, parts[2] + 1, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+    return new Date(nextMidnightIstAsUtc);
 }
 
-// 🔹 Generate a token and return protected link
+// Helper to format countdown
+function formatCountdown(ms) {
+    if (ms <= 0) return "Available now!";
+    const seconds = Math.floor(ms / 1000);
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+}
+
+// GET /api/spin/status/:userId
+app.get("/api/spin/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const user = await usersCollection.findOne({ user_id: uid }) || {};
+        const lastSpinDate = user.last_spin_date || null; // "YYYY-MM-DD" (IST, set by bot)
+        const streak = user.streak || 0;
+        const today = getIstDateString(); // IST – matches cspin.py
+        const canSpin = lastSpinDate !== today;
+
+        const nextSpinTime = getNextSpinTime(lastSpinDate);
+        const now = new Date();
+        const msUntilNext = Math.max(0, nextSpinTime.getTime() - now.getTime());
+
+        let session = null;
+        if (lastSpinDate === today) {
+            session = await webSpinSessionsCollection.findOne({ user_id: uid });
+        }
+
+        const roll = session ? session.roll : null;
+        const doubleUsed = session ? session.double_used : false;
+
+        res.json({
+            success: true,
+            canSpin,
+            streak,
+            lastSpinDate,
+            nextSpinTime: nextSpinTime.toISOString(),
+            countdown: formatCountdown(msUntilNext),
+            roll: roll,
+            doubleUsed: doubleUsed,
+            hasActiveSession: !!session
+        });
+    } catch (error) {
+        console.error("Spin status error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// POST /api/spin/do/:userId
+app.post("/api/spin/do/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const user = await usersCollection.findOne({ user_id: uid });
+        // Use IST calendar date so web + bot (cspin.py) stay in sync
+        const today = getIstDateString();
+        const lastSpinDate = user?.last_spin_date || null;
+
+        if (lastSpinDate === today) {
+            return res.status(400).json({ success: false, error: "Already spun today." });
+        }
+
+        // Generate random roll 1-6
+        const roll = Math.floor(Math.random() * 6) + 1;
+
+        // Streak logic – matches cspin.py (keep streak, bonus every 7 days, no reset)
+        let streak = user?.streak || 0;
+        let bonus = 0;
+        if (lastSpinDate) {
+            const yesterdayStr = getIstYesterdayString();
+            if (lastSpinDate === yesterdayStr) {
+                streak += 1;
+            } else {
+                // Broken streak: save lost_streak like the bot does
+                if (streak > 1) {
+                    await usersCollection.updateOne(
+                        { user_id: uid },
+                        { $set: { lost_streak: streak } }
+                    );
+                }
+                streak = 1;
+            }
+        } else {
+            streak = 1;
+        }
+
+        if (streak > 0 && streak % 7 === 0) {
+            bonus = 100;
+            // do NOT reset streak (matches cspin.py)
+        }
+
+        const pointsToAdd = roll + bonus;
+
+        // Update user
+        await usersCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { mythopoints: pointsToAdd },
+                $set: {
+                    last_spin_date: today,
+                    streak: streak
+                }
+            },
+            { upsert: true }
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: roll,
+            type: "EARNED",
+            reason: "Spin & Win (Web)",
+            date: new Date()
+        });
+        if (bonus > 0) {
+            await mpHistoryCollection.insertOne({
+                user_id: uid,
+                amount: bonus,
+                type: "EARNED",
+                reason: "7-Day Streak Bonus (Web)",
+                date: new Date()
+            });
+        }
+
+        // Create a spin session for double
+        await webSpinSessionsCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    user_id: uid,
+                    roll: roll,
+                    double_used: false,
+                    created_at: new Date()
+                }
+            },
+            { upsert: true }
+        );
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+        res.json({
+            success: true,
+            roll: roll,
+            bonus: bonus,
+            pointsAdded: pointsToAdd,
+            newBalance: updatedUser?.mythopoints || 0,
+            streak: streak,
+            canDouble: true
+        });
+    } catch (error) {
+        console.error("Spin error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// POST /api/spin/double/:userId
+app.post("/api/spin/double/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+
+        const session = await webSpinSessionsCollection.findOne({ user_id: uid });
+        if (!session) {
+            return res.status(400).json({ success: false, error: "No spin session found. Spin first." });
+        }
+        if (session.double_used) {
+            return res.status(400).json({ success: false, error: "Double already used for this spin." });
+        }
+
+        const roll = session.roll;
+        // Add the same amount again
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $inc: { mythopoints: roll } }
+        );
+
+        // Mark double as used
+        await webSpinSessionsCollection.updateOne(
+            { _id: session._id },
+            { $set: { double_used: true } }
+        );
+
+        // Log transaction
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: roll,
+            type: "EARNED",
+            reason: "Spin Double (Web)",
+            date: new Date()
+        });
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+        res.json({
+            success: true,
+            pointsAdded: roll,
+            newBalance: updatedUser?.mythopoints || 0
+        });
+    } catch (error) {
+        console.error("Double error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// ========================
+// ENTRY POINTS (unchanged)
+// ========================
+app.get("/link/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  
+  try {
+    const adData = await searchAdsCollection.findOne({
+      $and: [
+        { $or: [ { verify_token: token }, { token: token } ] },
+        { $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ] }
+      ]
+    });
+    
+    if (!adData) {
+      return res.send(`
+        <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+        <div class="container">
+          <h2 class="error-title">Invalid or Expired Link</h2>
+          <p>System couldn't find your record in database.</p>
+          <a href="https://t.me/MythoSerialBot">Return to Bot</a>
+        </div></body></html>
+      `);
+    }
+    
+    const target = adData.short_url || adData.url; 
+    if (!target) return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Error: Target missing</h2></div></body></html>`);
+    
+    renderAntiBypassPage(res, target);
+    
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+app.get("/link/:hex", (req, res) => {
+  const { hex } = req.params;
+  try {
+    const targetUrl = Buffer.from(hex, 'hex').toString('utf-8');
+    new URL(targetUrl);
+    renderAntiBypassPage(res, targetUrl);
+  } catch (error) {
+    res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
+app.get("/verify/:prefix/:userId/:token", async (req, res) => {
+  const { prefix, userId, token } = req.params;
+
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  try {
+      const adData = await searchAdsCollection.findOne({
+        $and: [
+          { $or: [ { verify_token: token }, { token: token } ] },
+          { $or: [ { user_id: parseInt(userId) }, { user_id: userId.toString() } ] }
+        ]
+      });
+
+      if (!adData) {
+        return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
+      }
+
+      const trueBotToken = adData.bot_token || adData.token || token;
+      const finalBotLink = `https://t.me/MythoSerialBot?start=${prefix}_${userId}_${trueBotToken}`;
+      
+      renderSecureFinalPage(res, finalBotLink);
+
+  } catch (error) {
+      res.redirect('https://t.me/MythoSerialBot');
+  }
+});
+
 app.get("/generate/:userId", async (req, res) => {
   const { userId } = req.params;
   const token = crypto.randomBytes(8).toString("hex");
 
   await doubleCollection.insertOne({
-    token,
-    user_id: userId,
-    used: false,
-    created_at: new Date()
+    token, user_id: userId, used: false, created_at: new Date()
   });
 
   const protectedLink = `https://${req.hostname}/double/${userId}/${token}`;
   res.send(`
-    ✅ Token generated!<br>
-    Copy this link and shorten it with Softurl:<br><br>
-    <code>${protectedLink}</code>
+    <!DOCTYPE html><html><head>${THEME_CSS}</head><body>
+    <div class="container">
+      <h2>Token generated!</h2>
+      <p>Copy this link and shorten it with shortxlinks:</p>
+      <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; word-wrap:break-word; color:#ea80fc;">
+        <code>${protectedLink}</code>
+      </div>
+    </div></body></html>
   `);
 });
 
-// 🔹 Validate and redirect for double points
 app.get("/double/:userId/:token", async (req, res) => {
   const { userId, token } = req.params;
 
-  console.log(`--- incoming /double request for user=${userId} token=${token} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-
-  // Check referer (must come from softurl.in)
-  const referer = req.get("referer") || "";
-  if (!referer.includes("arolinks.com")) {
-    // Roast message for double points bypass
-    const roastMessages = [
-      "🚫 Oops! Trying to double points without SoftURL? Even my grandma follows links better!",
-      "🤡 Nice try, points pirate! But this isn't a shortcut to free MythoPoints!",
-      "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
-      "🔐 Awww, trying to skip the line? The points system feels offended!",
-      "🧐 I see what you did there! Too bad I see everything!"
-    ];
-    const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
-    
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Bypass Detected! 🚫</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
-          body { 
-            font-family: 'Comic Neue', cursive; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
-            color: white;
-            text-align: center;
-          }
-          .roast-container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            margin: 20px 0;
-          }
-          .roast-message {
-            font-size: 24px;
-            margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-          }
-          .emoji {
-            font-size: 50px;
-            margin: 10px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="roast-container">
-          <div class="emoji">🚫🎯🤡</div>
-          <div class="roast-message">"${randomRoast}"</div>
-          <div class="emoji">🔐🚷🕵️‍♂️</div>
-          <p>Use the proper SoftURL link to double your MythoPoints!</p>
-          <a href="https://t.me/MythoSerialBot" style="
-            display: inline-block;
-            background: white;
-            color: #ff6b6b;
-            padding: 12px 24px;
-            border-radius: 25px;
-            text-decoration: none;
-            margin-top: 20px;
-            font-weight: bold;
-          ">🤖 Go To MythoBot</a>
-        </div>
-      </body>
-      </html>
-    `);
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
   }
 
-  // Mark token as used
   await doubleCollection.updateOne(
     { user_id: userId, token },
     { $set: { used: true, used_at: new Date() } }
   );
 
-  // Redirect to bot deep link
-  const botUsername = "MythoSerialBot"; // change to your bot username
-  const deepLink = `https://t.me/${botUsername}?start=double_${userId}_${token}`;
-
-  res.redirect(deepLink);
+  const finalBotLink = `https://t.me/MythoSerialBot?start=double_${userId}_${token}`;
+  renderSecureFinalPage(res, finalBotLink);
 });
 
-// 🔹 Bypass protection for URL shortener with roast messages
-app.get("/Bypass/:userId/:token", async (req, res) => {
-  const { userId, token } = req.params;
-  const { target } = req.query;
-  
-  console.log(`--- incoming /Bypass request for user=${userId} ---`);
-  console.log("referer:", req.get("referer"));
-  console.log("user-agent:", req.get("user-agent"));
-  console.log("target URL:", target);
-  
-  // Check if this is a direct bypass attempt (no referer or not from softurl)
-  const referer = req.get("referer") || "";
-  const isBypassAttempt = !referer.includes("arolinks.com");
-  
-  // If no target URL provided, show info page
-  if (!target) {
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>MythoBot URL Bypass Protection</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .success { background: #d4edda; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; }
-        </style>
-      </head>
-      <body>
-        <h1>🛡️ MythoBot URL Bypass Protection</h1>
-        
-        <div class="success">
-          <h3>✅ Legitimate Access Detected</h3>
-          <p>You're accessing this endpoint properly through SoftURL!</p>
-        </div>
-        
-        <div class="info">
-          <h3>📊 Request Information:</h3>
-          <p><strong>User ID:</strong> <code>${userId}</code></p>
-          <p><strong>Token:</strong> <code>${token}</code></p>
-          <p><strong>Timestamp:</strong> ${new Date().toUTCString()}</p>
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Status:</strong> <span style="color: green;">VALID ACCESS</span> ✅</p>
-        </div>
-        
-        <p>🔗 <a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-      </body>
-      </html>
-    `);
-  }
-  
-  // Decode the target URL
-  let decodedTarget;
-  try {
-    decodedTarget = decodeURIComponent(target);
-  } catch (error) {
-    return res.status(400).send("Invalid URL encoding");
-  }
-
-  // Fun roast messages for bypass attempts
-  const roastMessages = [
-    "🚫 Oops! Trying to be a hacker? Even my grandma follows links better!",
-    "🤡 Nice try, bypass bandit! But this isn't a shortcut, it's a dead end!",
-    "🎯 Bypass detected! Your hacking skills need more practice, padawan!",
-    "🔐 Awww, trying to skip the line? The URL feels offended!",
-    "🧐 I see what you did there! Too bad I see everything!",
-    "🚷 No ticket, no entry! This isn't a free ride, buddy!",
-    "🎪 Welcome to the circus! You're the clown trying to bypass!",
-    "📵 Error 404: Bypass skills not found!",
-    "🦸 Wannabe superhero! Even Superman follows links properly!",
-    "🍌 This isn't a banana peel you can slip through!",
-    "🎮 Game Over! Bypass attempt failed! Insert coin to try again!",
-    "🧙 You shall not pass! - Gandalf (probably talking about URL bypass)",
-    "🐌 Your bypass attempt is slower than a snail on vacation!",
-    "🎰 Jackpot! You found the 'I tried to bypass' prize! It's nothing!",
-    "🔍 Sherlock Holmes couldn't bypass this, what makes you think you can?",
-    "🍪 No cookies for bypassers! The URL is on a diet!",
-    "🚀 Trying to launch directly? Missing rocket fuel (aka proper link)!",
-    "🎵 Why you gotta be so bypass? Just follow the link like everyone else!",
-    "📚 Bypass 101: You failed the exam! Better luck next semester!",
-    "🎪 Stop clowning around and use the proper link!",
-    "🕵️‍♂️ Secret agent mode activated... and failed! Mission impossible!",
-    "💀 Rest in peace, your bypass attempt! 2024-2024",
-    "🎨 You're painting outside the lines! Stay within the link!",
-    "🍕 Even pizza delivery follows better routes than your bypass attempt!",
-    "👻 Spooky! Your bypass attempt vanished into thin air!",
-    "🎪 Three rings of failure: Bypass attempt, no skills, try again!",
-    "🚦 Red light! Stop trying to bypass and follow the traffic!",
-    "🎯 Bullseye! You hit the 'wrong way' target perfectly!",
-    "🍦 This isn't an ice cream cone you can lick from the bottom!",
-    "🎮 Player 1: Bypass Attempt → Game Over! Insert proper link to continue!"
-  ];
-
-  // If it's a bypass attempt, show roast page
-  if (isBypassAttempt) {
-    const randomRoast = roastMessages[Math.floor(Math.random() * roastMessages.length)];
-    
-    // Log the blocked bypass attempt
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: true,
-      blocked: true,
-      status: "BLOCKED - Bypass attempt"
-    });
-    
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Bypass Detected! 🚫</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
-          body { 
-            font-family: 'Comic Neue', cursive; 
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
-            color: white;
-            text-align: center;
-          }
-          .roast-container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            margin: 20px 0;
-          }
-          .roast-message {
-            font-size: 24px;
-            margin: 20px 0;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-          }
-          .emoji {
-            font-size: 50px;
-            margin: 10px;
-          }
-          .user-info {
-            background: rgba(0,0,0,0.3);
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-family: monospace;
-          }
-          .button {
-            background: #ff6b6b;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 25px;
-            font-size: 16px;
-            cursor: pointer;
-            margin: 10px;
-            text-decoration: none;
-            display: inline-block;
-            transition: transform 0.3s;
-          }
-          .button:hover {
-            transform: scale(1.1);
-            background: #ff5252;
-          }
-          .fireworks {
-            font-size: 30px;
-            animation: bounce 2s infinite;
-          }
-          @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-          }
-          .attempt-counter {
-            background: rgba(255,255,255,0.2);
-            padding: 10px;
-            border-radius: 10px;
-            margin: 10px 0;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="fireworks">🎆🎇✨</div>
-        <h1>🚫 BYPASS DETECTED! 🚫</h1>
-        
-        <div class="roast-container">
-          <div class="emoji">🤡🎪👻</div>
-          <div class="roast-message">"${randomRoast}"</div>
-          <div class="emoji">🔐🚷🕵️‍♂️</div>
-        </div>
-
-        <div class="user-info">
-          <h3>📊 Bypass Attempt Details:</h3>
-          <p><strong>User ID:</strong> ${userId}</p>
-        
-          <p><strong>IP Address:</strong> ${req.ip}</p>
-          <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Status:</strong> <span style="color: #ff6b6b;">BLOCKED - Bypass Attempt</span> 🎯</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <a href="https://t.me/MythoSerialBot" class="button">🤖 Go To Proper Bot</a>
-          <a href="/" class="button">🏠 Server Home</a>
-        </div>
-      </body>
-      </html>
-    `);
-  }
-
-  // LEGITIMATE ACCESS FROM SOFTURL - REDIRECT TO TARGET URL
-  try {
-    // Validate the URL
-    new URL(decodedTarget);
-    
-    // Log the successful legitimate access
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: false,
-      blocked: false,
-      status: "SUCCESS - Redirected to target"
-    });
-    
-    console.log(`✅ Legitimate access from SoftURL - Redirecting user ${userId} to: ${decodedTarget}`);
-    
-    // REDIRECT to the target URL for legitimate SoftURL accesses
-    res.redirect(decodedTarget);
-    
-  } catch (error) {
-    // Invalid URL handling
-    await urlShortenerCollection.insertOne({
-      user_id: parseInt(userId),
-      token: token,
-      original_url: decodedTarget,
-      accessed_at: new Date(),
-      ip: req.ip,
-      user_agent: req.get("user-agent"),
-      referer: req.get("referer"),
-      is_bypass_attempt: false,
-      blocked: true,
-      status: "ERROR - Invalid URL"
-    });
-    
-    res.status(400).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Invalid URL</title>
-        <style>
-          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .error { background: #f8d7da; padding: 15px; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="error">
-          <h2>❌ Invalid URL</h2>
-          <p>The provided URL is invalid: <code>${decodedTarget}</code></p>
-          <p>Error: ${error.message}</p>
-        </div>
-        <p><a href="https://t.me/MythoSerialBot">Go to MythoBot</a></p>
-      </body>
-      </html>
-    `);
-  }
-});
-
-// 🔹 URL Shortener API endpoint
 app.get("/shorten", async (req, res) => {
   const { url, userId } = req.query;
-  
-  if (!url || !userId) {
-    return res.status(400).json({
-      success: false,
-      error: "Missing url or userId parameters"
-    });
-  }
+  if (!url || !userId) return res.status(400).json({ success: false, error: "Missing url or userId" });
   
   try {
-    // Validate URL
     new URL(url);
-    
-    // Generate token for the URL
     const token = crypto.randomBytes(8).toString("hex");
+    const encodedUrl = base62_encode(url);
+    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?t=${encodedUrl}`;
     
-    // Generate bypass URL
-    const bypassUrl = `https://${req.hostname}/Bypass/${userId}/${token}?target=${encodeURIComponent(url)}`;
-    
-    res.json({
-      success: true,
-      original_url: url,
-      bypass_url: bypassUrl,
-      token: token,
-      user_id: userId,
-      timestamp: new Date().toISOString()
+    await urlShortenerCollection.insertOne({
+      token: token, creator_id: parseInt(userId), target_url: url, encoded_target: encodedUrl, created_at: new Date(), clicks: 0, access_logs: []
     });
     
+    res.json({ success: true, original_url: url, bypass_url: bypassUrl, encoded_target: encodedUrl, token: token, user_id: userId });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      error: "Invalid URL format"
-    });
+    res.status(400).json({ success: false, error: "Invalid URL format" });
   }
 });
 
-// 🔹 Get URL access statistics
-app.get("/stats/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.get("/Bypass/:userId/:token", async (req, res) => {
+  const { userId, token } = req.params;
+  const { t } = req.query;
   
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  let dbRecord = null;
   try {
-    const stats = await urlShortenerCollection
-      .find({ user_id: parseInt(userId) })
-      .sort({ accessed_at: -1 })
-      .limit(50)
-      .toArray();
-    
-    res.json({
-      success: true,
-      user_id: userId,
-      total_accesses: stats.length,
-      accesses: stats
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch statistics"
-    });
-  }
-});
-
-// 🔹 Enhanced Payment Page with MythoPoints Discount
-app.get("/payment", (req, res) => {
-  const { amount, upi, channel, admin, mythopoints } = req.query;
+    dbRecord = await urlShortenerCollection.findOne({ token: token, creator_id: parseInt(userId) });
+  } catch (dbError) {}
   
-  // Default values if not provided
-  const baseAmount = amount || 49;
-  const upiId = upi || "sandip10x@fam";
-  const channelName = channel || "MythoBot Premium";
-  const adminUsername = admin || "MythoSerialBot";
-  const mythoPointsApplied = mythopoints === "true";
-
-  // Calculate discounted price
-  const finalAmount = calculateDiscountedPrice(parseInt(baseAmount), mythoPointsApplied);
-  const originalAmount = parseInt(baseAmount);
-  const discountAmount = originalAmount - finalAmount;
-
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>MythoBot Premium Access</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-        <link rel="icon" type="image/png" href="https://i.postimg.cc/Y0MsZM32/favicon.jpg">
-        <style>
-            .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #8b5cf6; width: 40px; height: 40px; animation: spin 1.5s linear infinite; }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-            body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -ms-user-select: none; user-select: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-            .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
-            .upi-app { transition: all 0.3s ease; }
-            .upi-app:hover { transform: scale(1.05); }
-            .discount-badge { background: linear-gradient(135deg, #10b981, #059669); }
-            .mythopoints-active { border: 3px solid #f59e0b; box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
-        </style>
-    </head>
-    <body class="flex items-center justify-center min-h-screen p-4">
-        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
-            
-            <!-- Header Section -->
-            <div class="p-8 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
-                <div class="flex justify-center mb-4">
-                    <i class="fa-solid fa-robot fa-3x text-white"></i>
-                </div>
-                <h1 class="text-2xl font-bold">MythoBot Premium Access</h1>
-                <p class="text-purple-200 mt-2">Unlock Exclusive Features & Double Points</p>
-                
-                ${mythoPointsApplied ? `
-                <div class="discount-badge inline-flex items-center px-4 py-2 rounded-full text-white font-bold mt-3">
-                    <i class="fa-solid fa-star mr-2"></i>
-                    30% MythoPoints Discount Applied!
-                </div>
-                ` : ''}
-            </div>
-
-            <!-- Payment Details Section -->
-            <div class="p-6 sm:p-8 text-center">
-                ${mythoPointsApplied ? `
-                <div class="flex justify-center items-center gap-4 mb-4">
-                    <span class="text-2xl text-slate-400 line-through">₹${originalAmount}</span>
-                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
-                    <span class="text-5xl font-extrabold text-green-600">₹${finalAmount}</span>
-                </div>
-                <p class="text-sm text-green-600 font-bold mb-2">
-                    🎉 You saved ₹${discountAmount} with MythoPoints!
-                </p>
-                ` : `
-                <p class="text-5xl font-extrabold text-purple-600 my-2">₹${finalAmount}</p>
-                `}
-                
-                <p class="text-xs text-slate-500 mb-6">Unique amount for your transaction</p>
-                
-                <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200">
-                    <div id="loader" class="loader"></div>
-                </div>
-                <p class="text-sm text-slate-600 mt-4 font-semibold">Scan QR to pay via any UPI App</p>
-
-                <!-- MythoPoints Info -->
-                ${!mythoPointsApplied ? `
-                <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div class="flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-coins text-amber-600"></i>
-                        <span class="text-sm text-amber-800 font-semibold">
-                            Have MythoPoints? Get 30% discount!
-                        </span>
-                    </div>
-                    <a href="/payment?amount=${baseAmount}&upi=${upiId}&channel=${encodeURIComponent(channelName)}&admin=${adminUsername}&mythopoints=true" 
-                       class="inline-block mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
-                       Apply 30% MythoPoints Discount
-                    </a>
-                </div>
-                ` : ''}
-
-                <!-- UPI Apps Direct Links -->
-                <div class="mt-6">
-                    <p class="text-sm font-semibold text-slate-600 mb-3">Or open directly in:</p>
-                    <div class="grid grid-cols-4 gap-3 mb-4" id="upi-apps-container">
-                        <!-- UPI apps will be dynamically added here -->
-                    </div>
-                </div>
-
-                <div class="flex items-center my-6">
-                    <hr class="w-full border-slate-200"><span class="px-2 text-xs font-medium text-slate-400">OR</span><hr class="w-full border-slate-200">
-                </div>
-
-                <p class="text-sm text-slate-600 font-semibold mb-2">Copy UPI ID</p>
-                <div class="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200">
-                    <span class="font-mono text-slate-700 text-lg break-all" id="upi-id-text">${upiId}</span>
-                    <button id="copy-button" class="bg-purple-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-purple-700 transition-all flex-shrink-0 w-28">
-                        <span class="copy-text-span"><i class="fa-regular fa-copy mr-2"></i>Copy</span>
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Instructions Section -->
-            <div class="bg-purple-50 p-6 sm:p-8">
-                <h3 class="text-lg font-bold text-slate-800 text-center">What happens next?</h3>
-                <p class="text-slate-600 text-center mt-2 text-sm">After successful payment, send screenshot to @${adminUsername} on Telegram to activate your premium features.</p>
-                
-                <div class="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                    <p class="text-xs text-yellow-700 text-center">
-                        <i class="fa-solid fa-shield-alt mr-1"></i>
-                        <strong>Secure Payment:</strong> Your transaction is protected
-                    </p>
-                </div>
-
-                <a href="https://t.me/${adminUsername}" class="mt-6 w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-transform hover:scale-105 shadow-lg">
-                    <i class="fa-brands fa-telegram fa-lg"></i>
-                    <span>Contact @${adminUsername}</span>
-                </a>
-            </div>
-        </main>
-
-        <script>
-            document.addEventListener('DOMContentLoaded', () => {
-                const loader = document.getElementById('loader');
-                const qrContainer = document.getElementById('qr-code-container');
-                const upiIdElement = document.getElementById('upi-id-text');
-                const copyButton = document.getElementById('copy-button');
-                const copySpan = copyButton.querySelector('.copy-text-span');
-                const originalCopyHTML = copySpan.innerHTML;
-                const upiAppsContainer = document.getElementById('upi-apps-container');
-
-                // Use the final amount from server calculation
-                const finalAmount = ${finalAmount};
-                
-                // Generate UPI link
-                const upiLink = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
-                const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}&qzone=1\`;
-                
-                // Load QR Code
-                const qrImage = new Image();
-                qrImage.src = qrApiUrl;
-                qrImage.alt = 'Scan to Pay';
-                qrImage.className = 'rounded-lg';
-                qrImage.onload = () => { 
-                    if (loader) loader.style.display = 'none';
-                    qrContainer.appendChild(qrImage);
-                };
-
-                qrImage.onerror = () => {
-                    if (loader) loader.style.display = 'none';
-                    qrContainer.innerHTML = '<p class="text-red-500 text-sm">QR Code failed to load</p>';
-                };
-
-                // UPI Apps Configuration
-                const upiApps = [
-                    {
-                        name: "GPay",
-                        package: "com.google.android.apps.nbu.paisa.user",
-                        icon: "fa-brands fa-google-pay",
-                        color: "bg-gradient-to-r from-blue-500 to-purple-600"
-                    },
-                    {
-                        name: "Paytm",
-                        package: "net.one97.paytm",
-                        icon: "fa-solid fa-mobile-screen-button",
-                        color: "bg-gradient-to-r from-blue-600 to-blue-800"
-                    },
-                    {
-                        name: "PhonePe",
-                        package: "com.phonepe.app",
-                        icon: "fa-solid fa-phone",
-                        color: "bg-gradient-to-r from-purple-600 to-purple-800"
-                    },
-                    {
-                        name: "BHIM",
-                        package: "in.org.npci.upiapp",
-                        icon: "fa-solid fa-indian-rupee-sign",
-                        color: "bg-gradient-to-r from-green-600 to-green-800"
-                    },
-                    {
-                        name: "Amazon Pay",
-                        package: "in.amazon.mShop.android.shopping",
-                        icon: "fa-brands fa-amazon",
-                        color: "bg-gradient-to-r from-yellow-500 to-orange-500"
-                    },
-                    {
-                        name: "WhatsApp",
-                        package: "com.whatsapp",
-                        icon: "fa-brands fa-whatsapp",
-                        color: "bg-gradient-to-r from-green-500 to-green-600"
-                    },
-                    {
-                        name: "Cred",
-                        package: "com.dreamplug.androidapp",
-                        icon: "fa-solid fa-gem",
-                        color: "bg-gradient-to-r from-purple-700 to-purple-900"
-                    },
-                    {
-                        name: "Any UPI",
-                        package: "",
-                        icon: "fa-solid fa-wallet",
-                        color: "bg-gradient-to-r from-gray-600 to-gray-800"
-                    }
-                ];
-
-                // Create UPI App buttons
-                upiApps.forEach(app => {
-                    const appButton = document.createElement('button');
-                    appButton.className = \`upi-app \${app.color} text-white rounded-lg p-3 flex flex-col items-center justify-center\`;
-                    appButton.innerHTML = \`
-                        <i class="\${app.icon} text-xl mb-1"></i>
-                        <span class="text-xs font-medium">\${app.name}</span>
-                    \`;
-                    
-                    appButton.onclick = () => {
-                        if (app.package) {
-                            // Try to open in app first, then fallback to UPI link
-                            const intentUrl = \`intent://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
-                            const upiUrl = \`upi://pay?pa=\${upiIdElement.textContent}&pn=\${encodeURIComponent("${channelName}")}&am=\${finalAmount}.00&cu=INR\`;
-                            
-                            // Try app intent first
-                            window.location.href = intentUrl;
-                            
-                            // Fallback after delay
-                            setTimeout(() => {
-                                window.location.href = upiUrl;
-                            }, 500);
-                        } else {
-                            // Direct UPI link for "Any UPI"
-                            window.location.href = upiLink;
-                        }
-                    };
-                    
-                    upiAppsContainer.appendChild(appButton);
-                });
-
-                // Copy UPI ID functionality
-                copyButton.addEventListener('click', () => {
-                    navigator.clipboard.writeText(upiIdElement.textContent).then(() => {
-                        copySpan.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Copied!';
-                        copyButton.classList.remove('bg-purple-600', 'hover:bg-purple-700');
-                        copyButton.classList.add('bg-green-600');
-                        setTimeout(() => {
-                            copySpan.innerHTML = originalCopyHTML;
-                            copyButton.classList.remove('bg-green-600');
-                            copyButton.classList.add('bg-purple-600', 'hover:bg-purple-700');
-                        }, 2000);
-                    }).catch(() => {
-                        copySpan.innerHTML = '<i class="fa-solid fa-xmark mr-2"></i>Failed!';
-                        setTimeout(() => {
-                            copySpan.innerHTML = originalCopyHTML;
-                        }, 2000);
-                    });
-                });
-            });
-        </script>
-        
-        <script>
-            // Security features
-            document.addEventListener('DOMContentLoaded', function() {
-                // Disable Right-Click Context Menu
-                document.addEventListener('contextmenu', function(e) {
-                    e.preventDefault();
-                });
-
-                // Disable Keyboard Shortcuts
-                document.addEventListener('keydown', function(e) {
-                    if (e.ctrlKey && (e.key === 'c' || e.key === 'u')) {
-                        e.preventDefault();
-                    }
-                    if (e.key === 'F12') {
-                        e.preventDefault();
-                    }
-                });
-
-                // Disable Dragging
-                document.addEventListener('dragstart', function(e) {
-                    e.preventDefault();
-                });
-            });
-        </script>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 Enhanced Premium Payment with MythoPoints Discount Button
-app.get("/premium-payment", async (req, res) => {
-  const { user_id, plan, duration, amount, upi, admin, mythopoints } = req.query;
-  
-  // Validate required parameters
-  if (!user_id || !plan) {
-    return res.status(400).send("Missing user_id or plan parameters");
-  }
-
-  // Plan configurations
-  const plans = {
-    'silver': { default_amount: 79, default_duration: 28, name: 'Silver Plan' },
-    'gold': { default_amount: 149, default_duration: 30, name: 'Gold Plan' }
-  };
-
-  const selectedPlan = plans[plan] || plans['silver'];
-  const originalAmount = amount || selectedPlan.default_amount;
-  const mythoPointsApplied = mythopoints === "true";
-  
-  // Apply 30% discount if MythoPoints are used
-  const finalAmount = calculateDiscountedPrice(parseInt(originalAmount), mythoPointsApplied);
-  const discountAmount = originalAmount - finalAmount;
-  
-  const finalDuration = duration || selectedPlan.default_duration;
-  const upiId = upi || "sandip10x@fam";
-  const adminUsername = admin || "MythoSerialBot";
-  const planName = selectedPlan.name;
-
-  // Generate payment token
-  const paymentToken = crypto.randomBytes(16).toString('hex');
-  
-  // Store payment session in database
-  const paymentCollection = client.db("mythobot").collection("payment_sessions");
-  await paymentCollection.insertOne({
-    payment_token: paymentToken,
-    user_id: parseInt(user_id),
-    plan: plan,
-    original_amount: parseInt(originalAmount),
-    final_amount: finalAmount,
-    mythopoints_applied: mythoPointsApplied,
-    discount_amount: discountAmount,
-    duration: parseInt(finalDuration),
-    status: 'pending',
-    created_at: new Date(),
-    expires_at: new Date(Date.now() + 30 * 60 * 1000) // 30 minutes expiry
-  });
-
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>MythoBot ${planName} Payment</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-        <style>
-            .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #8b5cf6; width: 40px; height: 40px; animation: spin 1.5s linear infinite; }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            body { font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-            .mytho-glow { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
-            .upi-app { transition: all 0.3s ease; }
-            .upi-app:hover { transform: scale(1.05); }
-            .status-check { background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px; margin: 10px 0; }
-            .discount-badge { background: linear-gradient(135deg, #10b981, #059669); }
-            .mythopoints-active { border: 3px solid #f59e0b; box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
-        </style>
-    </head>
-    <body class="flex items-center justify-center min-h-screen p-4">
-        <main class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden mytho-glow ${mythoPointsApplied ? 'mythopoints-active' : ''}">
-            
-            <!-- Header Section -->
-            <div class="p-6 text-center border-b bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
-                <h1 class="text-2xl font-bold">${planName}</h1>
-                <p class="text-purple-200 mt-2">Automatic Activation • ${finalDuration} Days</p>
-                
-                ${mythoPointsApplied ? `
-                <div class="discount-badge inline-flex items-center px-4 py-2 rounded-full text-white font-bold mt-3">
-                    <i class="fa-solid fa-star mr-2"></i>
-                    30% MythoPoints Discount Applied!
-                </div>
-                ` : ''}
-            </div>
-
-            <!-- Payment Details -->
-            <div class="p-6 text-center">
-                ${mythoPointsApplied ? `
-                <div class="flex justify-center items-center gap-4 mb-4">
-                    <span class="text-2xl text-slate-400 line-through">₹${originalAmount}</span>
-                    <i class="fa-solid fa-arrow-right text-slate-400"></i>
-                    <span class="text-5xl font-extrabold text-green-600">₹${finalAmount}</span>
-                </div>
-                <p class="text-sm text-green-600 font-bold mb-2">
-                    🎉 You saved ₹${discountAmount} with MythoPoints!
-                </p>
-                ` : `
-                <p class="text-5xl font-extrabold text-purple-600 my-2">₹${finalAmount}</p>
-                `}
-                
-                <p class="text-sm text-slate-600">User ID: <code>${user_id}</code></p>
-                
-                <!-- MythoPoints Discount Button -->
-                ${!mythoPointsApplied ? `
-                <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div class="flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-coins text-amber-600"></i>
-                        <span class="text-sm text-amber-800 font-semibold">
-                            Have MythoPoints? Get 30% discount!
-                        </span>
-                    </div>
-                    <a href="/premium-payment?user_id=${user_id}&plan=${plan}&amount=${originalAmount}&duration=${finalDuration}&upi=${upiId}&admin=${adminUsername}&mythopoints=true" 
-                       class="inline-block mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
-                       Apply 30% MythoPoints Discount
-                    </a>
-                </div>
-                ` : ''}
-                
-                <div id="qr-code-container" class="flex justify-center items-center h-52 w-52 mx-auto bg-slate-50 rounded-lg p-2 border-2 border-dashed border-purple-200 my-4">
-                    <div id="loader" class="loader"></div>
-                </div>
-
-                <!-- UPI Apps -->
-                <div class="grid grid-cols-4 gap-2 mb-4" id="upi-apps-container"></div>
-
-                <!-- UPI ID -->
-                <div class="flex items-center justify-between bg-slate-100 p-3 rounded-lg border border-slate-200 mt-4">
-                    <span class="font-mono text-slate-700 text-sm break-all" id="upi-id-text">${upiId}</span>
-                    <button id="copy-button" class="bg-purple-600 text-white px-3 py-1 rounded text-sm font-semibold hover:bg-purple-700 transition-all">
-                        <span class="copy-text-span"><i class="fa-regular fa-copy mr-1"></i>Copy</span>
-                    </button>
-                </div>
-
-                <!-- Payment Status -->
-                <div id="status-container" class="status-check mt-4">
-                    <p class="text-sm font-semibold">Payment Status: <span id="status-text">Waiting for payment...</span></p>
-                    <div id="status-loader" class="loader mx-auto my-2" style="width: 20px; height: 20px;"></div>
-                    <p class="text-xs text-slate-600" id="status-message">After payment, your plan will be activated automatically within 2 minutes</p>
-                </div>
-            </div>
-            
-            <!-- Instructions -->
-            <div class="bg-purple-50 p-6">
-                <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
-                    <p class="text-xs text-green-700 text-center">
-                        <i class="fa-solid fa-bolt mr-1"></i>
-                        <strong>Automatic Activation:</strong> No need to send screenshot
-                    </p>
-                </div>
-                <a href="https://t.me/${adminUsername}" class="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-2 px-4 rounded-lg text-sm">
-                    <i class="fa-brands fa-telegram"></i>
-                    <span>Contact @${adminUsername}</span>
-                </a>
-            </div>
-        </main>
-
-        <script>
-            const paymentToken = "${paymentToken}";
-            const userId = "${user_id}";
-            let statusCheckInterval;
-
-            // Generate QR Code
-            const upiLink = \`upi://pay?pa=${upiId}&pn=\${encodeURIComponent("MythoBot " + "${planName}")}&am=${finalAmount}.00&cu=INR&tn=Payment for ${planName} (User: ${user_id})\`;
-            const qrApiUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=\${encodeURIComponent(upiLink)}\`;
-            
-            const qrImage = new Image();
-            qrImage.src = qrApiUrl;
-            qrImage.className = 'rounded-lg';
-            qrImage.onload = () => { 
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('qr-code-container').appendChild(qrImage);
-            };
-
-            // UPI Apps
-            const upiApps = [
-                { name: "GPay", package: "com.google.android.apps.nbu.paisa.user", icon: "fa-brands fa-google-pay", color: "bg-blue-500" },
-                { name: "Paytm", package: "net.one97.paytm", icon: "fa-solid fa-mobile", color: "bg-blue-600" },
-                { name: "PhonePe", package: "com.phonepe.app", icon: "fa-solid fa-phone", color: "bg-purple-600" },
-                { name: "Any UPI", package: "", icon: "fa-solid fa-wallet", color: "bg-gray-600" }
-            ];
-
-            upiApps.forEach(app => {
-                const appButton = document.createElement('button');
-                appButton.className = \`upi-app \${app.color} text-white rounded p-2 flex flex-col items-center justify-center\`;
-                appButton.innerHTML = \`<i class="\${app.icon} text-sm mb-1"></i><span class="text-xs">\${app.name}</span>\`;
-                appButton.onclick = () => {
-                    if (app.package) {
-                        const intentUrl = \`intent://pay?pa=${upiId}&pn=\${encodeURIComponent("MythoBot " + "${planName}")}&am=${finalAmount}.00&cu=INR#Intent;package=\${app.package};scheme=upi;end;\`;
-                        window.location.href = intentUrl;
-                        setTimeout(() => { window.location.href = upiLink; }, 500);
-                    } else {
-                        window.location.href = upiLink;
-                    }
-                };
-                document.getElementById('upi-apps-container').appendChild(appButton);
-            });
-
-            // Copy UPI ID
-            document.getElementById('copy-button').addEventListener('click', () => {
-                navigator.clipboard.writeText("${upiId}").then(() => {
-                    const span = document.querySelector('.copy-text-span');
-                    span.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied!';
-                    setTimeout(() => { span.innerHTML = '<i class="fa-regular fa-copy mr-1"></i>Copy'; }, 2000);
-                });
-            });
-
-            // Payment Status Check
-            async function checkPaymentStatus() {
-                try {
-                    const response = await fetch(\`/payment-status/\${paymentToken}\`);
-                    const data = await response.json();
-                    
-                    if (data.status === 'completed') {
-                        document.getElementById('status-text').innerHTML = '<span class="text-green-600">✅ Payment Verified!</span>';
-                        document.getElementById('status-loader').style.display = 'none';
-                        document.getElementById('status-message').innerHTML = 'Your premium plan has been activated! Return to Telegram bot.';
-                        clearInterval(statusCheckInterval);
-                        
-                        // Redirect to bot after delay
-                        setTimeout(() => {
-                            window.location.href = \`https://t.me/MythoSerialBot?start=payment_success_\${userId}\`;
-                        }, 3000);
-                    } else if (data.status === 'failed') {
-                        document.getElementById('status-text').innerHTML = '<span class="text-red-600">❌ Payment Failed</span>';
-                        document.getElementById('status-loader').style.display = 'none';
-                        document.getElementById('status-message').textContent = data.message || 'Payment verification failed. Please try again.';
-                        clearInterval(statusCheckInterval);
-                    }
-                    // If still pending, continue checking
-                } catch (error) {
-                    console.error('Status check error:', error);
-                }
-            }
-
-            // Start status checking
-            statusCheckInterval = setInterval(checkPaymentStatus, 5000); // Check every 5 seconds
-        </script>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 UPI Deep Link API
-app.get("/upi-redirect", (req, res) => {
-  const { upi, amount, name } = req.query;
-  
-  const upiId = upi || "sandip10x@fam";
-  const paymentAmount = amount || 49;
-  const receiverName = name || "MythoBot Premium";
-  
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${paymentAmount}.00&cu=INR`;
-  
-  res.redirect(upiLink);
-});
-
-// 🔹 Payment API endpoint
-app.get("/payment/api", (req, res) => {
-  const { amount, upi, channel, admin } = req.query;
-  
-  res.json({
-    success: true,
-    payment_page: `https://${req.hostname}/payment?amount=${amount || 49}&upi=${upi || "sandip10x@fam"}&channel=${channel || "MythoBot Premium"}&admin=${admin || "MythoSerialBot"}`,
-    upi_redirect: `https://${req.hostname}/upi-redirect?upi=${upi || "sandip10x@fam"}&amount=${amount || 49}&name=${channel || "MythoBot Premium"}`,
-    config: {
-      amount: amount || 49,
-      upi_id: upi || "sandip10x@fam",
-      channel_name: channel || "MythoBot Premium", 
-      admin_username: admin || "MythoSerialBot"
-    },
-    message: "MythoBot Premium Access Payment"
-  });
-});
-
-// 🔹 Enhanced Payment Status Check with Telegram Notifications
-app.get("/payment-status/:token", async (req, res) => {
-  const { token } = req.params;
-  
-  const paymentCollection = client.db("mythobot").collection("payment_sessions");
-  const paymentSession = await paymentCollection.findOne({ payment_token: token });
-  
-  if (!paymentSession) {
-    return res.json({ status: 'failed', message: 'Payment session not found' });
+  if (dbRecord) {
+    await urlShortenerCollection.updateOne({ token: token }, { $inc: { clicks: 1 } });
+    return renderSecureFinalPage(res, dbRecord.target_url);
   }
   
-  if (paymentSession.status === 'completed') {
-    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
-  }
-  
-  if (paymentSession.status === 'failed') {
-    return res.json({ status: 'failed', message: 'Payment verification failed' });
-  }
-  
-  // Check if payment is completed
-  const isPaymentVerified = await verifyUPIPayment(paymentSession);
-  
-  if (isPaymentVerified) {
-    // Update payment status
-    await paymentCollection.updateOne(
-      { payment_token: token },
-      { 
-        $set: { 
-          status: 'completed', 
-          verified_at: new Date(),
-          notified: true
-        } 
+  if (t) {
+    try {
+      let decodedTarget = null;
+      try {
+        decodedTarget = base62_decode(t);
+        new URL(decodedTarget);
+      } catch (e1) {
+        decodedTarget = decodeURIComponent(t);
+        new URL(decodedTarget);
       }
-    );
-    
-    // Activate premium for user
-    await activatePremiumSubscription(paymentSession.user_id, paymentSession.duration);
-    
-    // Send Telegram notification for successful payment
-    const notificationMessage = `
-💳 <b>NEW PAYMENT RECEIVED! 💰</b>
-
-👤 <b>User ID:</b> <code>${paymentSession.user_id}</code>
-📦 <b>Plan:</b> ${paymentSession.plan}
-💵 <b>Amount:</b> ₹${paymentSession.final_amount}
-${paymentSession.mythopoints_applied ? `🎯 <b>MythoPoints Discount:</b> ₹${paymentSession.discount_amount} (30% off)\n💸 <b>Original Amount:</b> ₹${paymentSession.original_amount}` : ''}
-⏰ <b>Duration:</b> ${paymentSession.duration} days
-🕒 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-🔗 <b>Payment Token:</b> <code>${token}</code>
-
-✅ <b>Status:</b> Payment Verified & Premium Activated
-    `;
-    
-    await sendTelegramNotification(notificationMessage);
-    
-    return res.json({ status: 'completed', user_id: paymentSession.user_id, plan: paymentSession.plan });
+      
+      await urlShortenerCollection.insertOne({
+        token: token, creator_id: parseInt(userId), target_url: decodedTarget, encoded_target: t, created_at: new Date(), clicks: 1, access_logs: []
+      });
+      
+      return renderSecureFinalPage(res, decodedTarget);
+      
+    } catch (error) {
+      return res.redirect('https://t.me/MythoSerialBot');
+    }
   }
-  
-  res.json({ status: 'pending' });
+  res.redirect('https://t.me/MythoSerialBot');
 });
 
-// 🔹 UPI Payment Verification (Placeholder - Implement based on your payment gateway)
-async function verifyUPIPayment(paymentSession) {
-  // Implement actual UPI payment verification here
-  // This could involve:
-  // 1. Checking with your payment gateway API
-  // 2. Webhook verification
-  // 3. Manual verification through admin panel
-  // 4. Bank statement parsing
-  
-  // For now, return false - you'll need to implement this based on your payment processor
-  return false;
-}
-
-// 🔹 Activate Premium Subscription
-async function activatePremiumSubscription(userId, duration) {
-  const usersCollection = client.db("mythobot").collection("users");
-  const subscriptionDate = new Date();
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + duration);
-  
-  await usersCollection.updateOne(
-    { user_id: userId },
-    { 
-      $set: { 
-        is_premium: true,
-        premium_since: subscriptionDate,
-        premium_until: expiryDate,
-        plan_duration: duration
-      } 
-    },
-    { upsert: true }
-  );
-  
-  console.log(`✅ Premium activated for user ${userId} for ${duration} days`);
-}
-
-// 🔹 YOUTUBE DOWNLOADER FEATURE - ADDED HERE
-// YouTube Downloader API endpoint
-app.get("/youtube-downloader", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>YouTube Downloader • MythoBot</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-        <link rel="icon" type="image/png" href="https://i.postimg.cc/Y0MsZM32/favicon.jpg">
-        <style>
-            body {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                font-family: 'Inter', sans-serif;
-            }
-            .glass {
-                background: rgba(255, 255, 255, 0.1);
-                backdrop-filter: blur(10px);
-                border-radius: 20px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-            }
-            .loader {
-                border: 4px solid #f3f3f3;
-                border-radius: 50%;
-                border-top: 4px solid #8b5cf6;
-                width: 40px;
-                height: 40px;
-                animation: spin 1s linear infinite;
-            }
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            .format-card {
-                transition: all 0.3s ease;
-            }
-            .format-card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-            }
-            .progress-bar {
-                transition: width 0.3s ease;
-            }
-        </style>
-    </head>
-    <body class="min-h-screen py-8 px-4">
-        <div class="max-w-6xl mx-auto">
-            <!-- Header -->
-            <div class="text-center mb-10">
-                <h1 class="text-4xl font-bold text-white mb-3">🎬 YouTube Downloader</h1>
-                <p class="text-purple-200 text-lg">Download videos & audio from YouTube in multiple formats</p>
-                <a href="/" class="inline-block mt-4 text-white hover:text-purple-300">
-                    <i class="fa-solid fa-arrow-left mr-2"></i> Back to Home
-                </a>
-            </div>
-
-            <!-- Main Container -->
-            <div class="glass p-6 md:p-8 mb-8">
-                <!-- URL Input Section -->
-                <div class="mb-8">
-                    <div class="flex flex-col md:flex-row gap-4">
-                        <div class="flex-grow">
-                            <input 
-                                type="url" 
-                                id="youtubeUrl" 
-                                placeholder="Paste YouTube URL here (e.g., https://youtube.com/watch?v=...)" 
-                                class="w-full p-4 rounded-lg bg-white/10 border border-white/20 text-white placeholder-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            >
-                        </div>
-                        <button 
-                            id="analyzeBtn" 
-                            class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 px-8 rounded-lg transition-all flex items-center justify-center"
-                        >
-                            <i class="fa-solid fa-magnifying-glass mr-2"></i> Analyze Video
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Loading State -->
-                <div id="loading" class="hidden text-center py-8">
-                    <div class="loader mx-auto mb-4"></div>
-                    <p class="text-white">Analyzing video information...</p>
-                </div>
-
-                <!-- Error State -->
-                <div id="error" class="hidden bg-red-500/20 border border-red-500 rounded-lg p-4 mb-6">
-                    <p class="text-red-200" id="errorMessage"></p>
-                </div>
-
-                <!-- Video Info Section -->
-                <div id="videoInfo" class="hidden">
-                    <div class="flex flex-col md:flex-row gap-8">
-                        <!-- Thumbnail -->
-                        <div class="md:w-1/3">
-                            <div class="bg-black rounded-lg overflow-hidden">
-                                <img id="videoThumbnail" src="" alt="Video Thumbnail" class="w-full h-auto">
-                            </div>
-                            <div class="mt-4 text-white">
-                                <h3 id="videoTitle" class="font-bold text-lg mb-2"></h3>
-                                <div class="flex items-center gap-4 text-sm">
-                                    <span id="videoDuration" class="bg-purple-600 px-2 py-1 rounded"></span>
-                                    <span id="videoViews" class="text-purple-300"></span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Formats Selection -->
-                        <div class="md:w-2/3">
-                            <h3 class="text-white text-xl font-bold mb-4">Available Formats</h3>
-                            
-                            <!-- Video Formats -->
-                            <div class="mb-6">
-                                <h4 class="text-white font-semibold mb-3 flex items-center">
-                                    <i class="fa-solid fa-video mr-2"></i> Video Formats
-                                </h4>
-                                <div id="videoFormats" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <!-- Video formats will be dynamically added here -->
-                                </div>
-                            </div>
-
-                            <!-- Audio Formats -->
-                            <div>
-                                <h4 class="text-white font-semibold mb-3 flex items-center">
-                                    <i class="fa-solid fa-music mr-2"></i> Audio Formats
-                                </h4>
-                                <div id="audioFormats" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <!-- Audio formats will be dynamically added here -->
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Download Progress -->
-                <div id="downloadProgress" class="hidden mt-8">
-                    <div class="bg-white/10 rounded-lg p-6">
-                        <h4 class="text-white font-bold mb-3">Download Progress</h4>
-                        <div class="w-full bg-gray-700 rounded-full h-2 mb-4">
-                            <div id="progressBar" class="bg-green-500 h-2 rounded-full progress-bar" style="width: 0%"></div>
-                        </div>
-                        <div class="flex justify-between text-white text-sm">
-                            <span id="progressText">0%</span>
-                            <span id="statusText">Preparing download...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Instructions -->
-            <div class="glass p-6 mb-8">
-                <h3 class="text-white text-xl font-bold mb-4">📖 How to Use</h3>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-white/5 p-4 rounded-lg">
-                        <div class="text-purple-300 mb-2">
-                            <i class="fa-solid fa-1 text-2xl"></i>
-                        </div>
-                        <h4 class="text-white font-semibold mb-2">Paste URL</h4>
-                        <p class="text-purple-200 text-sm">Copy and paste any YouTube video URL</p>
-                    </div>
-                    <div class="bg-white/5 p-4 rounded-lg">
-                        <div class="text-purple-300 mb-2">
-                            <i class="fa-solid fa-2 text-2xl"></i>
-                        </div>
-                        <h4 class="text-white font-semibold mb-2">Select Format</h4>
-                        <p class="text-purple-200 text-sm">Choose video or audio format & quality</p>
-                    </div>
-                    <div class="bg-white/5 p-4 rounded-lg">
-                        <div class="text-purple-300 mb-2">
-                            <i class="fa-solid fa-3 text-2xl"></i>
-                        </div>
-                        <h4 class="text-white font-semibold mb-2">Download</h4>
-                        <p class="text-purple-200 text-sm">Click download and get your file instantly</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Features -->
-            <div class="glass p-6">
-                <h3 class="text-white text-xl font-bold mb-4">✨ Features</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div class="flex items-start gap-3">
-                        <div class="text-green-400 mt-1">
-                            <i class="fa-solid fa-check-circle"></i>
-                        </div>
-                        <div>
-                            <h4 class="text-white font-semibold">Multiple Formats</h4>
-                            <p class="text-purple-200 text-sm">MP4, WebM, MP3, M4A</p>
-                        </div>
-                    </div>
-                    <div class="flex items-start gap-3">
-                        <div class="text-green-400 mt-1">
-                            <i class="fa-solid fa-check-circle"></i>
-                        </div>
-                        <div>
-                            <h4 class="text-white font-semibold">HD Quality</h4>
-                            <p class="text-purple-200 text-sm">Up to 1080p resolution</p>
-                        </div>
-                    </div>
-                    <div class="flex items-start gap-3">
-                        <div class="text-green-400 mt-1">
-                            <i class="fa-solid fa-check-circle"></i>
-                        </div>
-                        <div>
-                            <h4 class="text-white font-semibold">Fast Downloads</h4>
-                            <p class="text-purple-200 text-sm">High-speed servers</p>
-                        </div>
-                    </div>
-                    <div class="flex items-start gap-3">
-                        <div class="text-green-400 mt-1">
-                            <i class="fa-solid fa-check-circle"></i>
-                        </div>
-                        <div>
-                            <h4 class="text-white font-semibold">No Watermarks</h4>
-                            <p class="text-purple-200 text-sm">Original quality files</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Footer -->
-            <div class="text-center mt-10 text-purple-300 text-sm">
-                <p>⚠️ For educational purposes only. Download only content you have rights to.</p>
-                <p class="mt-2">💫 Powered by MythoBot • Made with ❤️ by @Sandip10x</p>
-            </div>
-        </div>
-
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                const youtubeUrlInput = document.getElementById('youtubeUrl');
-                const analyzeBtn = document.getElementById('analyzeBtn');
-                const loadingDiv = document.getElementById('loading');
-                const errorDiv = document.getElementById('error');
-                const videoInfoDiv = document.getElementById('videoInfo');
-                const downloadProgressDiv = document.getElementById('downloadProgress');
-                const progressBar = document.getElementById('progressBar');
-                const progressText = document.getElementById('progressText');
-                const statusText = document.getElementById('statusText');
-
-                // YouTube API endpoint (using a proxy for CORS)
-                const API_ENDPOINT = 'https://api.allorigins.win/get?url=';
-                
-                analyzeBtn.addEventListener('click', async function() {
-                    const url = youtubeUrlInput.value.trim();
-                    
-                    if (!url) {
-                        showError('Please enter a YouTube URL');
-                        return;
-                    }
-                    
-                    if (!isValidYouTubeUrl(url)) {
-                        showError('Please enter a valid YouTube URL');
-                        return;
-                    }
-                    
-                    // Show loading, hide others
-                    showLoading();
-                    hideError();
-                    videoInfoDiv.classList.add('hidden');
-                    
-                    try {
-                        // Extract video ID
-                        const videoId = extractVideoId(url);
-                        if (!videoId) {
-                            throw new Error('Could not extract video ID from URL');
-                        }
-                        
-                        // Get video info
-                        const videoInfo = await getVideoInfo(videoId);
-                        displayVideoInfo(videoInfo);
-                        
-                    } catch (error) {
-                        showError('Failed to analyze video: ' + error.message);
-                    } finally {
-                        hideLoading();
-                    }
-                });
-
-                function showLoading() {
-                    loadingDiv.classList.remove('hidden');
-                    analyzeBtn.disabled = true;
-                    analyzeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Analyzing...';
-                }
-
-                function hideLoading() {
-                    loadingDiv.classList.add('hidden');
-                    analyzeBtn.disabled = false;
-                    analyzeBtn.innerHTML = '<i class="fa-solid fa-magnifying-glass mr-2"></i> Analyze Video';
-                }
-
-                function showError(message) {
-                    errorDiv.classList.remove('hidden');
-                    document.getElementById('errorMessage').textContent = message;
-                }
-
-                function hideError() {
-                    errorDiv.classList.add('hidden');
-                }
-
-                function isValidYouTubeUrl(url) {
-                    const patterns = [
-                        /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/,
-                        /^https?:\/\/youtu\.be\/[A-Za-z0-9_-]+$/,
-                        /^https?:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]+/,
-                        /^https?:\/\/www\.youtube\.com\/embed\/[A-Za-z0-9_-]+/
-                    ];
-                    return patterns.some(pattern => pattern.test(url));
-                }
-
-                function extractVideoId(url) {
-                    const patterns = [
-                        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]+)/,
-                        /(?:v=)([A-Za-z0-9_-]+)/,
-                        /youtu\.be\/([A-Za-z0-9_-]+)/
-                    ];
-                    
-                    for (const pattern of patterns) {
-                        const match = url.match(pattern);
-                        if (match && match[1]) {
-                            return match[1];
-                        }
-                    }
-                    return null;
-                }
-
-                async function getVideoInfo(videoId) {
-                    // Simulate API call - in real implementation, you'd use a YouTube API or yt-dlp
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    
-                    // Mock video info for demonstration
-                    // In production, you'd fetch real data from YouTube API or use yt-dlp
-                    return {
-                        id: videoId,
-                        title: 'Mythological Serial - Episode 1',
-                        thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-                        duration: '24:35',
-                        views: '1.2M views',
-                        formats: [
-                            { type: 'video', quality: '1080p', format: 'MP4', size: '185 MB', code: '137' },
-                            { type: 'video', quality: '720p', format: 'MP4', size: '98 MB', code: '22' },
-                            { type: 'video', quality: '480p', format: 'MP4', size: '65 MB', code: '18' },
-                            { type: 'video', quality: '360p', format: 'MP4', size: '42 MB', code: '18' },
-                            { type: 'audio', quality: '128kbps', format: 'MP3', size: '12 MB', code: '140' },
-                            { type: 'audio', quality: '192kbps', format: 'MP3', size: '18 MB', code: '141' },
-                            { type: 'audio', quality: '256kbps', format: 'MP3', size: '24 MB', code: '141' },
-                            { type: 'audio', quality: '320kbps', format: 'MP3', size: '30 MB', code: '141' }
-                        ]
-                    };
-                }
-
-                function displayVideoInfo(videoInfo) {
-                    // Set thumbnail
-                    document.getElementById('videoThumbnail').src = videoInfo.thumbnail;
-                    
-                    // Set title
-                    document.getElementById('videoTitle').textContent = videoInfo.title;
-                    
-                    // Set duration and views
-                    document.getElementById('videoDuration').textContent = videoInfo.duration;
-                    document.getElementById('videoViews').textContent = videoInfo.views;
-                    
-                    // Clear previous formats
-                    document.getElementById('videoFormats').innerHTML = '';
-                    document.getElementById('audioFormats').innerHTML = '';
-                    
-                    // Add video formats
-                    videoInfo.formats.forEach(format => {
-                        const formatCard = createFormatCard(format, videoInfo.id);
-                        if (format.type === 'video') {
-                            document.getElementById('videoFormats').appendChild(formatCard);
-                        } else {
-                            document.getElementById('audioFormats').appendChild(formatCard);
-                        }
-                    });
-                    
-                    // Show video info
-                    videoInfoDiv.classList.remove('hidden');
-                }
-
-                function createFormatCard(format, videoId) {
-                    const card = document.createElement('div');
-                    card.className = 'format-card bg-white/10 rounded-lg p-4 border border-white/20 hover:border-purple-500 cursor-pointer';
-                    
-                    const icon = format.type === 'video' ? 'fa-video' : 'fa-music';
-                    const typeColor = format.type === 'video' ? 'text-blue-400' : 'text-green-400';
-                    
-                    card.innerHTML = \`
-                        <div class="flex justify-between items-start mb-3">
-                            <div>
-                                <div class="flex items-center gap-2 mb-1">
-                                    <i class="fa-solid \${icon} \${typeColor}"></i>
-                                    <span class="text-white font-bold">\${format.quality}</span>
-                                </div>
-                                <span class="text-purple-300 text-sm">\${format.format}</span>
-                            </div>
-                            <span class="text-white font-semibold">\${format.size}</span>
-                        </div>
-                        <button 
-                            onclick="downloadVideo('\${videoId}', '\${format.code}', '\${format.quality}', '\${format.type}')"
-                            class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg transition-all flex items-center justify-center"
-                        >
-                            <i class="fa-solid fa-download mr-2"></i> Download
-                        </button>
-                    \`;
-                    
-                    return card;
-                }
-
-                // Global function for download buttons
-                window.downloadVideo = async function(videoId, formatCode, quality, type) {
-                    showDownloadProgress();
-                    
-                    // Simulate download progress
-                    let progress = 0;
-                    const interval = setInterval(() => {
-                        progress += 5;
-                        if (progress > 100) progress = 100;
-                        
-                        progressBar.style.width = progress + '%';
-                        progressText.textContent = progress + '%';
-                        
-                        if (progress < 30) {
-                            statusText.textContent = 'Preparing download...';
-                        } else if (progress < 60) {
-                            statusText.textContent = 'Downloading...';
-                        } else if (progress < 90) {
-                            statusText.textContent = 'Processing...';
-                        } else {
-                            statusText.textContent = 'Almost done...';
-                        }
-                        
-                        if (progress >= 100) {
-                            clearInterval(interval);
-                            statusText.textContent = 'Download complete!';
-                            
-                            // Simulate file ready for download
-                            setTimeout(() => {
-                                const fileName = \`mythobot_\${videoId}_\${quality.toLowerCase().replace(/\\s+/g, '_')}.\${type === 'video' ? 'mp4' : 'mp3'}\`;
-                                const dummyContent = 'This is a dummy file. In production, this would be the actual video/audio file.';
-                                
-                                const blob = new Blob([dummyContent], { type: type === 'video' ? 'video/mp4' : 'audio/mpeg' });
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = fileName;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                window.URL.revokeObjectURL(url);
-                                
-                                // Reset progress
-                                setTimeout(() => {
-                                    downloadProgressDiv.classList.add('hidden');
-                                    progressBar.style.width = '0%';
-                                    progressText.textContent = '0%';
-                                }, 2000);
-                            }, 1000);
-                        }
-                    }, 200);
-                };
-
-                function showDownloadProgress() {
-                    downloadProgressDiv.classList.remove('hidden');
-                    progressBar.style.width = '0%';
-                    progressText.textContent = '0%';
-                    statusText.textContent = 'Starting download...';
-                }
-
-                // Allow pressing Enter to analyze
-                youtubeUrlInput.addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
-                        analyzeBtn.click();
-                    }
-                });
-            });
-        </script>
-    </body>
-    </html>
-  `);
-});
-
-// 🔹 YouTube Download API endpoint
-app.get("/api/youtube/download", async (req, res) => {
-  const { url, format, quality } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "YouTube URL is required" 
-    });
-  }
-  
-  try {
-    // In production, you would:
-    // 1. Use yt-dlp or youtube-dl to get video info
-    // 2. Process the download
-    // 3. Return the download link
-    
-    // For now, return a mock response
-    res.json({
-      success: true,
-      message: "Download started",
-      download_url: `https://${req.hostname}/api/youtube/download-file?url=${encodeURIComponent(url)}&format=${format || 'mp4'}`,
-      info: {
-        url: url,
-        format: format || 'mp4',
-        quality: quality || '720p',
-        estimated_size: "98 MB",
-        estimated_time: "2-5 minutes"
-      }
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to process download request"
-    });
-  }
-});
-
-// 🔹 YouTube Info API endpoint
-app.get("/api/youtube/info", async (req, res) => {
-  const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "YouTube URL is required" 
-    });
-  }
-  
-  try {
-    // Mock video info - in production, use yt-dlp or similar
-    const videoInfo = {
-      title: "Mythological Video - Sample Title",
-      thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
-      duration: "24:35",
-      views: "1.2M views",
-      uploader: "MythoChannel",
-      upload_date: "2024-01-15",
-      description: "This is a sample video description for mythological content.",
-      formats: [
-        { quality: "1080p", format: "mp4", size: "185 MB" },
-        { quality: "720p", format: "mp4", size: "98 MB" },
-        { quality: "480p", format: "mp4", size: "65 MB" },
-        { quality: "360p", format: "mp4", size: "42 MB" },
-        { quality: "128kbps", format: "mp3", size: "12 MB" },
-        { quality: "192kbps", format: "mp3", size: "18 MB" },
-        { quality: "256kbps", format: "mp3", size: "24 MB" }
-      ]
-    };
-    
-    res.json({
-      success: true,
-      info: videoInfo
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch video information"
-    });
-  }
-});
-
-// 🏠 MythoBot Animated Home Page (Updated to include YouTube Downloader link)
-app.get("/", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>MythoBot • Official Portal</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-      <link rel="icon" href="https://i.postimg.cc/Y0MsZM32/favicon.jpg" />
-      <style>
-        body {
-          font-family: 'Poppins', sans-serif;
-          background: radial-gradient(circle at top, #6b46c1 0%, #3b0764 100%);
-          color: white;
-          overflow-x: hidden;
-        }
-        .glass {
-          background: rgba(255, 255, 255, 0.1);
-          backdrop-filter: blur(10px);
-          border-radius: 20px;
-          border: 1px solid rgba(255, 255, 255, 0.15);
-          transition: all 0.3s ease;
-          transform: translateY(20px);
-          opacity: 0;
-          animation: fadeUp 1s forwards;
-        }
-        .glass:hover {
-          transform: scale(1.05) rotate(1deg);
-          box-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
-        }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(30px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .btn {
-          transition: all 0.2s ease;
-        }
-        .btn:hover {
-          transform: scale(1.08);
-          box-shadow: 0 0 15px rgba(255,255,255,0.3);
-        }
-        .pulse {
-          animation: pulse 3s infinite;
-        }
-        @keyframes pulse {
-          0%,100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.8; transform: scale(1.03); }
-        }
-      </style>
-    </head>
-    <body class="min-h-screen flex flex-col items-center justify-center px-4 py-10">
-
-      <!-- Header -->
-      <div class="text-center mb-10 animate-fadeIn">
-        <img src="https://envs.sh/XwB.jpg" alt="MythoserialBot" class="w-24 h-24 rounded-full mx-auto mb-4 shadow-lg border-4 border-white/20 pulse">
-        <h1 class="text-5xl font-extrabold tracking-wide">✨ MythoserialBot Portal ✨</h1>
-        <p class="text-purple-200 mt-3 text-sm">Your One-stop Hub for Mythological Serials, Games & Premium Access</p>
-      </div>
-
-      <!-- Feature Cards -->
-      <div class="grid md:grid-cols-2 gap-6 max-w-3xl w-full">
+// ==========================================
+// UNIFIED APPLE iOS PROFILE MINI APP (unchanged)
+// ==========================================
+app.get("/api/ios-profile-data/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
         
-        <!-- Premium Access -->
-        <div class="glass text-center p-6 delay-100">
-          <i class="fa-solid fa-gem text-yellow-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Premium Membership</h2>
-          <p class="text-purple-100 text-sm mt-2">Unlock all mythological serials, HD access & batch downloads.</p>
-          <a href="https://t.me/MythoSerialBot?start=upgrade" target="_blank" class="btn inline-block mt-4 bg-yellow-400 text-black font-semibold px-5 py-2 rounded-full">Upgrade Now</a>
-        </div>
+        const user = await usersCollection.findOne({ user_id: uid });
+        
+        const history = await mpHistoryCollection
+            .find({ user_id: uid })
+            .sort({ date: -1 })
+            .limit(15)
+            .toArray();
 
-        <!-- YouTube Downloader -->
-        <div class="glass text-center p-6 delay-200">
-          <i class="fa-brands fa-youtube text-red-500 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">YouTube Downloader</h2>
-          <p class="text-purple-100 text-sm mt-2">Download videos & audio from YouTube in multiple formats.</p>
-          <a href="/youtube-downloader" class="btn inline-block mt-4 bg-red-600 text-white font-semibold px-5 py-2 rounded-full">Download Now</a>
-        </div>
-
-        <!-- Games -->
-        <div class="glass text-center p-6 delay-300">
-          <i class="fa-solid fa-gamepad text-pink-300 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Mytho Games</h2>
-          <p class="text-purple-100 text-sm mt-2">Play fun mythology-inspired games & earn MythoPoints.</p>
-          <a href="/radhe" class="btn inline-block mt-4 bg-pink-500 text-white font-semibold px-5 py-2 rounded-full">Play Radhe Radhe</a>
-        </div>
-
-        <!-- Bypass Protection -->
-        <div class="glass text-center p-6 delay-400">
-          <i class="fa-solid fa-shield-halved text-green-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Bypass Protection</h2>
-          <p class="text-purple-100 text-sm mt-2">Advanced protection prevents unauthorized SoftURL bypass.</p>
-          <a href="/generate/12345" class="btn inline-block mt-4 bg-green-400 text-black font-semibold px-5 py-2 rounded-full">Test Demo</a>
-        </div>
-
-        <!-- Payment Gateway -->
-        <div class="glass text-center p-6 delay-500">
-          <i class="fa-solid fa-wallet text-blue-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Payment Portal</h2>
-          <p class="text-purple-100 text-sm mt-2">Pay via secure UPI for premium access or channel plans.</p>
-          <a href="/payment?amount=49&upi=sandip10x@fam&channel=MythoBot%20Premium&admin=MythoSerialBot" class="btn inline-block mt-4 bg-blue-500 text-white font-semibold px-5 py-2 rounded-full">Open Payment</a>
-        </div>
-
-        <!-- MythoPoints Discount -->
-        <div class="glass text-center p-6 delay-600">
-          <i class="fa-solid fa-coins text-yellow-500 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">MythoPoints</h2>
-          <p class="text-purple-100 text-sm mt-2">Use your earned points to get 30% discount on payments!</p>
-          <a href="/payment?amount=49&mythopoints=true" class="btn inline-block mt-4 bg-yellow-500 text-black font-semibold px-5 py-2 rounded-full">Use Points</a>
-        </div>
-
-        <!-- Admin Notifications -->
-        <div class="glass text-center p-6 delay-700">
-          <i class="fa-solid fa-bell text-red-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Live Alerts</h2>
-          <p class="text-purple-100 text-sm mt-2">Instant Telegram notifications for all payments & activities.</p>
-          <a href="https://t.me/MythoSerialBot" class="btn inline-block mt-4 bg-red-500 text-white font-semibold px-5 py-2 rounded-full">Get Alerts</a>
-        </div>
-
-        <!-- YouTube Downloader (Second mention) -->
-        <div class="glass text-center p-6 delay-800">
-          <i class="fa-solid fa-download text-purple-400 text-3xl mb-3"></i>
-          <h2 class="text-xl font-bold">Video Download</h2>
-          <p class="text-purple-100 text-sm mt-2">Download any YouTube video in MP4, MP3 formats instantly.</p>
-          <a href="/youtube-downloader" class="btn inline-block mt-4 bg-purple-600 text-white font-semibold px-5 py-2 rounded-full">Try Downloader</a>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="text-center mt-12 text-sm text-purple-200">
-        <p>💫 Developed by <b>@Sandip10x</b> | Powered by <b>MythoBot Server</b></p>
-        <p class="mt-1">
-          <a href="https://t.me/MythoSerialBot" class="underline text-purple-100">Telegram Bot</a> • 
-          <a href="/radhe" class="underline text-purple-100">Radhe Radhe Game</a> •
-          <a href="/youtube-downloader" class="underline text-purple-100">YouTube Downloader</a>
-        </p>
-      </div>
-
-      <script>
-        // Smooth Fade-in Animations
-        document.addEventListener('DOMContentLoaded', () => {
-          const cards = document.querySelectorAll('.glass');
-          cards.forEach((card, i) => {
-            card.style.animationDelay = (i * 0.2) + 's';
-          });
+        res.json({
+            success: true,
+            mythopoints: user?.mythopoints || 0,
+            is_verified: user?.is_verified || false,
+            history: history
         });
-      </script>
-
-    </body>
-    </html>
-  `);
+    } catch (error) {
+        console.error("Profile API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch unified data" });
+    }
 });
 
-// 🔹 Radhe Radhe Game Page
-app.get("/radhe", (req, res) => {
-  res.send(`
+app.get("/ios-app/:userId", (req, res) => {
+    const { userId } = req.params;
+    
+    res.send(`
     <!DOCTYPE html>
     <html lang="en">
     <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Radhe Radhe Jap 🙏</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <style>
-        body {
-          font-family: 'Poppins', sans-serif;
-          background: linear-gradient(135deg,#ffb6c1,#ffc8dd,#ffb6b9);
-          text-align:center;
-          height:100vh;
-          display:flex;
-          flex-direction:column;
-          align-items:center;
-          justify-content:center;
-          overflow:hidden;
-        }
-        #count {
-          font-size:2.5rem;
-          font-weight:700;
-          color:#9d174d;
-          text-shadow:0 0 10px rgba(255,255,255,0.7);
-          margin-top:1rem;
-        }
-        #tapBtn {
-          background:linear-gradient(45deg,#ec4899,#db2777);
-          color:white;
-          border:none;
-          border-radius:9999px;
-          padding:1.2rem 2.5rem;
-          font-size:1.5rem;
-          font-weight:bold;
-          cursor:pointer;
-          transition:transform 0.1s;
-          box-shadow:0 0 15px rgba(236,72,153,0.6);
-        }
-        #tapBtn:active {
-          transform:scale(0.9);
-        }
-        .chant {
-          animation:pulse 1.2s infinite;
-        }
-        @keyframes pulse {
-          0%,100% {opacity:1; transform:scale(1);}
-          50% {opacity:0.7; transform:scale(1.05);}
-        }
-        audio { display:none; }
-      </style>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>My Profile</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            /* iOS System Variables */
+            :root {
+                --ios-bg: #F2F2F7;
+                --ios-card: #FFFFFF;
+                --ios-blue: #007AFF;
+                --ios-green: #34C759;
+                --ios-red: #FF3B30;
+                --ios-text: #000000;
+                --ios-gray: #8E8E93;
+                --ios-light-gray: #E5E5EA;
+                --safe-area-bottom: env(safe-area-inset-bottom, 20px);
+            }
+            
+            * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, Helvetica, sans-serif;
+                background-color: var(--ios-bg);
+                background-image: radial-gradient(circle at 100% 0%, rgba(0,122,255,0.06) 0%, transparent 45%);
+                margin: 0; padding: 0; padding-bottom: calc(85px + var(--safe-area-bottom));
+                color: var(--ios-text); -webkit-font-smoothing: antialiased; user-select: none;
+            }
+
+            .header {
+                position: sticky; top: 0; z-index: 50;
+                background: rgba(255, 255, 255, 0.78);
+                backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%);
+                border-bottom: 0.5px solid rgba(0,0,0,0.08);
+                padding: 16px; text-align: center; font-weight: 700; font-size: 17px;
+                letter-spacing: -0.4px;
+            }
+
+            .card {
+                background: var(--ios-card); border-radius: 18px; margin: 16px; padding: 18px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.04), 0 10px 30px rgba(0,0,0,0.05);
+                border: 0.5px solid rgba(0,0,0,0.04);
+            }
+
+            .profile-header { 
+                display: flex; align-items: center; gap: 15px; 
+                border-bottom: 0.5px solid var(--ios-light-gray); 
+                padding-bottom: 16px; margin-bottom: 16px; 
+            }
+            .profile-pic { 
+                width: 64px; height: 64px; border-radius: 50%; 
+                object-fit: cover; background: var(--ios-light-gray);
+                box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+                border: 2px solid #fff;
+            }
+            .profile-info h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+            .profile-info p { margin: 4px 0 0 0; color: var(--ios-gray); font-size: 13px; }
+            
+            .balance-box { text-align: center; padding: 5px 0; }
+            .balance-box h3 { margin: 0; font-size: 12px; color: var(--ios-gray); font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; }
+            .balance-box .amount { 
+                font-size: 40px; font-weight: 800; margin: 8px 0; letter-spacing: -1px;
+                background: linear-gradient(135deg, #007AFF, #5856D6);
+                -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+            }
+            
+            .activity-item { 
+                display: flex; justify-content: space-between; align-items: center; 
+                padding: 12px 0; border-bottom: 0.5px solid var(--ios-light-gray); 
+            }
+            .activity-item:last-child { border-bottom: none; padding-bottom: 0; }
+            .act-left p { margin: 0; font-size: 16px; font-weight: 500; letter-spacing: -0.3px; }
+            .act-left span { font-size: 13px; color: var(--ios-gray); margin-top: 4px; display: inline-block; }
+            .act-right { font-weight: 600; font-size: 16px; }
+            .earn { color: var(--ios-green); }
+            .spend { color: var(--ios-red); }
+
+            .tab-bar {
+                position: fixed; bottom: 0; width: 100%;
+                background: rgba(242, 242, 247, 0.85); 
+                backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+                border-top: 0.5px solid rgba(0,0,0,0.1);
+                display: flex; justify-content: space-around; 
+                padding: 10px 0 calc(10px + var(--safe-area-bottom)) 0; z-index: 100;
+            }
+            .tab-item { 
+                display: flex; flex-direction: column; align-items: center; 
+                color: var(--ios-gray); cursor: pointer; font-size: 10px; font-weight: 600;
+                transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.2s;
+            }
+            .tab-item:active { transform: scale(0.88); }
+            .tab-item svg { width: 28px; height: 28px; margin-bottom: 3px; fill: currentColor; }
+            .tab-item.active { color: var(--ios-blue); }
+            
+            .tab-content { display: none; }
+            .tab-content.active { display: block; animation: fadeUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+            
+            @keyframes fadeUp { 
+                from { opacity: 0; transform: translateY(10px); } 
+                to { opacity: 1; transform: translateY(0); } 
+            }
+            
+            .empty-state { text-align: center; padding: 40px 20px; color: var(--ios-gray); }
+        </style>
     </head>
     <body>
-      <h1 class="text-3xl font-bold text-pink-700 chant">💖 Radhe Radhe 💖</h1>
-      <button id="tapBtn">Radhe Radhe</button>
-      <div id="count">0 Japs</div>
-      <audio id="chantAudio" src="https://cdn.pixabay.com/download/audio/2022/03/14/audio_9a4ed9a26e.mp3?filename=indian-mantra-loop-108-13823.mp3" loop></audio>
+        <div class="header" id="header-title">Profile</div>
 
-      <script>
-        const btn = document.getElementById('tapBtn');
-        const countEl = document.getElementById('count');
-        const audio = document.getElementById('chantAudio');
-        let count = 0;
-        btn.addEventListener('click', () => {
-          count++;
-          countEl.textContent = count + " Japs";
-          if (audio.paused) audio.play();
-          // small heart burst
-          const heart = document.createElement('div');
-          heart.textContent = "💖";
-          heart.style.position = 'absolute';
-          heart.style.left = (Math.random()*90+5) + "%";
-          heart.style.top = (Math.random()*80+10) + "%";
-          heart.style.opacity = '0.9';
-          heart.style.fontSize = (Math.random()*30+20) + 'px';
-          heart.style.transition = '1.5s';
-          document.body.appendChild(heart);
-          setTimeout(()=>heart.style.transform='translateY(-80px)',50);
-          setTimeout(()=>heart.remove(),1500);
-        });
-      </script>
+        <div id="tab-profile" class="tab-content active">
+            <div class="card">
+                <div class="profile-header">
+                    <img id="user-dp" class="profile-pic" src="https://via.placeholder.com/100" alt="DP">
+                    <div class="profile-info">
+                        <h2 id="user-name">Loading...</h2>
+                        <p id="user-id">ID: ...</p>
+                    </div>
+                </div>
+                <div class="balance-box">
+                    <h3>Available Balance</h3>
+                    <div class="amount" id="mp-balance">0.00</div>
+                    <p style="font-size:13px; margin:0;" id="verification-status">Checking Status...</p>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top:0;">
+                <h3 style="font-size:16px; margin:0 0 12px 0; font-weight:600;">System Information</h3>
+                <div style="display:flex; justify-content:space-between; padding: 12px 0; border-bottom:0.5px solid var(--ios-light-gray);">
+                    <span style="font-size:16px;">Daily Rate</span>
+                    <span style="color:var(--ios-gray); font-size:16px;">0.0015</span>
+                </div>
+                 <div style="display:flex; justify-content:space-between; padding: 12px 0;">
+                    <span style="font-size:16px;">Bot Node</span>
+                    <span style="color:var(--ios-gray); font-size:16px;">Mytho Serial</span>
+                </div>
+            </div>
+        </div>
 
-      <p class="text-pink-800 mt-4 text-sm">Tap continuously and chant with ❤️ Premanand Maharaj Ki Jai!</p>
-      <a href="/" class="text-sm text-purple-900 underline mt-3 block">🏠 Back to Home</a>
+        <div id="tab-activity" class="tab-content">
+            <div style="padding: 0 16px 8px 24px; font-size: 13px; color: var(--ios-gray); text-transform: uppercase;">Recent Transactions</div>
+            <div class="card" id="activity-list" style="margin-top: 0;">
+                <div class="empty-state">Loading history...</div>
+            </div>
+        </div>
+
+        <div class="tab-bar">
+            <div class="tab-item active" onclick="switchTab('profile', 'Profile', this)">
+                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                Profile
+            </div>
+            <div class="tab-item" onclick="switchTab('activity', 'Activity History', this)">
+                <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                Activity
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.setHeaderColor('#F2F2F7'); 
+            
+            const userId = ${userId};
+
+            const tgUser = tg.initDataUnsafe?.user;
+            if (tgUser) {
+                document.getElementById('user-name').innerText = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
+                
+                const uiIdElement = document.getElementById('user-id');
+                if (tgUser.username) {
+                    uiIdElement.innerText = '@' + tgUser.username + ' | ID: ' + tgUser.id;
+                } else {
+                    uiIdElement.innerText = 'ID: ' + tgUser.id; 
+                }
+
+                if (tgUser.photo_url) {
+                    document.getElementById('user-dp').src = tgUser.photo_url;
+                }
+            } else {
+                document.getElementById('user-id').innerText = 'ID: ' + userId;
+            }
+
+            function switchTab(tabId, title, element) {
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+                
+                document.getElementById('tab-' + tabId).classList.add('active');
+                element.classList.add('active');
+                document.getElementById('header-title').innerText = title;
+                
+                tg.HapticFeedback.selectionChanged();
+            }
+
+            async function fetchUserData() {
+                try {
+                    const res = await fetch('/api/ios-profile-data/' + userId);
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        const formattedBalance = Number.isInteger(data.mythopoints) ? 
+                            data.mythopoints.toLocaleString() : 
+                            data.mythopoints.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
+                        
+                        document.getElementById('mp-balance').innerText = formattedBalance;
+
+                        document.getElementById('verification-status').innerHTML = data.is_verified ? 
+                            '<span style="color:var(--ios-green);">✓ Node Verified</span>' : 
+                            '<span style="color:var(--ios-red);">! Unverified Device</span>';
+
+                        const list = document.getElementById('activity-list');
+                        if (data.history.length === 0) {
+                            list.innerHTML = '<div class="empty-state">No recent activity found.</div>';
+                        } else {
+                            list.innerHTML = data.history.map(item => {
+                                const isEarn = item.type === "EARNED";
+                                const sign = isEarn ? '+' : '-';
+                                const colorClass = isEarn ? 'earn' : 'spend';
+                                const dateString = new Date(item.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                                
+                                return \`
+                                <div class="activity-item">
+                                    <div class="act-left">
+                                        <p>\${item.reason || item.type}</p>
+                                        <span>\${dateString}</span>
+                                    </div>
+                                    <div class="act-right \${colorClass}">
+                                        \${sign}\${item.amount}
+                                    </div>
+                                </div>
+                                \`;
+                            }).join('');
+                        }
+                    }
+                } catch (e) {
+                    console.error("Fetch error:", e);
+                    document.getElementById('activity-list').innerHTML = '<div class="empty-state" style="color:var(--ios-red);">Failed to connect to database.</div>';
+                }
+            }
+            
+            fetchUserData();
+        </script>
     </body>
     </html>
-  `);
+    `);
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Bypass protection with roast messages activated!`);
-  console.log(`✅ Legitimate SoftURL accesses will redirect to target URLs`);
-  console.log(`🤡 Bypass attempts will get roasted!`);
-  console.log(`🔔 Telegram notifications: ${TELEGRAM_BOT_TOKEN ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`💰 30% MythoPoints discount system: ACTIVE`);
-  console.log(`🎬 YouTube Downloader feature: ADDED & READY`);
+// ==========================================
+// UNIFIED iOS PURPLE DASHBOARD – ADD RATING & WITHDRAW
+// ==========================================
+
+app.get("/api/ios-dashboard-data/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const db = client.db("Mytho");
+        const now = Math.floor(Date.now() / 1000);
+
+        const [user, bank, search, premium, stats, history, rating] = await Promise.all([
+            usersCollection.findOne({ user_id: uid }),
+            bankCollection.findOne({ user_id: uid }),
+            searchLimitCollection.findOne({ user_id: uid }),
+            premiumUsersCollection.findOne({ user_id: uid }),
+            userStatsCollection.findOne({ user_id: uid }),
+            mpHistoryCollection.find({ user_id: uid }).sort({ date: -1 }).limit(20).toArray(),
+            ratingsCollection.findOne({ _id: uid })
+        ]);
+
+        let pendingInterest = 0;
+        let activeLoan = false;
+        let loanDue = 0;
+
+        if (bank) {
+            if (bank.invested > 0) {
+                const cycles = Math.floor((now - bank.last_claim_time) / 86400);
+                if (cycles > 0) pendingInterest = Math.floor(bank.invested * 0.025 * cycles);
+            }
+            if (bank.loan_active && bank.loan_principal > 0) {
+                activeLoan = true;
+                let loanCycles = Math.floor((now - bank.loan_taken_at) / 86400);
+                loanCycles = Math.max(1, loanCycles); 
+                const calculated_interest = Math.floor(bank.loan_principal * 0.10 * loanCycles);
+                loanDue = Math.min(bank.loan_principal + calculated_interest, bank.loan_principal * 5); 
+            }
+        }
+
+        let isPremium = false;
+        let premiumDaysLeft = 0;
+        if (premium && premium.expiry_time > now) {
+            isPremium = true;
+            premiumDaysLeft = Math.ceil((premium.expiry_time - now) / 86400);
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const paymentCount = await paymentLimitCollection.countDocuments({
+            user_id: uid,
+            date: today
+        });
+
+        const allRatings = await ratingsCollection.find({ rating: { $exists: true } }).toArray();
+        const totalRatings = allRatings.length;
+        const avgRating = totalRatings > 0 ? (allRatings.reduce((sum, r) => sum + r.rating, 0) / totalRatings) : 0;
+
+        res.json({
+            success: true,
+            profile: {
+                mythopoints: user?.mythopoints || 0,
+                streak: user?.streak || 0,
+                is_verified: user?.is_verified || false,
+                referrals: user?.referral_count || 0
+            },
+            bank: {
+                invested: bank?.invested || 0,
+                pendingInterest: pendingInterest,
+                activeLoan: activeLoan,
+                loanDue: loanDue
+            },
+            search: {
+                credits: search?.credits || 0,
+                max_credits: 5
+            },
+            premium: {
+                active: isPremium,
+                daysLeft: premiumDaysLeft,
+                plan: premium?.duration === 30 ? "Gold" : (premium?.duration === 28 ? "Silver" : "Premium")
+            },
+            stats: {
+                lifetimeEarned: stats?.total_points_earned || 0,
+                lifetimeSpent: stats?.total_points_spent || 0,
+                totalFiles: stats?.lifetime_files || 0
+            },
+            history: history,
+            payment: {
+                dailyLimit: 1,
+                usedToday: paymentCount
+            },
+            rating: {
+                userRating: rating?.rating || null,
+                totalRatings: totalRatings,
+                average: avgRating
+            }
+        });
+    } catch (error) {
+        console.error("Dashboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch dashboard data" });
+    }
 });
+
+// ==========================================
+// 🏦 BANKING API (cbank.py logic) – CORRECTED INTEREST RATE
+// ==========================================
+
+async function getBank(userId) {
+    let bank = await bankCollection.findOne({ user_id: userId });
+    if (!bank) {
+        bank = {
+            user_id: userId,
+            loan_active: false,
+            loan_principal: 0,
+            loan_taken_at: 0,
+            invested: 0,
+            last_claim_time: Math.floor(Date.now() / 1000),
+            notified_for_claim: false
+        };
+        await bankCollection.insertOne(bank);
+    }
+    return bank;
+}
+
+function calculateInterest(invested, lastClaimTime) {
+    if (invested <= 0) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    const cycles = Math.floor((now - lastClaimTime) / 86400);
+    if (cycles < 1) return 0;
+    return Math.floor(invested * 0.025 * cycles);
+}
+
+function calculateLoanDue(principal, takenAt) {
+    if (principal <= 0) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    let cycles = Math.floor((now - takenAt) / 86400);
+    cycles = Math.max(1, cycles);
+    const interest = Math.floor(principal * 0.10 * cycles);
+    const total = principal + interest;
+    return Math.min(total, principal * 5);
+}
+
+app.get("/api/bank/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        const invested = bank.invested || 0;
+        const pending = calculateInterest(invested, bank.last_claim_time);
+        const loanActive = bank.loan_active || false;
+        const loanDue = loanActive ? calculateLoanDue(bank.loan_principal, bank.loan_taken_at) : 0;
+
+        res.json({
+            success: true,
+            invested,
+            pendingInterest: pending,
+            loanActive,
+            loanDue,
+            loanPrincipal: bank.loan_principal || 0
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/invest/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount" });
+
+        const bank = await getBank(uid);
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found" });
+        if (user.mythopoints < amount) return res.status(400).json({ success: false, error: "Insufficient balance" });
+
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
+        if (pending > 0) {
+            return res.status(400).json({ success: false, error: "Claim pending interest before investing" });
+        }
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -amount } });
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { invested: amount },
+                $set: { last_claim_time: Math.floor(Date.now() / 1000) }
+            }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: amount,
+            type: "SPENT",
+            reason: "Invested into MythoFund",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Added ${amount} to investment.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/withdraw/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount" });
+
+        const bank = await getBank(uid);
+        if (bank.invested < amount) return res.status(400).json({ success: false, error: "Not enough invested" });
+
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
+        if (pending > 0) {
+            return res.status(400).json({ success: false, error: "Claim pending interest before withdrawing" });
+        }
+
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $inc: { invested: -amount },
+                $set: { last_claim_time: Math.floor(Date.now() / 1000) }
+            }
+        );
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: amount } });
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: amount,
+            type: "EARNED",
+            reason: "Withdrew from MythoFund",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Withdrew ${amount} from investment.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        const pending = calculateInterest(bank.invested, bank.last_claim_time);
+
+        if (pending < 1) return res.status(400).json({ success: false, error: "No interest to claim" });
+
+        const now = Math.floor(Date.now() / 1000);
+        const cycles = Math.floor((now - bank.last_claim_time) / 86400);
+        const newClaimTime = bank.last_claim_time + (cycles * 86400);
+
+        await bankCollection.updateOne(
+            { user_id: uid },
+            { $set: { last_claim_time: newClaimTime, notified_for_claim: false } }
+        );
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: pending } });
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pending,
+            type: "EARNED",
+            reason: `MythoFund Interest (${cycles} cycles)`,
+            date: new Date()
+        });
+
+        res.json({ success: true, claimed: pending });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/loan/apply/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        if (bank.loan_active) return res.status(400).json({ success: false, error: "Loan already active" });
+
+        const principal = 100;
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    loan_active: true,
+                    loan_principal: principal,
+                    loan_taken_at: Math.floor(Date.now() / 1000)
+                }
+            }
+        );
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: principal } });
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: principal,
+            type: "EARNED",
+            reason: "Bank Loan Disbursed",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Loan of ${principal} MythoPoints granted.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/loan/repay/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const bank = await getBank(uid);
+        if (!bank.loan_active) return res.status(400).json({ success: false, error: "No active loan" });
+
+        const due = calculateLoanDue(bank.loan_principal, bank.loan_taken_at);
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user || user.mythopoints < due) return res.status(400).json({ success: false, error: "Insufficient balance" });
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -due } });
+
+        await bankCollection.updateOne(
+            { user_id: uid },
+            {
+                $set: {
+                    loan_active: false,
+                    loan_principal: 0,
+                    loan_taken_at: 0
+                }
+            }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: due,
+            type: "SPENT",
+            reason: `Loan Repayment (Interest: ${due - bank.loan_principal})`,
+            date: new Date()
+        });
+
+        res.json({ success: true, message: `Repaid ${due} MythoPoints.` });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// 🛍️ STORE API (cstore.py logic) – unchanged
+// ==========================================
+
+async function generateCoupon(userId, discount) {
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await couponsCollection.insertOne({
+        code: code,
+        user_id: userId,
+        discount: discount,
+        used: false,
+        created: Math.floor(Date.now() / 1000),
+        expiry: Math.floor(Date.now() / 1000) + 30 * 86400
+    });
+    return code;
+}
+
+app.post("/api/store/purchase/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { item } = req.body;
+
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found" });
+
+        const items = {
+            credits: { cost: 50, name: "5 Search Credits" },
+            skip_cooldown: { cost: 50, name: "Skip Cooldown" },
+            mystery: { cost: 100, name: "Mystery Box" },
+        };
+        const couponCosts = { 10: 200, 20: 500, 30: 800, 40: 1000, 50: 1500 };
+
+        let cost = 0;
+        let action = null;
+
+        if (item === 'credits') {
+            cost = items.credits.cost;
+            action = async () => {
+                await searchLimitCollection.updateOne(
+                    { user_id: uid },
+                    { $inc: { credits: 5 }, $set: { last_search: 0 } },
+                    { upsert: true }
+                );
+                return { message: "Added 5 search credits." };
+            };
+        } else if (item === 'skip_cooldown') {
+            cost = items.skip_cooldown.cost;
+            action = async () => {
+                await searchLimitCollection.updateOne(
+                    { user_id: uid },
+                    { $set: { last_search: 0 } },
+                    { upsert: true }
+                );
+                return { message: "Cooldown skipped!" };
+            };
+        } else if (item === 'mystery') {
+            cost = items.mystery.cost;
+            action = async () => {
+                const rewards = ["jackpot", "credits", "coupon", "nothing"];
+                const weights = [10, 40, 30, 20];
+                const outcome = rewards[weights.reduce((acc, w, i) => {
+                    const r = Math.random() * 100;
+                    return r < w ? i : acc;
+                }, 0)];
+
+                let result = "";
+                if (outcome === "jackpot") {
+                    await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: 300 } });
+                    await mpHistoryCollection.insertOne({ user_id: uid, amount: 300, type: "EARNED", reason: "Mystery Jackpot", date: new Date() });
+                    result = "Jackpot! You won 300 Mythopoints!";
+                } else if (outcome === "credits") {
+                    await searchLimitCollection.updateOne({ user_id: uid }, { $inc: { credits: 10 } }, { upsert: true });
+                    result = "You found 10 Search Credits!";
+                } else if (outcome === "coupon") {
+                    const code = await generateCoupon(uid, 15);
+                    result = `You found a 15% OFF coupon! Code: ${code}`;
+                } else {
+                    result = "The box was empty.";
+                }
+                return { message: result };
+            };
+        } else if (item.startsWith('coupon_')) {
+            const discount = parseInt(item.split('_')[1]);
+            if (!couponCosts[discount]) return res.status(400).json({ success: false, error: "Invalid coupon" });
+            cost = couponCosts[discount];
+            action = async () => {
+                const code = await generateCoupon(uid, discount);
+                return { message: `Coupon ${discount}% OFF generated! Code: ${code}` };
+            };
+        } else {
+            return res.status(400).json({ success: false, error: "Invalid item" });
+        }
+
+        if (user.mythopoints < cost) return res.status(400).json({ success: false, error: "Insufficient Mythopoints" });
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -cost } });
+        const result = await action();
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: cost,
+            type: "SPENT",
+            reason: `Purchased ${item}`,
+            date: new Date()
+        });
+
+        res.json({ success: true, message: result.message });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// 💸 PAYMENT API – WITH CHAT SUPPORT (UPDATED)
+// ==========================================
+
+async function canMakePayment(userId) {
+    const today = new Date().toISOString().split('T')[0];
+    const count = await paymentLimitCollection.countDocuments({
+        user_id: userId,
+        date: today
+    });
+    return count < 1;
+}
+
+app.post("/api/payment/send", async (req, res) => {
+    try {
+        const { senderId, receiverId, amount } = req.body;
+
+        const sender = parseInt(senderId);
+        const receiver = parseInt(receiverId);
+        const amt = parseInt(amount);
+
+        if (!sender || !receiver || !amt) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        if (sender === receiver) {
+            return res.status(400).json({ success: false, error: "Cannot send to yourself." });
+        }
+        if (amt < 200) {
+            return res.status(400).json({ success: false, error: "Minimum payment is 200 Mythopoints." });
+        }
+
+        const canPay = await canMakePayment(sender);
+        if (!canPay) {
+            return res.status(400).json({ success: false, error: "Daily payment limit reached (1 per day)." });
+        }
+
+        const senderDoc = await usersCollection.findOne({ user_id: sender });
+        const receiverDoc = await usersCollection.findOne({ user_id: receiver });
+        if (!senderDoc || !receiverDoc) {
+            return res.status(404).json({ success: false, error: "User not found." });
+        }
+
+        const senderIpRecord = await ipVerificationCollection.findOne({ userId: sender });
+        const receiverIpRecord = await ipVerificationCollection.findOne({ userId: receiver });
+        if (!senderIpRecord || !receiverIpRecord) {
+            return res.status(400).json({ success: false, error: "Both users must be verified." });
+        }
+        if (senderIpRecord.ip === receiverIpRecord.ip) {
+            return res.status(400).json({ success: false, error: "Same IP detected. Multiple accounts not allowed." });
+        }
+
+        if (senderDoc.mythopoints < amt) {
+            return res.status(400).json({ success: false, error: "Insufficient balance." });
+        }
+
+        const tax = Math.floor(amt * 0.15);
+        const receiverAmount = amt - tax;
+
+        const session = client.startSession();
+        try {
+            await session.withTransaction(async () => {
+                await usersCollection.updateOne(
+                    { user_id: sender },
+                    { $inc: { mythopoints: -amt } },
+                    { session }
+                );
+                await usersCollection.updateOne(
+                    { user_id: receiver },
+                    { $inc: { mythopoints: receiverAmount } },
+                    { session }
+                );
+                const today = new Date().toISOString().split('T')[0];
+                await paymentLimitCollection.insertOne({
+                    user_id: sender,
+                    date: today,
+                    receiver: receiver,
+                    amount: amt,
+                    tax: tax,
+                    receiverAmount: receiverAmount,
+                    timestamp: new Date()
+                }, { session });
+                await mpHistoryCollection.insertOne({
+                    user_id: sender,
+                    amount: amt,
+                    type: "SPENT",
+                    reason: `Payment to ${receiver}`,
+                    date: new Date()
+                }, { session });
+                await mpHistoryCollection.insertOne({
+                    user_id: receiver,
+                    amount: receiverAmount,
+                    type: "EARNED",
+                    reason: `Payment from ${sender}`,
+                    date: new Date()
+                }, { session });
+                await mpHistoryCollection.insertOne({
+                    user_id: 0,
+                    amount: tax,
+                    type: "TAX",
+                    reason: `Tax on payment ${sender}->${receiver}`,
+                    date: new Date()
+                }, { session });
+                
+                // Save payment chat message with read status
+                await paymentChatCollection.insertOne({
+                    senderId: sender,
+                    receiverId: receiver,
+                    amount: amt,
+                    receiverAmount: receiverAmount,
+                    tax: tax,
+                    message: `💸 Payment of ${amt} Mythopoints sent!`,
+                    timestamp: new Date(),
+                    type: 'payment',
+                    read: false,
+                    reactions: [],
+                    deletedFor: [],
+                    messageId: new Date().getTime().toString() + Math.random().toString(36).substr(2, 5),
+                    notified: false
+                });
+            });
+            await session.endSession();
+        } catch (error) {
+            await session.endSession();
+            throw error;
+        }
+
+        // Fast-path Telegram push (bot.py worker is backup if this fails / BOT_TOKEN missing)
+        try {
+            const botToken = process.env.BOT_TOKEN;
+            if (botToken) {
+                const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiver}`;
+                fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: receiver,
+                        text: `💰 You received *${receiverAmount} MythoPoints* from a payment!\nOpen the app to view chat.`,
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [[{ text: '📱 Open MythoApp', web_app: { url: dashboardUrl } }]]
+                        }
+                    })
+                }).then(async (r) => {
+                    if (r.ok) {
+                        await paymentChatCollection.updateMany(
+                            { senderId: sender, receiverId: receiver, type: 'payment', notified: false },
+                            { $set: { notified: true } }
+                        );
+                    }
+                }).catch(() => {});
+            }
+        } catch (_) {}
+
+        res.json({
+            success: true,
+            message: `Payment sent! Receiver gets ${receiverAmount} Mythopoints (tax: ${tax}).`
+        });
+    } catch (e) {
+        console.error("Payment error:", e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/users/search", async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q) return res.json({ success: true, users: [] });
+
+        const query = {
+            $or: [
+                { username: { $regex: q, $options: 'i' } },
+                { first_name: { $regex: q, $options: 'i' } },
+            ]
+        };
+        const numericQ = parseInt(q);
+        if (!isNaN(numericQ)) {
+            query.$or.push({ user_id: numericQ });
+        }
+
+        const users = await usersCollection.find(query)
+            .limit(10)
+            .project({ user_id: 1, username: 1, first_name: 1, mythopoints: 1, photo_url: 1 })
+            .toArray();
+
+        const formatted = users.map(u => ({
+            id: u.user_id,
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            username: u.username || null,
+            points: u.mythopoints || 0,
+            photo_url: u.photo_url || null
+        }));
+
+        res.json({ success: true, users: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// PAYMENT CHAT API (UPDATED with reactions, deletion, read receipts)
+// ==========================================
+
+// Track online status - update user session
+app.post("/api/payment/online", async (req, res) => {
+    try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ success: false, error: "Missing userId" });
+        
+        const uid = parseInt(userId);
+        await userSessionsCollection.updateOne(
+            { userId: uid },
+            { 
+                $set: { 
+                    lastSeen: new Date(),
+                    isOnline: true
+                } 
+            },
+            { upsert: true }
+        );
+        
+        // Clean up old sessions (older than 2 minutes)
+        const twoMinutesAgo = new Date(Date.now() - 120000);
+        await userSessionsCollection.updateMany(
+            { lastSeen: { $lt: twoMinutesAgo } },
+            { $set: { isOnline: false } }
+        );
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Check online status of a user
+app.get("/api/payment/online-status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const session = await userSessionsCollection.findOne({ userId: uid });
+        
+        const isOnline = session?.isOnline || false;
+        const lastSeen = session?.lastSeen || null;
+        
+        res.json({ 
+            success: true, 
+            isOnline,
+            lastSeen: lastSeen ? lastSeen.toISOString() : null
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Get chat messages for a user
+app.get("/api/payment/chat/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const otherId = req.query.otherId ? parseInt(req.query.otherId) : null;
+        
+        let query = {
+            $or: [{ senderId: uid }, { receiverId: uid }]
+        };
+        
+        if (otherId) {
+            query = {
+                $or: [
+                    { senderId: uid, receiverId: otherId },
+                    { senderId: otherId, receiverId: uid }
+                ]
+            };
+        }
+        
+        const chats = await paymentChatCollection
+            .find(query)
+            .sort({ timestamp: -1 })
+            .limit(100)
+            .toArray();
+        
+        // Get user details for each chat
+        const userIds = new Set();
+        chats.forEach(c => {
+            userIds.add(c.senderId);
+            userIds.add(c.receiverId);
+        });
+        const users = await usersCollection
+            .find({ user_id: { $in: Array.from(userIds) } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+        const userMap = {};
+        users.forEach(u => userMap[u.user_id] = u);
+        
+        const formatted = chats.map(c => {
+            const sender = userMap[c.senderId] || { first_name: `User ${c.senderId}` };
+            const receiver = userMap[c.receiverId] || { first_name: `User ${c.receiverId}` };
+            return {
+                ...c,
+                senderName: sender.first_name || sender.username || `User ${c.senderId}`,
+                senderPhoto: sender.photo_url || null,
+                receiverName: receiver.first_name || receiver.username || `User ${c.receiverId}`,
+                receiverPhoto: receiver.photo_url || null,
+                isSent: c.senderId === uid,
+                isDeleted: c.deletedFor ? c.deletedFor.includes(uid) : false
+            };
+        });
+        
+        res.json({ success: true, chats: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Get recent chats with unread counts
+app.get("/api/payment/recent/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        const chats = await paymentChatCollection.find({
+            $or: [{ senderId: uid }, { receiverId: uid }]
+        }).sort({ timestamp: -1 }).toArray();
+
+        const recentUsersMap = new Map();
+        const userIds = new Set();
+
+        chats.forEach(c => {
+            const sId = Number(c.senderId);
+            const rId = Number(c.receiverId);
+            
+            let otherId = (sId === uid) ? rId : sId;
+            if (otherId === uid) return;
+
+            if (!recentUsersMap.has(otherId)) {
+                recentUsersMap.set(otherId, {
+                    lastMessage: c.message || 'Payment transaction',
+                    timestamp: c.timestamp,
+                    unreadCount: 0,
+                    lastMessageId: c.messageId || c._id.toString()
+                });
+                userIds.add(otherId);
+            }
+            
+            // If message is from other user and not read
+            if (sId === otherId && !c.read) {
+                recentUsersMap.get(otherId).unreadCount += 1;
+            }
+            
+            // Update last message if this one is newer
+            const existing = recentUsersMap.get(otherId);
+            if (new Date(c.timestamp) > new Date(existing.timestamp)) {
+                existing.lastMessage = c.message || 'Payment transaction';
+                existing.timestamp = c.timestamp;
+                existing.lastMessageId = c.messageId || c._id.toString();
+            }
+        });
+
+        // Also get online status for these users
+        const userSessions = await userSessionsCollection
+            .find({ userId: { $in: Array.from(userIds) } })
+            .toArray();
+        const sessionMap = {};
+        userSessions.forEach(s => sessionMap[s.userId] = s);
+
+        const users = await usersCollection
+            .find({ user_id: { $in: Array.from(userIds) } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+
+        const formatted = users.map(u => {
+            const session = sessionMap[u.user_id] || {};
+            return {
+                id: u.user_id,
+                name: u.first_name || u.username || `User ${u.user_id}`,
+                username: u.username || null,
+                photo_url: u.photo_url || null,
+                lastMessage: recentUsersMap.get(u.user_id)?.lastMessage || '',
+                timestamp: recentUsersMap.get(u.user_id)?.timestamp || new Date(0),
+                unreadCount: recentUsersMap.get(u.user_id)?.unreadCount || 0,
+                isOnline: session.isOnline || false,
+                lastSeen: session.lastSeen || null
+            };
+        }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        res.json({ success: true, recent: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Mark messages as read
+app.post("/api/payment/chat/mark-read", async (req, res) => {
+    try {
+        const { userId, otherId } = req.body;
+        if (!userId || !otherId) {
+            return res.status(400).json({ success: false, error: "Missing userId or otherId" });
+        }
+        
+        const result = await paymentChatCollection.updateMany(
+            { 
+                senderId: parseInt(otherId), 
+                receiverId: parseInt(userId), 
+                read: { $ne: true } 
+            },
+            { $set: { read: true } }
+        );
+        
+        res.json({ success: true, modifiedCount: result.modifiedCount });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Send a chat message
+app.post("/api/payment/chat/message", async (req, res) => {
+    try {
+        const { senderId, receiverId, message, senderName, replyTo, type, mediaUrl, mediaType, sticker } = req.body;
+        if (!senderId || !receiverId) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        const msgType = type || 'message';
+        // text required unless sticker/media/voice
+        if (msgType === 'message' && !message) {
+            return res.status(400).json({ success: false, error: "Missing message text." });
+        }
+        // size guard for base64 media (≈ 350KB)
+        if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.length > 500000) {
+            return res.status(400).json({ success: false, error: "Media too large (max ~350KB)." });
+        }
+
+        const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
+        let replySnapshot = null;
+        if (replyTo) {
+            const parent = await paymentChatCollection.findOne({ messageId: String(replyTo) });
+            if (parent) {
+                replySnapshot = {
+                    messageId: parent.messageId,
+                    message: parent.message || (parent.sticker ? parent.sticker : (parent.type === 'payment' ? `Payment M${parent.amount}` : (parent.type || 'Media'))),
+                    senderId: parent.senderId,
+                    type: parent.type || 'message',
+                    sticker: parent.sticker || null
+                };
+            }
+        }
+
+        const doc = {
+            senderId: parseInt(senderId),
+            receiverId: parseInt(receiverId),
+            message: message || '',
+            timestamp: new Date(),
+            type: msgType,
+            read: false,
+            reactions: [],
+            deletedFor: [],
+            deletedForEveryone: false,
+            messageId: messageId,
+            replyTo: replySnapshot,
+            edited: false,
+            editedAt: null,
+            mediaUrl: mediaUrl || null,
+            mediaType: mediaType || null,
+            sticker: sticker || null,
+            // Bot worker (bot.py) picks this up and DMs the receiver when offline
+            notified: false
+        };
+        await paymentChatCollection.insertOne(doc);
+
+        // Optional fast-path: if BOT_TOKEN is set on Express, notify immediately and mark notified
+        const botToken = process.env.BOT_TOKEN;
+        if (botToken) {
+            const dashboardUrl = `https://mythobot.koyeb.app/mini/${receiverId}`;
+            const sName = senderName || "a user";
+            let preview = message || '';
+            if (msgType === 'sticker') preview = 'Sticker';
+            else if (msgType === 'image') preview = 'Photo';
+            else if (msgType === 'voice') preview = 'Voice message';
+            else if (!preview) preview = 'New message';
+            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: receiverId,
+                    text: `📩 **${sName}**: ${String(preview).slice(0, 80)}`,
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [[{ text: "📱 Open MythoApp", web_app: { url: dashboardUrl } }]]
+                    }
+                })
+            }).then(async (r) => {
+                if (r.ok) {
+                    await paymentChatCollection.updateOne({ messageId }, { $set: { notified: true } });
+                }
+            }).catch(e => console.error("Telegram Notify Error:", e));
+        }
+
+        res.json({ success: true, messageId: messageId, message: doc });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Edit own message
+app.post("/api/payment/chat/edit", async (req, res) => {
+    try {
+        const { messageId, userId, message } = req.body;
+        if (!messageId || !userId || message == null) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: String(messageId) });
+        if (!existing) return res.status(404).json({ success: false, error: "Message not found." });
+        if (existing.senderId !== uid) return res.status(403).json({ success: false, error: "Only sender can edit." });
+        if (existing.deletedForEveryone) return res.status(400).json({ success: false, error: "Message was deleted." });
+        if (existing.type && existing.type !== 'message') {
+            return res.status(400).json({ success: false, error: "Only text messages can be edited." });
+        }
+        await paymentChatCollection.updateOne(
+            { messageId: String(messageId) },
+            { $set: { message: String(message), edited: true, editedAt: new Date() } }
+        );
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Add reaction to a message
+app.post("/api/payment/chat/reaction", async (req, res) => {
+    try {
+        const { messageId, userId, reaction } = req.body;
+        if (!messageId || !userId || !reaction) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: messageId });
+        if (!existing) {
+            return res.status(404).json({ success: false, error: "Message not found." });
+        }
+        
+        // Remove existing reaction from this user if any
+        const reactions = existing.reactions || [];
+        const filtered = reactions.filter(r => r.userId !== uid);
+        
+        // Add new reaction
+        filtered.push({ userId: uid, reaction: reaction, timestamp: new Date() });
+        
+        await paymentChatCollection.updateOne(
+            { messageId: messageId },
+            { $set: { reactions: filtered } }
+        );
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Delete a message: for self, or for everyone (sender only)
+app.post("/api/payment/chat/delete", async (req, res) => {
+    try {
+        const { messageId, userId, forEveryone } = req.body;
+        if (!messageId || !userId) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+
+        const uid = parseInt(userId);
+        const existing = await paymentChatCollection.findOne({ messageId: String(messageId) });
+        if (!existing) {
+            return res.status(404).json({ success: false, error: "Message not found." });
+        }
+
+        if (forEveryone) {
+            if (existing.senderId !== uid) {
+                return res.status(403).json({ success: false, error: "Only sender can delete for everyone." });
+            }
+            await paymentChatCollection.updateOne(
+                { messageId: String(messageId) },
+                {
+                    $set: {
+                        deletedForEveryone: true,
+                        message: '',
+                        mediaUrl: null,
+                        sticker: null,
+                        type: 'deleted'
+                    }
+                }
+            );
+        } else {
+            const deletedFor = existing.deletedFor || [];
+            if (!deletedFor.includes(uid)) deletedFor.push(uid);
+            await paymentChatCollection.updateOne(
+                { messageId: String(messageId) },
+                { $set: { deletedFor: deletedFor } }
+            );
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Clear chat history for self
+app.post("/api/payment/chat/clear", async (req, res) => {
+    try {
+        const { userId, otherId } = req.body;
+        if (!userId || !otherId) {
+            return res.status(400).json({ success: false, error: "Missing fields." });
+        }
+        
+        const uid = parseInt(userId);
+        const oid = parseInt(otherId);
+        
+        // Find all messages between these two users
+        const messages = await paymentChatCollection.find({
+            $or: [
+                { senderId: uid, receiverId: oid },
+                { senderId: oid, receiverId: uid }
+            ]
+        }).toArray();
+        
+        // Add userId to deletedFor for each message
+        for (const msg of messages) {
+            const deletedFor = msg.deletedFor || [];
+            if (!deletedFor.includes(uid)) {
+                deletedFor.push(uid);
+            }
+            await paymentChatCollection.updateOne(
+                { _id: msg._id },
+                { $set: { deletedFor: deletedFor } }
+            );
+        }
+        
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Get unread message count for a user
+
+// ---------- Typing indicator ----------
+app.post("/api/payment/chat/typing", async (req, res) => {
+    try {
+        const { userId, otherId, typing } = req.body;
+        if (!userId || !otherId) return res.status(400).json({ success: false, error: "Missing fields." });
+        const uid = parseInt(userId);
+        const oid = parseInt(otherId);
+        await userSessionsCollection.updateOne(
+            { userId: uid },
+            { $set: { userId: uid, typingTo: typing ? oid : null, typingAt: new Date(), lastSeen: new Date() } },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/payment/chat/typing/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const otherId = parseInt(req.query.otherId);
+        if (!uid || !otherId) return res.status(400).json({ success: false, error: "Missing fields." });
+        const session = await userSessionsCollection.findOne({ userId: otherId });
+        const isTyping = !!(session && session.typingTo === uid && session.typingAt && (Date.now() - new Date(session.typingAt).getTime()) < 5000);
+        res.json({ success: true, typing: isTyping });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/payment/unread/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        const count = await paymentChatCollection.countDocuments({
+            receiverId: uid,
+            read: { $ne: true }
+        });
+        
+        // Also get count per sender
+        const unreadBySender = await paymentChatCollection.aggregate([
+            { $match: { receiverId: uid, read: { $ne: true } } },
+            { $group: { _id: "$senderId", count: { $sum: 1 } } }
+        ]).toArray();
+        
+        const bySender = {};
+        unreadBySender.forEach(item => {
+            bySender[item._id] = item.count;
+        });
+        
+        res.json({ 
+            success: true, 
+            total: count,
+            bySender: bySender
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// ⭐ RATING API
+// ==========================================
+
+app.get("/api/rating/status/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const userRating = await ratingsCollection.findOne({ _id: uid });
+        const allRatings = await ratingsCollection.find({ rating: { $exists: true } }).toArray();
+        const total = allRatings.length;
+        const avg = total > 0 ? (allRatings.reduce((sum, r) => sum + r.rating, 0) / total) : 0;
+
+        res.json({
+            success: true,
+            userRating: userRating?.rating || null,
+            totalRatings: total,
+            average: avg
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/rating/submit/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { rating } = req.body;
+        if (!rating || rating < 1 || rating > 5) {
+            return res.status(400).json({ success: false, error: "Rating must be 1-5." });
+        }
+
+        const existing = await ratingsCollection.findOne({ _id: uid });
+        if (existing && existing.rating) {
+            return res.status(400).json({ success: false, error: "You already rated." });
+        }
+
+        const pointsToAdd = 10;
+        const user = await usersCollection.findOne({ user_id: uid });
+        const currentPoints = user?.mythopoints || 0;
+        const newPoints = currentPoints + pointsToAdd;
+
+        await ratingsCollection.updateOne(
+            { _id: uid },
+            { $set: { rating: rating } },
+            { upsert: true }
+        );
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $set: { mythopoints: newPoints } }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pointsToAdd,
+            type: "EARNED",
+            reason: `Rated Bot ${rating} Stars`,
+            date: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Thanks for rating ${rating} ⭐! You earned ${pointsToAdd} MythoPoints.`,
+            newPoints: newPoints
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// 💰 WITHDRAW API (cwithdraw.py logic)
+// ==========================================
+
+const CONVERSION_RATE = 10000; // 10,000 pts = ₹1
+
+app.post("/api/withdraw/request/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { amount, method } = req.body;
+        if (!amount || amount <= 0) return res.status(400).json({ success: false, error: "Invalid amount." });
+        if (!method) return res.status(400).json({ success: false, error: "Method required." });
+
+        const pointsNeeded = amount * CONVERSION_RATE;
+        const user = await usersCollection.findOne({ user_id: uid });
+        if (!user) return res.status(404).json({ success: false, error: "User not found." });
+        if (user.mythopoints < pointsNeeded) {
+            return res.status(400).json({ success: false, error: `Insufficient points. Need ${pointsNeeded}.` });
+        }
+
+        await usersCollection.updateOne({ user_id: uid }, { $inc: { mythopoints: -pointsNeeded } });
+
+        const withdrawId = `${uid}_${Date.now()}`;
+        const request = {
+            _id: withdrawId,
+            user_id: uid,
+            amount: amount,
+            points: pointsNeeded,
+            method: method,
+            status: "Pending",
+            created_at: new Date().toISOString()
+        };
+        await withdrawsCollection.insertOne(request);
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: pointsNeeded,
+            type: "SPENT",
+            reason: `Withdraw Request (₹${amount} via ${method})`,
+            date: new Date()
+        });
+
+        res.json({
+            success: true,
+            message: `Withdraw request created! ₹${amount} via ${method} (Pending).`,
+            requestId: withdrawId
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/withdraw/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const requests = await withdrawsCollection.find({ user_id: uid })
+            .sort({ created_at: -1 })
+            .limit(10)
+            .toArray();
+
+        res.json({ success: true, requests });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// NEW: SYNC PROFILE API
+// ==========================================
+app.post("/api/sync-profile", async (req, res) => {
+    try {
+        const { userId, photo_url } = req.body;
+        if (!userId || !photo_url) {
+            return res.status(400).json({ success: false, error: "Missing userId or photo_url" });
+        }
+        const uid = parseInt(userId);
+        if (isNaN(uid)) {
+            return res.status(400).json({ success: false, error: "Invalid userId" });
+        }
+
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { $set: { photo_url: photo_url } },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Sync profile error:", error);
+        res.status(500).json({ success: false, error: "Failed to sync profile" });
+    }
+});
+
+// ==========================================
+// USER SETTINGS API (Persistent)
+// ==========================================
+app.post("/api/settings/save", async (req, res) => {
+    try {
+        const { userId, settings } = req.body;
+        const uid = parseInt(userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+        
+        // Merge with existing settings to preserve any other fields
+        await userSettingsCollection.updateOne(
+            { user_id: uid },
+            { 
+                $set: { 
+                    ...settings,
+                    updated_at: new Date()
+                } 
+            },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Settings save error:", error);
+        res.status(500).json({ success: false, error: "Failed to save settings" });
+    }
+});
+
+app.get("/api/settings/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        if (isNaN(uid)) return res.status(400).json({ success: false, error: "Invalid userId" });
+        
+        let settings = await userSettingsCollection.findOne({ user_id: uid });
+        if (!settings) {
+            // Default settings
+            settings = {
+                user_id: uid,
+                sound: true,
+                haptic: true,
+                visual: true,
+                privacy: false,
+                pillNav: false,
+                shortNum: false,
+                forceVerify: false,
+                created_at: new Date()
+            };
+            await userSettingsCollection.insertOne(settings);
+        }
+        
+        // Remove MongoDB _id before sending
+        const { _id, ...settingsWithoutId } = settings;
+        res.json({ success: true, settings: settingsWithoutId });
+    } catch (error) {
+        console.error("Settings fetch error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch settings" });
+    }
+});
+
+// ==========================================
+// CHANT & EARN (Tap to Earn) – UPDATED WITH 1 SECOND COOLDOWN
+// ==========================================
+
+// In-memory rate limiting: last sync timestamps per user
+const userTapHistory = new Map();
+
+app.get("/api/chant/stats/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const stats = await userStatsCollection.findOne({ user_id: uid });
+        const totalTaps = stats?.chant_taps || 0;
+        res.json({ success: true, totalTaps });
+    } catch (e) {
+        res.status(500).json({ success: false, error: "Failed to fetch chant stats." });
+    }
+});
+
+app.post("/api/chant/sync/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { newTaps } = req.body;  // number of new taps since last sync
+        if (typeof newTaps !== 'number' || newTaps <= 0) {
+            return res.status(400).json({ success: false, error: "Invalid taps count." });
+        }
+
+        // --- ANTI-CHEAT: rate limiting ---
+        const now = Date.now();
+        const history = userTapHistory.get(uid) || [];
+        // Keep only last 10 requests
+        history.push(now);
+        if (history.length > 10) history.shift();
+        userTapHistory.set(uid, history);
+
+        if (history.length >= 2) {
+            const timeSpan = now - history[0];
+            const avgTapsPerSec = (newTaps) / (timeSpan / 1000);
+            // Allow maximum 1 tap per second (strict 1/sec)
+            if (avgTapsPerSec > 1.5) {
+                return res.status(429).json({ success: false, error: "Too many taps! Maximum 1 tap per second." });
+            }
+        }
+
+        // Fetch current stats
+        let stats = await userStatsCollection.findOne({ user_id: uid });
+        if (!stats) {
+            // Initialize
+            await userStatsCollection.insertOne({
+                user_id: uid,
+                chant_taps: 0,
+                total_points_earned: 0,
+                total_points_spent: 0,
+                lifetime_files: 0
+            });
+            stats = await userStatsCollection.findOne({ user_id: uid });
+        }
+
+        const oldTotal = stats.chant_taps || 0;
+        const newTotal = oldTotal + newTaps;
+        const pointsEarned = Math.floor(newTotal / 1000) - Math.floor(oldTotal / 1000); // how many new 1000-thresholds crossed
+
+        let mythopointsAdded = 0;
+        if (pointsEarned > 0) {
+            // Add points to user
+            await usersCollection.updateOne(
+                { user_id: uid },
+                { $inc: { mythopoints: pointsEarned } }
+            );
+            // Log each point separately or as one entry? We'll log total points earned in one history entry.
+            await mpHistoryCollection.insertOne({
+                user_id: uid,
+                amount: pointsEarned,
+                type: "EARNED",
+                reason: `Chant & Earn Reward: ${pointsEarned} Mythopoint(s) for ${pointsEarned * 1000} taps`,
+                date: new Date()
+            });
+            mythopointsAdded = pointsEarned;
+        }
+
+        // Update total taps
+        await userStatsCollection.updateOne(
+            { user_id: uid },
+            { $set: { chant_taps: newTotal } }
+        );
+
+        res.json({
+            success: true,
+            totalTaps: newTotal,
+            pointsAdded: mythopointsAdded,
+            newBalance: (await usersCollection.findOne({ user_id: uid }))?.mythopoints || 0
+        });
+
+    } catch (e) {
+        console.error("Chant sync error:", e);
+        res.status(500).json({ success: false, error: "Internal server error." });
+    }
+});
+
+// ==========================================
+// CHANT LEADERBOARD (top by total taps)
+// ==========================================
+app.get("/api/chant/leaderboard", async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 5;
+        const top = await userStatsCollection
+            .find({ chant_taps: { $gt: 0 } })
+            .sort({ chant_taps: -1 })
+            .limit(limit)
+            .toArray();
+
+        // Fetch user details (name, photo) for each
+        const userIds = top.map(s => s.user_id);
+        const users = await usersCollection
+            .find({ user_id: { $in: userIds } })
+            .project({ user_id: 1, first_name: 1, username: 1, photo_url: 1 })
+            .toArray();
+        const userMap = {};
+        users.forEach(u => userMap[u.user_id] = u);
+
+        const leaderboard = top.map(s => {
+            const user = userMap[s.user_id] || {};
+            return {
+                userId: s.user_id,
+                name: user.first_name || user.username || `User ${s.user_id}`,
+                photo: user.photo_url || null,
+                taps: s.chant_taps || 0
+            };
+        });
+
+        res.json({ success: true, leaderboard });
+    } catch (e) {
+        console.error("Chant leaderboard error:", e);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
+    }
+});
+
+// ==========================================
+// REFERRAL LEADERBOARD API
+// ==========================================
+app.get("/api/referral/leaderboard", async (req, res) => {
+    try {
+        const users = await usersCollection.find(
+            { referral_count: { $gt: 0 } }
+        ).sort({ referral_count: -1 }).limit(10).project({ 
+            user_id: 1, first_name: 1, username: 1, referral_count: 1, photo_url: 1 
+        }).toArray();
+
+        const formatted = users.map(u => ({
+            name: u.first_name || u.username || `User ${u.user_id}`,
+            refs: u.referral_count || 0,
+            photo: u.photo_url || null
+        }));
+
+        res.json({ success: true, leaderboard: formatted });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// LEADERBOARD API (UPDATED: includes photo_url)
+// ==========================================
+app.get("/api/leaderboard/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const timeframe = String(req.query.timeframe || "all").toLowerCase();
+        const limit = 10;
+        const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const skip = (pageNum - 1) * limit;
+
+        const formatUser = (u, points) => {
+            let rawUsername = u.username || u.user_name || u.Username || u.UserName || null;
+            let safeUsername = null;
+            if (rawUsername && typeof rawUsername === "string" && rawUsername.trim() !== "") {
+                safeUsername = rawUsername.trim().startsWith("@")
+                    ? rawUsername.trim()
+                    : `@${rawUsername.trim()}`;
+            }
+            let rawName = u.name || u.first_name || null;
+            if (!rawName) rawName = safeUsername || `User ${u.user_id}`;
+            let finalName = String(rawName);
+            if (finalName.length > 15) finalName = finalName.substring(0, 15) + "..";
+            return {
+                user_id: u.user_id,
+                name: finalName,
+                username: safeUsername,
+                points: points,
+                title: getRankTitle(points),
+                photo_url: u.photo_url || null
+            };
+        };
+
+        // ========== ALL-TIME: users.mythopoints ==========
+        if (timeframe === "all") {
+            const pointField = "mythopoints";
+            const query = { [pointField]: { $gt: 0 } };
+            const totalUsers = await usersCollection.countDocuments(query);
+            const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+            const users = await usersCollection
+                .find(query)
+                .sort({ [pointField]: -1 })
+                .skip(skip)
+                .limit(limit)
+                .toArray();
+
+            const formattedUsers = users.map(u => formatUser(u, u[pointField] || 0));
+
+            let currentUser = null;
+            const userDoc = await usersCollection.findOne({ user_id: uid });
+            if (userDoc && (userDoc[pointField] || 0) > 0) {
+                const higherCount = await usersCollection.countDocuments({
+                    [pointField]: { $gt: userDoc[pointField] }
+                });
+                currentUser = {
+                    points: userDoc[pointField],
+                    rank: higherCount + 1,
+                    title: getRankTitle(userDoc[pointField])
+                };
+            }
+
+            return res.json({
+                success: true,
+                page: pageNum,
+                totalPages,
+                users: formattedUsers,
+                currentUser
+            });
+        }
+
+        // ========== WEEKLY / MONTHLY from mphistory (EARNED only) ==========
+        const days = (timeframe === "weekly" || timeframe === "week") ? 7 : 30;
+        const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+        // Case-insensitive EARNED + date window; normalize user_id to int
+        const basePipeline = [
+            {
+                $match: {
+                    $and: [
+                        {
+                            $or: [
+                                { type: "EARNED" },
+                                { type: "earned" },
+                                { type: { $regex: /^earned$/i } }
+                            ]
+                        },
+                        {
+                            $or: [
+                                { date: { $gte: since } },
+                                // string ISO dates fallback
+                                { date: { $gte: since.toISOString() } }
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                $group: {
+                    _id: { $toLong: "$user_id" },
+                    points: { $sum: { $toDouble: "$amount" } }
+                }
+            },
+            { $match: { points: { $gt: 0 }, _id: { $ne: null } } },
+            { $sort: { points: -1 } }
+        ];
+
+        let totalUsers = 0;
+        let rows = [];
+        try {
+            const countAgg = await mpHistoryCollection
+                .aggregate([...basePipeline, { $count: "n" }])
+                .toArray();
+            totalUsers = countAgg[0]?.n || 0;
+
+            rows = await mpHistoryCollection
+                .aggregate([...basePipeline, { $skip: skip }, { $limit: limit }])
+                .toArray();
+        } catch (aggErr) {
+            // Fallback without $toLong/$toDouble if old Mongo
+            console.error("Leaderboard agg primary failed, fallback:", aggErr.message);
+            const simple = [
+                {
+                    $match: {
+                        type: { $in: ["EARNED", "earned"] },
+                        date: { $gte: since }
+                    }
+                },
+                { $group: { _id: "$user_id", points: { $sum: "$amount" } } },
+                { $match: { points: { $gt: 0 } } },
+                { $sort: { points: -1 } }
+            ];
+            const countAgg = await mpHistoryCollection.aggregate([...simple, { $count: "n" }]).toArray();
+            totalUsers = countAgg[0]?.n || 0;
+            rows = await mpHistoryCollection.aggregate([...simple, { $skip: skip }, { $limit: limit }]).toArray();
+        }
+
+        const totalPages = Math.ceil(totalUsers / limit) || 1;
+
+        const formattedUsers = [];
+        for (const r of rows) {
+            const rid = typeof r._id === "number" ? r._id : parseInt(r._id, 10);
+            const u = (await usersCollection.findOne({
+                $or: [{ user_id: rid }, { user_id: String(rid) }]
+            })) || { user_id: rid };
+            if (u.user_id == null) u.user_id = rid;
+            formattedUsers.push(formatUser(u, Math.round(r.points || 0)));
+        }
+
+        // Current user period points + rank
+        let currentUser = null;
+        try {
+            const myMatch = {
+                $and: [
+                    {
+                        $or: [
+                            { user_id: uid },
+                            { user_id: String(uid) }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { type: "EARNED" },
+                            { type: "earned" },
+                            { type: { $regex: /^earned$/i } }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { date: { $gte: since } },
+                            { date: { $gte: since.toISOString() } }
+                        ]
+                    }
+                ]
+            };
+            const myAgg = await mpHistoryCollection.aggregate([
+                { $match: myMatch },
+                { $group: { _id: null, points: { $sum: { $toDouble: "$amount" } } } }
+            ]).toArray().catch(async () => {
+                return mpHistoryCollection.aggregate([
+                    { $match: { user_id: uid, type: { $in: ["EARNED", "earned"] }, date: { $gte: since } } },
+                    { $group: { _id: null, points: { $sum: "$amount" } } }
+                ]).toArray();
+            });
+            const myPoints = Math.round(myAgg[0]?.points || 0);
+            if (myPoints > 0) {
+                const higherAgg = await mpHistoryCollection.aggregate([
+                    ...basePipeline.slice(0, 3),
+                    { $match: { points: { $gt: myPoints } } },
+                    { $count: "n" }
+                ]).toArray().catch(async () => []);
+                const higher = higherAgg[0]?.n || 0;
+                currentUser = {
+                    points: myPoints,
+                    rank: higher + 1,
+                    title: getRankTitle(myPoints)
+                };
+            }
+        } catch (e) {
+            console.error("Leaderboard currentUser error:", e.message);
+        }
+
+        res.json({
+            success: true,
+            page: pageNum,
+            totalPages,
+            users: formattedUsers,
+            currentUser,
+            timeframe,
+            windowDays: days
+        });
+    } catch (error) {
+        console.error("Leaderboard API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch leaderboard", detail: String(error.message || error) });
+    }
+});
+
+// ==========================================
+// HISTORY API (unchanged)
+// ==========================================
+app.get("/api/history/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const { filter = "ALL", page = 1 } = req.query;
+        const limit = 15;
+        const skip = (parseInt(page) - 1) * limit;
+
+        let query = { user_id: uid };
+        if (filter !== "ALL") {
+            query.type = filter.toUpperCase();
+        }
+
+        const historyRecords = await mpHistoryCollection
+            .find(query)
+            .sort({ date: -1 })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ 
+            success: true, 
+            history: historyRecords 
+        });
+    } catch (error) {
+        console.error("History API Error:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch history" });
+    }
+});
+
+// ==========================================
+// WATCH & EARN CLAIM API (Limit: 5/day)
+// ==========================================
+app.post("/api/watch-earn/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        const today = new Date().toISOString().split('T')[0];
+        const user = await usersCollection.findOne({ user_id: uid });
+        
+        const watchCount = (user?.watch_earn_date === today) ? (user?.watch_earn_count || 0) : 0;
+        
+        if (watchCount >= 5) {
+            return res.status(400).json({ success: false, error: "Daily limit of 5 ads reached! Come back tomorrow." });
+        }
+
+        const reward = Math.floor(Math.random() * 3) + 1;
+
+        await usersCollection.updateOne(
+            { user_id: uid },
+            { 
+                $inc: { mythopoints: reward },
+                $set: { 
+                    watch_earn_date: today,
+                    watch_earn_count: watchCount + 1
+                }
+            },
+            { upsert: true }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: reward,
+            type: "EARNED",
+            reason: `Watched Ad for points (${watchCount + 1}/5)`,
+            date: new Date()
+        });
+
+        const updatedUser = await usersCollection.findOne({ user_id: uid });
+
+        res.json({ success: true, reward: reward, newBalance: updatedUser.mythopoints });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// MONETAG S2S POSTBACK ENDPOINT
+// ==========================================
+app.get("/api/monetag-postback", async (req, res) => {
+    const userId = req.query.userid;
+    const rewardAmt = req.query.reward || 0;
+    const transactionId = req.query.tid || "unknown";
+
+    if (!userId) {
+        return res.status(400).json({ error: "Missing userid" });
+    }
+
+    console.log(`✅ [Monetag] User: ${userId} | Reward: ${rewardAmt} | TID: ${transactionId}`);
+
+    res.status(200).json({ success: true, status: "ok" });
+});
+
+// ==========================================
+// WATCH AD TO SKIP SEARCH COOLDOWN (WEBAPP)
+// ==========================================
+
+app.get("/cooldown-app/:userId", async (req, res) => {
+    const uid = parseInt(req.params.userId);
+    
+    const searchDoc = await searchLimitCollection.findOne({ user_id: uid });
+    
+    const now = Math.floor(Date.now() / 1000);
+    let inCooldown = false;
+    let timeRemaining = 0;
+    
+    if (searchDoc && searchDoc.last_search) {
+        const timePassed = now - searchDoc.last_search;
+        if (timePassed < 300) { 
+            inCooldown = true;
+            timeRemaining = 300 - timePassed;
+        }
+    }
+
+    const minutes = Math.floor(timeRemaining / 60);
+    const seconds = timeRemaining % 60;
+    const timeStr = minutes + "m " + seconds + "s";
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <title>Skip Cooldown</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <h2 style="font-size: 22px;">Skip Cooldown</h2>
+            
+            <div id="ui-cooldown-active" style="display: ${inCooldown ? 'block' : 'none'};">
+                <div style="font-size:40px; margin-bottom:10px;">⏳</div>
+                <p>You have a cooldown period of <b>${timeStr}</b> remaining.</p>
+                <p style="font-size: 13px; color: #aaa;">Watch a quick ad to skip the timer instantly!</p>
+                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad to Skip</button>
+            </div>
+
+            <div id="ui-cooldown-passed" style="display: ${inCooldown ? 'none' : 'block'};">
+                <div style="font-size:40px; margin-bottom:10px;">✅</div>
+                <p>Your cooldown period has already passed.</p>
+                <h3 style="color: #00e676;">You can search now!</h3>
+                <button class="btn" onclick="Telegram.WebApp.close()" style="margin-top: 15px;">Return to Bot</button>
+            </div>
+            
+            <div id="loading-msg" style="display:none; color:#ea80fc; margin-top:15px; font-weight:bold;">
+                Unlocking... Please wait ⚙️
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            
+            const watchBtn = document.getElementById('watch-ad-btn');
+            
+            if (watchBtn) {
+                watchBtn.addEventListener('click', function() {
+                    if (typeof show_9055307 !== 'function') {
+                        alert('Ad service is still loading. Please try again in a few seconds.');
+                        return;
+                    }
+                    
+                    show_9055307().then(() => {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        document.getElementById('ui-cooldown-active').style.display = 'none';
+                        document.getElementById('loading-msg').style.display = 'block';
+                        
+                        fetch('/api/skip-cooldown/claim/${uid}', { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                document.getElementById('loading-msg').style.display = 'none';
+                                if(data.success) {
+                                    document.getElementById('ui-cooldown-passed').style.display = 'block';
+                                    document.getElementById('ui-cooldown-passed').querySelector('h3').innerText = "Cooldown Skipped Successfully!";
+                                } else {
+                                    alert("Error skipping cooldown.");
+                                }
+                            }).catch(err => {
+                                alert("Network error while claiming reward.");
+                            });
+
+                    }).catch((error) => {
+                        alert("Ad failed to load or was closed early.");
+                        console.error("Monetag Error:", error);
+                    });
+                });
+            }
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+app.post("/api/skip-cooldown/claim/:userId", async (req, res) => {
+    try {
+        const uid = parseInt(req.params.userId);
+        
+        await searchLimitCollection.updateOne(
+            { user_id: uid },
+            { $set: { last_search: 0 } },
+            { upsert: true }
+        );
+
+        await mpHistoryCollection.insertOne({
+            user_id: uid,
+            amount: 0,
+            type: "EARNED",
+            reason: "Watched Ad to Skip Cooldown",
+            date: new Date()
+        });
+
+        res.json({ success: true, message: "Cooldown skipped!" });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ==========================================
+// WATCH 3 ADS TO FORWARD (ADVANCED MULTI-STEP, URL-SHORTENER STYLE)
+// Step progress 1/3 -> 2/3 -> 3/3, server-verified, resumable, anti-bypass
+// ==========================================
+const FORWARD_AD_REQUIRED = 3;          // number of ads to watch
+const FORWARD_AD_MIN_GAP_MS = 4000;     // min time between server-verified steps
+const FORWARD_AD_SESSION_TTL_MS = 30 * 60 * 1000; // session validity (30 min)
+
+function getForwardAdCollection() {
+    return client.db("Mytho").collection("forward_ad_sessions");
+}
+
+let forwardAdIndexReady = false;
+async function ensureForwardAdIndexes() {
+    if (forwardAdIndexReady) return;
+    try {
+        const col = getForwardAdCollection();
+        await col.createIndex({ createdAt: 1 }, { expireAfterSeconds: 3600 });
+        await col.createIndex({ user_id: 1, file_id: 1, completed: 1 });
+        forwardAdIndexReady = true;
+    } catch (e) {
+        console.error("Forward-ad index error:", e.message);
+    }
+}
+
+// Create (or resume) a session for user + file
+async function getOrCreateForwardAdSession(userId, fileId) {
+    await ensureForwardAdIndexes();
+    const col = getForwardAdCollection();
+    const now = Date.now();
+    let session = await col.findOne({
+        user_id: userId,
+        file_id: fileId,
+        completed: false,
+        expiresAt: { $gt: now }
+    });
+    if (!session) {
+        session = {
+            token: crypto.randomBytes(16).toString("hex"),
+            user_id: userId,
+            file_id: fileId,
+            step: 0,
+            completed: false,
+            lastStepAt: 0,
+            createdAt: new Date(),
+            expiresAt: now + FORWARD_AD_SESSION_TTL_MS
+        };
+        await col.insertOne(session);
+    }
+    return session;
+}
+
+// Status API (used by page on load to resume progress)
+app.get("/api/forward-ad/status/:userId/:fileId", async (req, res) => {
+    try {
+        const userId = String(req.params.userId);
+        const fileId = String(req.params.fileId);
+        const session = await getOrCreateForwardAdSession(userId, fileId);
+        res.json({
+            success: true,
+            token: session.token,
+            step: session.step,
+            required: FORWARD_AD_REQUIRED
+        });
+    } catch (e) {
+        console.error("Forward-ad status error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// Step API: called after each ad finishes; server validates and increments
+app.post("/api/forward-ad/step", async (req, res) => {
+    try {
+        const { token, userId, fileId } = req.body || {};
+        if (!token || !userId || !fileId) {
+            return res.status(400).json({ success: false, error: "Invalid request" });
+        }
+
+        const col = getForwardAdCollection();
+        const session = await col.findOne({
+            token: String(token),
+            user_id: String(userId),
+            file_id: String(fileId)
+        });
+
+        if (!session || session.expiresAt < Date.now()) {
+            return res.json({ success: false, code: "expired", error: "Session expired. Please reopen the link." });
+        }
+        if (session.completed || session.step >= FORWARD_AD_REQUIRED) {
+            return res.json({ success: true, step: FORWARD_AD_REQUIRED, required: FORWARD_AD_REQUIRED, done: true });
+        }
+
+        const now = Date.now();
+        const wait = FORWARD_AD_MIN_GAP_MS - (now - (session.lastStepAt || 0));
+        if (wait > 0) {
+            return res.json({
+                success: false,
+                code: "too_fast",
+                waitMs: wait,
+                error: "Please watch the full ad before continuing."
+            });
+        }
+
+        // Atomic increment (prevents double-click / replay race)
+        const updated = await col.findOneAndUpdate(
+            { token: session.token, step: session.step, completed: false },
+            { $set: { lastStepAt: now }, $inc: { step: 1 } },
+            { returnDocument: "after" }
+        );
+        const doc = updated && (updated.value !== undefined ? updated.value : updated);
+        if (!doc) {
+            return res.json({ success: false, code: "race", error: "Please try again." });
+        }
+
+        res.json({
+            success: true,
+            step: doc.step,
+            required: FORWARD_AD_REQUIRED,
+            done: doc.step >= FORWARD_AD_REQUIRED
+        });
+    } catch (e) {
+        console.error("Forward-ad step error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// Complete API: final verification before the file is forwarded
+app.post("/api/forward-ad/complete", async (req, res) => {
+    try {
+        const { token, userId, fileId } = req.body || {};
+        if (!token || !userId || !fileId) {
+            return res.status(400).json({ success: false, error: "Invalid request" });
+        }
+        const col = getForwardAdCollection();
+        const result = await col.findOneAndUpdate(
+            {
+                token: String(token),
+                user_id: String(userId),
+                file_id: String(fileId),
+                step: { $gte: FORWARD_AD_REQUIRED },
+                completed: false,
+                expiresAt: { $gt: Date.now() }
+            },
+            { $set: { completed: true, completedAt: new Date() } },
+            { returnDocument: "after" }
+        );
+        const doc = result && (result.value !== undefined ? result.value : result);
+        if (!doc) {
+            return res.json({ success: false, error: "Ads not completed yet." });
+        }
+
+        try {
+            await mpHistoryCollection.insertOne({
+                user_id: parseInt(userId),
+                amount: 0,
+                type: "EARNED",
+                reason: "Watched 3 Ads to Forward File",
+                date: new Date()
+            });
+        } catch (_) {}
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Forward-ad complete error:", e);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+app.get("/forward-ad/:userId/:fileId", async (req, res) => {
+    const userId = String(req.params.userId).replace(/[^0-9]/g, "");
+    const fileId = String(req.params.fileId).replace(/[^A-Za-z0-9_\-]/g, "");
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+        <title>Watch Ads to Forward</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
+        ${THEME_CSS}
+        <style>
+            .fa-steps { display:flex; align-items:center; justify-content:center; gap:0; margin:6px 0 22px; }
+            .fa-dot {
+                width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+                font-weight:700; font-size:15px; color:rgba(235,235,245,0.5);
+                background:rgba(255,255,255,0.06); border:1.5px solid rgba(255,255,255,0.14);
+                transition: all .4s cubic-bezier(0.34,1.56,0.64,1); flex:0 0 auto;
+            }
+            .fa-dot.active { color:#fff; border-color:#bf5af2; box-shadow:0 0 0 4px rgba(191,90,242,0.18); transform:scale(1.08); }
+            .fa-dot.done { color:#fff; background:linear-gradient(135deg,#00e676,#00b359); border-color:transparent; }
+            .fa-line { height:3px; width:44px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; flex:0 0 auto; }
+            .fa-line > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#00e676,#00b359); transition:width .5s ease; }
+            .fa-line.done > i { width:100%; }
+            .fa-counter { font-size:13px; color:#bf5af2; font-weight:700; letter-spacing:.4px; text-transform:uppercase; margin-bottom:6px; }
+            .fa-bar { height:8px; border-radius:8px; background:rgba(255,255,255,0.08); overflow:hidden; margin:0 0 20px; }
+            .fa-bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#b74bff,#00e676); border-radius:8px; transition:width .6s cubic-bezier(.32,.72,0,1); }
+            .btn[disabled] { opacity:.55; cursor:not-allowed; filter:grayscale(.3); }
+            .fa-note { margin-top:18px; padding:12px; background:rgba(255,255,255,0.05); border:0.5px solid rgba(255,255,255,0.1); border-radius:12px; font-size:12px; color:#aaa; line-height:1.5; }
+            .fa-status { min-height:20px; margin-top:14px; font-size:13px; font-weight:600; color:#ea80fc; }
+            .fa-status.err { color:#ff453a; }
+            .fa-status.ok { color:#30d158; }
+            .fa-check { width:64px; height:64px; margin:0 auto 12px; border-radius:50%; background:linear-gradient(135deg,#00e676,#00b359); display:flex; align-items:center; justify-content:center; animation: faPop .5s cubic-bezier(.34,1.56,.64,1); }
+            @keyframes faPop { from { transform:scale(0); } to { transform:scale(1); } }
+            .hidden { display:none !important; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+
+            <!-- LOADING -->
+            <div id="view-loading">
+                <div class="loader"></div>
+                <p style="margin-bottom:0;">Preparing your unlock session...</p>
+            </div>
+
+            <!-- ADS FLOW -->
+            <div id="view-ads" class="hidden">
+                <div style="font-size:40px; margin-bottom:6px;">🍋</div>
+                <h2>Unlock Forward</h2>
+                <div class="fa-counter" id="fa-counter">Ad 1 of 3</div>
+
+                <div class="fa-steps" id="fa-steps">
+                    <div class="fa-dot" data-i="1">1</div>
+                    <div class="fa-line" data-l="1"><i></i></div>
+                    <div class="fa-dot" data-i="2">2</div>
+                    <div class="fa-line" data-l="2"><i></i></div>
+                    <div class="fa-dot" data-i="3">3</div>
+                </div>
+
+                <div class="fa-bar"><i id="fa-bar-fill"></i></div>
+
+                <p id="fa-desc">Watch <b>3 short ads</b> one by one to get your file without spending any Mythopoints.</p>
+
+                <button class="btn" id="watch-ad-btn" style="background: linear-gradient(135deg, #00e676, #00b359);">▶ Watch Ad 1 of 3</button>
+
+                <div class="fa-status" id="fa-status"></div>
+                <div class="fa-note">Watch each ad until it finishes. Closing an ad early will not count as a step. Your progress is saved if you leave and come back.</div>
+            </div>
+
+            <!-- DONE -->
+            <div id="view-done" class="hidden">
+                <div class="fa-check">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+                <h2>All 3 Ads Completed</h2>
+                <p>Verified. Sending your file to the bot...</p>
+                <div class="fa-bar"><i style="width:100%"></i></div>
+                <button class="btn" id="open-bot-btn">Open Bot &amp; Get File</button>
+            </div>
+
+            <!-- ERROR -->
+            <div id="view-error" class="hidden">
+                <h2 class="error-title">Something went wrong</h2>
+                <p id="fa-error-msg">Please try again.</p>
+                <button class="btn" onclick="location.reload()">Retry</button>
+            </div>
+        </div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+
+            const USER_ID = "${userId}";
+            const FILE_ID = "${fileId}";
+            const REQUIRED = ${FORWARD_AD_REQUIRED};
+            const BOT_LINK = "https://t.me/MythoSerialBot?start=adfwd_" + FILE_ID;
+
+            let sessionToken = null;
+            let currentStep = 0;     // ads already completed (server-verified)
+            let busy = false;
+
+            const $ = (id) => document.getElementById(id);
+            const show = (name) => {
+                ['view-loading','view-ads','view-done','view-error'].forEach(v => $(v).classList.add('hidden'));
+                $(name).classList.remove('hidden');
+            };
+            const setStatus = (msg, cls) => {
+                const el = $('fa-status');
+                el.textContent = msg || '';
+                el.className = 'fa-status' + (cls ? ' ' + cls : '');
+            };
+            const haptic = (type) => { try { tg.HapticFeedback.notificationOccurred(type); } catch (_) {} };
+
+            function render() {
+                const next = Math.min(currentStep + 1, REQUIRED);
+                $('fa-counter').textContent = 'Ad ' + next + ' of ' + REQUIRED;
+                $('watch-ad-btn').textContent = '▶ Watch Ad ' + next + ' of ' + REQUIRED;
+                $('fa-bar-fill').style.width = ((currentStep / REQUIRED) * 100) + '%';
+
+                document.querySelectorAll('.fa-dot').forEach(d => {
+                    const i = parseInt(d.dataset.i);
+                    d.classList.remove('done', 'active');
+                    if (i <= currentStep) { d.classList.add('done'); d.innerHTML = '&#10003;'; }
+                    else if (i === currentStep + 1) { d.classList.add('active'); d.textContent = i; }
+                    else { d.textContent = i; }
+                });
+                document.querySelectorAll('.fa-line').forEach(l => {
+                    const i = parseInt(l.dataset.l);
+                    l.classList.toggle('done', i <= currentStep);
+                });
+
+                if (currentStep > 0 && currentStep < REQUIRED) {
+                    $('fa-desc').innerHTML = '<b>' + currentStep + ' of ' + REQUIRED + '</b> ads completed. ' + (REQUIRED - currentStep) + ' more to go!';
+                }
+            }
+
+            async function api(url, body) {
+                const r = await fetch(url, {
+                    method: body ? 'POST' : 'GET',
+                    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                    body: body ? JSON.stringify(body) : undefined
+                });
+                return r.json();
+            }
+
+            async function finish() {
+                show('view-done');
+                haptic('success');
+                try {
+                    const r = await api('/api/forward-ad/complete', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+                    if (!r.success) throw new Error(r.error || 'Verification failed');
+                } catch (e) {
+                    $('fa-error-msg').textContent = e.message || 'Verification failed.';
+                    show('view-error');
+                    return;
+                }
+                openBot();
+            }
+
+            function openBot() {
+                tg.openTelegramLink(BOT_LINK);
+                setTimeout(() => { tg.close(); }, 1200);
+            }
+
+            async function onWatch() {
+                if (busy) return;
+                if (typeof show_9055307 !== 'function') {
+                    setStatus('Ad service is still loading. Try again in a few seconds.', 'err');
+                    return;
+                }
+                busy = true;
+                const btn = $('watch-ad-btn');
+                btn.disabled = true;
+                setStatus('Loading ad ' + (currentStep + 1) + ' of ' + REQUIRED + '...');
+
+                try {
+                    await show_9055307();   // resolves only when the ad is completed
+                } catch (err) {
+                    console.error('Monetag Error:', err);
+                    setStatus('Ad was closed early or failed. Please try again.', 'err');
+                    btn.disabled = false;
+                    busy = false;
+                    return;
+                }
+
+                try {
+                    setStatus('Verifying...');
+                    let r = await api('/api/forward-ad/step', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+
+                    // Server asked us to slow down - wait and retry once
+                    if (!r.success && r.code === 'too_fast' && r.waitMs) {
+                        await new Promise(res => setTimeout(res, r.waitMs + 200));
+                        r = await api('/api/forward-ad/step', { token: sessionToken, userId: USER_ID, fileId: FILE_ID });
+                    }
+
+                    if (!r.success) {
+                        if (r.code === 'expired') {
+                            $('fa-error-msg').textContent = r.error;
+                            show('view-error');
+                            return;
+                        }
+                        throw new Error(r.error || 'Verification failed');
+                    }
+
+                    currentStep = r.step;
+                    haptic('success');
+                    render();
+
+                    if (r.done || currentStep >= REQUIRED) {
+                        setStatus('');
+                        await finish();
+                    } else {
+                        setStatus('Ad ' + currentStep + ' of ' + REQUIRED + ' completed. Next ad ready!', 'ok');
+                        btn.disabled = false;
+                    }
+                } catch (e) {
+                    setStatus(e.message || 'Network error. Please try again.', 'err');
+                    btn.disabled = false;
+                } finally {
+                    busy = false;
+                }
+            }
+
+            $('watch-ad-btn').addEventListener('click', onWatch);
+            $('open-bot-btn').addEventListener('click', openBot);
+
+            (async function init() {
+                try {
+                    const s = await api('/api/forward-ad/status/' + USER_ID + '/' + FILE_ID);
+                    if (!s.success) throw new Error(s.error || 'Could not start session');
+                    sessionToken = s.token;
+                    currentStep = s.step || 0;
+                    render();
+                    if (currentStep >= REQUIRED) { await finish(); }
+                    else { show('view-ads'); }
+                } catch (e) {
+                    $('fa-error-msg').textContent = e.message || 'Could not load. Please try again.';
+                    show('view-error');
+                }
+            })();
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// ==========================================
+// SERIAL SEARCH DATA - From csearch.py (Only i.ibb.co thumbnails)
+// ==========================================
+
+const SERIAL_DATA = {
+    "Shiv Shakti": {
+        command: "ss",
+        seasons: { 1: 914 },
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
+        displayName: "Shiv Shakti"
+    },
+    "Dwarkadheesh": {
+        command: "d",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/LP5n2y8/photo-2025-03-31-05-10-27-7599681771140715700.jpg",
+        displayName: "Dwarkadheesh"
+    },
+    "Karmadhikari Shanidev": {
+        command: "ksd",
+        seasons: { 1: 192 },
+        thumbnail: "https://i.ibb.co/gL87Q5v3/photo-2024-12-26-12-12-43-7607751850023976976.jpg",
+        displayName: "Karmadhikari Shanidev"
+    },
+    "Chandra Dev": {
+        command: "cd",
+        seasons: { 1: 26 },
+        thumbnail: "https://i.ibb.co/b5CJMTs0/photo-2024-12-24-15-58-52-7635141346096840728.jpg",
+        displayName: "Chandra Dev"
+    },
+    "Mahishasura Mardini": {
+        command: "mm",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/gdS9vwK/photo-2025-01-18-04-14-34-7596564443684411267.jpg",
+        displayName: "Mahishasura Mardini"
+    },
+    "Jai Mahalakshmi": {
+        command: "jm",
+        seasons: { 1: 34 },
+        thumbnail: "https://i.ibb.co/CSC4xJ9/photo-2025-01-27-06-00-27-7635140225110376472.jpg",
+        displayName: "Jai Mahalakshmi"
+    },
+    "Chandra Nandni": {
+        command: "cn",
+        seasons: { 1: 35, 2: 27, 3: 46, 4: 60, 5: 45, 6: 65, 7: 8 },
+        thumbnail: "https://i.ibb.co/hJg0hmqm/photo-2026-05-18-04-45-49-7641088540066971680.jpg",
+        displayName: "Chandra Nandni"
+    },
+    "Brij Ke Gopal": {
+        command: "bkg",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/G7JKWzW/photo-2025-02-20-06-30-25-7587769080549142302.jpg",
+        displayName: "Brij Ke Gopal"
+    },
+    "Yashomati Maiya Ke Nandlala": {
+        command: "ymkn",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/4RwFsKp/photo-2025-02-02-05-20-58-7579527255950082854.jpg",
+        displayName: "Yashomati Maiya Ke Nandlala"
+    },
+    "Meera": {
+        command: "meera",
+        seasons: { 1: 134 },
+        thumbnail: "https://i.ibb.co/nMNjkkYJ/photo-2026-06-06-04-27-38-7648144999535607836.jpg",
+        displayName: "Meera"
+    },
+    "Bangla": {
+        command: "bang",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
+        displayName: "Bangla"
+    },
+    "Dharm Yoddha Garud": {
+        command: "dyg",
+        seasons: { 1: 100, 2: 100, 3: 34 },
+        thumbnail: "https://i.ibb.co/3bgFqVD/photo-2026-06-30-03-45-29-7657029629013655556.jpg",
+        displayName: "Dharm Yoddha Garud"
+    },
+    "Siya Ke Ram": {
+        command: "skr",
+        seasons: { 1: 24, 2: 17, 3: 51, 4: 31, 5: 30, 6: 152 },
+        thumbnail: "https://i.ibb.co/HDJN4Dj/photo-2025-04-12-09-41-42-7585272733904694116.jpg",
+        displayName: "Siya Ke Ram"
+    },
+    "Ram Siya Ke Luv Kush": {
+        command: "rsklk",
+        seasons: { 1: 141 },
+        thumbnail: "https://i.ibb.co/FqsNvPJ/photo-2025-04-05-05-23-06-7581052428326426516.jpg",
+        displayName: "Ram Siya Ke Luv Kush"
+    },
+    "Tenali Rama": {
+        command: "tr",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/z8yBYK3/photo-2025-06-10-09-13-06-7604925046016847949.jpg",
+        displayName: "Tenali Rama"
+    },
+    "Devon Ke Dev Mahadev": {
+        command: "dkdm",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/2gy8jK2/photo-2025-06-23-09-08-07-7611488977898018294.jpg",
+        displayName: "Devon Ke Dev Mahadev"
+    },
+    "Karn Sangini": {
+        command: "ks",
+        seasons: { 1: 90 },
+        thumbnail: "https://i.ibb.co/SpLRp9B/photo-2026-05-30-04-27-17-7645537026673999876.jpg",
+        displayName: "Karn Sangini"
+    },
+    "Mata Saraswati": {
+        command: "ms",
+        seasons: { 1: 25 },
+        thumbnail: "https://i.ibb.co/Hphh3XVR/photo-2024-11-11-15-11-54-7635140409793970192.jpg",
+        displayName: "Mata Saraswati"
+    },
+    "Shri Tirupati Balaji": {
+        command: "stb",
+        seasons: { 1: 52 },
+        thumbnail: "https://i.ibb.co/99MqTqgK/photo-2024-09-01-04-08-23-7635141019679326232.jpg",
+        displayName: "Shri Tirupati Balaji"
+    },
+    "Jag Jaanani Maa Vaishnodevi": {
+        command: "jjmv",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/1f7t83D/photo-2025-05-29-04-11-41-7643326846606822532.jpg",
+        displayName: "Jag Jaanani Maa Vaishnodevi"
+    },
+    "Bolo Ambe Maa Ki Jai": {
+        command: "maa",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/0FjtCNq/photo-2025-06-16-08-25-10-7609344192725896061.jpg",
+        displayName: "Bolo Ambe Maa Ki Jai"
+    },
+    "Sriman Rama": {
+        command: "rama",
+        seasons: { 1: 8 },
+        thumbnail: "https://i.ibb.co/dsSqBWNm/photo-2025-01-21-07-03-34-7598189848368775196.jpg",
+        displayName: "Sriman Rama"
+    },
+    "The Legend of Hanuman": {
+        command: "tloh",
+        seasons: { 1: 13, 2: 13, 3: 6, 4: 7, 5: 6, 6: 7 },
+        thumbnail: "https://i.ibb.co/pjvX2r5t/photo-2024-12-19-03-29-05-7597807763783155716.jpg",
+        displayName: "The Legend of Hanuman"
+    },
+    "Hatim": {
+        command: "hatim",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/DGxwSJz/photo-2025-06-12-07-56-15-7605499944947512450.jpg",
+        displayName: "Hatim"
+    },
+    "Ramanand Sagar Ramayan": {
+        command: "rsr",
+        seasons: { 1: 50 },
+        thumbnail: "https://i.ibb.co/MPjH85p/photo-2025-02-26-05-28-27-7591247647277933692.jpg",
+        displayName: "Ramanand Sagar Ramayan"
+    },
+    "Shrimad Ramayan": {
+        command: "sr",
+        seasons: { 1: 341 },
+        thumbnail: "https://i.ibb.co/51MJLm2/photo-2025-05-08-03-51-37-7587054966308235584.jpg",
+        displayName: "Shrimad Ramayan"
+    },
+    "Ramayan Sabke Jeevan Ka Aadhar": {
+        command: "rsjka",
+        seasons: { 1: 60 },
+        thumbnail: "https://i.ibb.co/ChjNnkh/photo-2025-05-03-13-52-16-7585084653194901950.jpg",
+        displayName: "Ramayan Sabke Jeevan Ka Aadhar"
+    },
+    "Radhakrishn": {
+        command: "rk",
+        seasons: { 1: 460, 2: 35, 3: 37, 4: 613 },
+        thumbnail: "https://i.ibb.co/JRygz3XD/photo-2026-06-02-09-49-26-7646733050511884324.jpg",
+        displayName: "Radhakrishn"
+    },
+    "Veer Hanuman": {
+        command: "vh",
+        seasons: { 1: 100, 2: 56 },
+        thumbnail: "https://i.ibb.co/7nbsg8Y/photo-2025-04-25-05-49-20-7581834215599137296.jpg",
+        displayName: "Veer Hanuman"
+    },
+    "Prithviraj Chauhan": {
+        command: "cspc",
+        seasons: { 1: 88 },
+        thumbnail: "https://i.ibb.co/9mb2C2Vk/photo-2025-07-02-11-27-23-7630099372318916612.jpg",
+        displayName: "Prithviraj Chauhan"
+    },
+    "Suryaputra Karn": {
+        command: "spk",
+        seasons: { 1: 307 },
+        thumbnail: "https://i.ibb.co/xtKFW4wJ/photo-2026-07-27-03-59-33-7667052557969129520.jpg",
+        displayName: "Suryaputra Karn"
+    },
+    "Jai Kanhaiya Laal Ki": {
+        command: "jklk",
+        seasons: { 1: 185 },
+        thumbnail: "https://i.ibb.co/4RWQTrXg/photo-2026-02-18-06-46-44-7608093119535382552.jpg",
+        displayName: "Jai Kanhaiya Laal Ki"
+    },
+    "Kaamdhenu Gaumata": {
+        command: "kg",
+        seasons: { 1: 52 },
+        thumbnail: "https://i.ibb.co/LXNBQTtM/photo-2026-02-04-18-29-30-7604087959452647448.jpg",
+        displayName: "Kaamdhenu Gaumata"
+    },
+    "Kakbhushundi Ramayan": {
+        command: "kr",
+        seasons: { 1: 104, 2: 104, 3: 104 },
+        thumbnail: "https://i.ibb.co/JP8yj2T/photo-2026-07-01-02-43-08-7657384801334198304.jpg",
+        displayName: "Kakbhushundi Ramayan"
+    },
+    "Dhruv Tara": {
+        command: "dt",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/cXXCphb/photo-2025-07-18-05-27-07-7616936323912040814.jpg",
+        displayName: "Dhruv Tara"
+    },
+    "Shri Krishna": {
+        command: "sk",
+        seasons: { 1: 0 },
+        thumbnail: "https://i.ibb.co/7nbsg8Y/photo-2025-04-25-05-49-20-7581834215599137296.jpg",
+        displayName: "Shri Krishna"
+    },
+    "Ganesh Kartikey": {
+        command: "gk",
+        seasons: { 1: 156 },
+        thumbnail: "https://i.ibb.co/LDfMvfhG/photo-2025-10-06-14-30-11-7627837255993786376.jpg",
+        displayName: "Ganesh Kartikey"
+    },
+    "Kurukshetra": {
+        command: "kurukshetra",
+        seasons: { 1: 18 },
+        thumbnail: "https://i.ibb.co/JRW0pxQr/photo-2025-10-10-12-07-52-7597691554853027868.jpg",
+        displayName: "Kurukshetra"
+    },
+    "Mahabharat": {
+        command: "mb",
+        seasons: { 1: 7, 2: 20, 3: 13, 4: 18, 5: 8, 6: 5, 7: 10, 8: 7, 9: 7, 10: 15, 11: 18, 12: 5, 13: 5, 14: 3, 15: 13, 16: 14, 17: 13, 18: 6, 19: 8, 20: 14, 21: 4, 22: 5, 23: 7, 24: 4, 25: 7, 26: 7, 27: 19, 28: 3 },
+        thumbnail: "https://i.ibb.co/WD3ZbJ6/photo-2025-04-15-06-58-03-7584404290012614476.jpg",
+        displayName: "Mahabharat"
+    },
+    "Budh Dev": {
+        command: "bd",
+        seasons: { 1: 26 },
+        thumbnail: "https://i.ibb.co/Pz41pj0T/photo-2025-11-13-05-01-06-7635139151368552472.jpg",
+        displayName: "Budh Dev"
+    },
+    "Jai Jagannath": {
+        command: "jj",
+        seasons: { 1: 272 },
+        thumbnail: "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
+        displayName: "Jai Jagannath"
+    },
+    "Mangal Dev": {
+        command: "md",
+        seasons: { 1: 25 },
+        thumbnail: "https://i.ibb.co/WQrzmtN/photo-2026-05-02-04-06-21-7635140993909522436.jpg",
+        displayName: "Mangal Dev"
+    },
+    "Ramayan (2008)": {
+        command: "ry8",
+        seasons: { 1: 300 },
+        thumbnail: "https://i.ibb.co/k2nKV02c/photo-2025-08-22-06-22-11-7624806520911298588.jpg",
+        displayName: "Ramayan (2008)"
+    },
+    "Ramayan (Luv Kush)": {
+        command: "rlk",
+        seasons: { 1: 44 },
+        thumbnail: "https://i.ibb.co/gyF1rHW/photo-2025-08-08-06-18-37-7619255412413860408.jpg",
+        displayName: "Ramayan (Luv Kush)"
+    },
+    "Shrimad Bhagwat Mahapuran": {
+        command: "sbm",
+        seasons: { 1: 52 },
+        thumbnail: "https://i.ibb.co/Y2DT2Dp/photo-2025-08-02-04-19-24-7617394010198705004.jpg",
+        displayName: "Shrimad Bhagwat Mahapuran"
+    },
+    "Bhakter Bhagaban": {
+        command: "bbsk",
+        seasons: { 1: 16, 2: 34, 3: 22, 4: 29, 5: 48, 6: 67, 7: 63, 8: 12, 9: 53, 10: 31, 11: 34, 12: 110, 13: 61, 14: 77 },
+        thumbnail: "https://i.ibb.co/cSqZC1P3/photo-2026-01-21-04-26-51-7597673988436787208.jpg",
+        displayName: "Bhakter Bhagaban"
+    },
+    "Devi Aadi Parashakti": {
+        command: "dap",
+        seasons: { 1: 87 },
+        thumbnail: "https://i.ibb.co/b7PRhCb/photo-2026-01-22-04-29-40-7597937238579388980.jpg",
+        displayName: "Devi Aadi Parashakti"
+    },
+    "Mahima Shani Dev Ki": {
+        command: "msdk",
+        seasons: { 1: 235 },
+        thumbnail: "https://i.ibb.co/BsG1LtL/photo-2025-06-21-09-22-54-7610940870637037699.jpg",
+        displayName: "Mahima Shani Dev Ki"
+    },
+    "Shani": {
+        command: "kds",
+        seasons: { 1: 346 },
+        thumbnail: "https://i.ibb.co/F8Pp8Vk/photo-2025-05-11-09-16-59-7588264655872797310.jpg",
+        displayName: "Shani"
+    },
+    "Jai Hanuman Sankat Mochan Naam Tiharo": {
+        command: "jhsnt",
+        seasons: { 1: 89 },
+        thumbnail: "https://i.ibb.co/d4nhyG1Y/photo-2026-01-27-05-11-57-7599904785860395040.jpg",
+        displayName: "Jai Hanuman Sankat Mochan Naam Tiharo"
+    },
+    "Chandragupta Maurya": {
+        command: "cm",
+        seasons: { 1: 105 },
+        thumbnail: "https://i.ibb.co/jkvwhjPN/photo-2026-01-25-05-34-26-7599168405127561244.jpg",
+        displayName: "Chandragupta Maurya"
+    },
+    "Baal Shiv": {
+        command: "bs",
+        seasons: { 1: 215 },
+        thumbnail: "https://i.ibb.co/p6QwkdQn/photo-2026-01-23-05-09-37-7598419869637279748.jpg",
+        displayName: "Baal Shiv"
+    },
+    "Raja Shivchhatrapati": {
+        command: "rs",
+        seasons: { 1: 45 },
+        thumbnail: "https://i.ibb.co/KxpQRmfk/photo-2026-02-19-03-54-28-7608419764683145256.jpg",
+        displayName: "Raja Shivchhatrapati"
+    },
+    "Sangamarmar": {
+        command: "smm",
+        seasons: { 1: 13 },
+        thumbnail: "https://i.ibb.co/vxf1jJVH/photo-2026-03-09-06-38-32-7615595993609797652.jpg",
+        displayName: "Sangamarmar"
+    },
+    "Shrimad Ramayan Marathi": {
+        command: "srm",
+        seasons: { 1: 101 },
+        thumbnail: "https://i.ibb.co/d4D80N40/photo-2026-06-27-04-46-27-7655932080185933828.jpg",
+        displayName: "Shrimad Ramayan Marathi"
+    },
+    "Shrimad Ramayan Bangla": {
+        command: "srb",
+        seasons: { 1: 360 },
+        thumbnail: "https://i.ibb.co/ns4ZQk7p/photo-2026-07-20-04-13-28-7664458621060644888.jpg",
+        displayName: "Shrimad Ramayan Bangla"
+    },
+    "Radha Krishna": {
+        command: "rkb",
+        seasons: { 1: 1072 },
+        thumbnail: "https://i.ibb.co/JRygz3XD/photo-2026-06-02-09-49-26-7646733050511884324.jpg",
+        displayName: "Radha Krishna"
+    },
+    "Vighnaharta Ganesh": {
+        command: "vg",
+        seasons: { 1: 1026 },
+        thumbnail: "https://i.ibb.co/v4Tj2nmy/photo-2026-07-04-03-21-38-7658507815023018012.jpg",
+        displayName: "Vighnaharta Ganesh"
+    },
+    "Paapnaashini Ganga": {
+        command: "pg",
+        seasons: { 1: 88 },
+        thumbnail: "https://i.ibb.co/BHSKj76q/photo-2026-07-02-04-41-16-7657786170322976784.jpg",
+        displayName: "Paapnaashini Ganga"
+    },
+    "Hastinapur Ke Veer": {
+        command: "hkv",
+        seasons: { 1: 50 },
+        thumbnail: "https://i.ibb.co/27V2wwnX/photo-2026-06-01-07-35-00-7646327408030646276.jpg",
+        displayName: "Hastinapur Ke Veer"
+    }
+};
+
+// API endpoint to get serial data
+app.get("/api/serials", (req, res) => {
+    const serials = Object.keys(SERIAL_DATA).map(name => ({
+        name,
+        displayName: SERIAL_DATA[name].displayName || name,
+        command: SERIAL_DATA[name].command,
+        thumbnail: SERIAL_DATA[name].thumbnail || "https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg",
+        seasons: SERIAL_DATA[name].seasons,
+        totalEpisodes: Object.values(SERIAL_DATA[name].seasons).reduce((a, b) => a + b, 0)
+    }));
+    res.json({ success: true, serials });
+});
+
+// ==========================================
+// FAKE TRAP ERROR ROUTE FOR BYPASS BOTS
+// ==========================================
+app.get("/AntiBypassError", (req, res) => {
+    renderBypassError(res);
+});
+
+
+// ==========================================
+// REST API TO RECEIVE MINI-APP QUIZZES (UPDATED with per-question time & photo support)
+// ==========================================
+app.post("/api/quiz/create", async (req, res) => {
+    try {
+        const { userId, title, description, time_per_question, questions } = req.body;
+        
+        if (!title || !questions || questions.length === 0) {
+            return res.status(400).json({ success: false, error: "Missing required fields or questions." });
+        }
+
+        const category = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+
+        // Calculate average time per question if not set globally
+        let avgTime = time_per_question || 15;
+        if (!time_per_question) {
+            const times = questions.map(q => q.time_limit || 15);
+            avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+        }
+
+        const metadata = {
+            title: title,
+            description: description || "",
+            category: category,
+            difficulty: "medium",
+            time_per_question: avgTime, // Global fallback
+            total_questions: questions.length,
+            created_by: parseInt(userId),
+            created_at: new Date(),
+            is_active: true
+        };
+
+        const metaResult = await quizMetadataCollection.insertOne(metadata);
+        const quizId = metaResult.insertedId;
+
+        const questionDocs = questions.map(q => ({
+            quiz_id: quizId,
+            category: category,
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation || "Good job! ✨",
+            media_url: q.media_url || null,      // Photo URL support
+            media_file_id: q.media_file_id || null, // NEW: Telegram file ID
+            media_type: q.media_type || null,    // "photo" or "video" or null
+            time_limit: q.time_limit || null,     // PER-QUESTION TIME (null = use global)
+            is_active: true,
+            is_rapid_fire: q.is_rapid_fire === true 
+        }));
+
+        await quizCollection.insertMany(questionDocs);
+
+        res.json({ success: true, quiz_id: quizId.toString(), category: category });
+
+    } catch (e) {
+        console.error("Quiz Creation Server Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error." });
+    }
+});
+
+// ==========================================
+// AI QUIZ GENERATOR (Gemini with key rotation)
+// ==========================================
+app.post("/api/quiz/generate-ai", async (req, res) => {
+    try {
+        const { topic, count = 5, difficulty = "medium", language = "English", time_per_question = 15 } = req.body;
+        if (!topic || typeof topic !== "string" || topic.trim().length < 2) {
+            return res.status(400).json({ success: false, error: "Please provide a valid topic." });
+        }
+        const numQ = Math.min(Math.max(parseInt(count, 10) || 5, 1), 20);
+        const diff = ["easy", "medium", "hard"].includes(String(difficulty).toLowerCase())
+            ? String(difficulty).toLowerCase()
+            : "medium";
+        const lang = String(language || "English").slice(0, 40);
+        const tPerQ = Math.min(Math.max(parseInt(time_per_question, 10) || 15, 5), 120);
+
+        const prompt = `You are an expert quiz creator. Generate exactly ${numQ} multiple-choice quiz questions about: "${topic.trim()}".
+
+Difficulty: ${diff}
+Language for all text: ${lang}
+Each question must have exactly 4 options.
+Return ONLY a valid JSON object (no markdown, no code fences) with this exact structure:
+{
+  "title": "Short catchy quiz title",
+  "description": "One sentence description of the quiz",
+  "time_per_question": ${tPerQ},
+  "questions": [
+    {
+      "question": "Question text here?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": 0,
+      "explanation": "Brief explanation why the correct answer is right",
+      "time_limit": ${tPerQ}
+    }
+  ]
+}
+Rules:
+- "answer" is the 0-based index of the correct option (0, 1, 2 or 3).
+- Make questions clear, factual and non-ambiguous.
+- Options should be plausible; only one is correct.
+- Do not include any text outside the JSON object.`;
+
+        const raw = await callGemini(prompt);
+        let parsed;
+        try {
+            // Strip accidental markdown fences if model ignored mime type
+            const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+            parsed = JSON.parse(cleaned);
+        } catch (e) {
+            console.error("Gemini JSON parse failed:", raw?.slice?.(0, 400));
+            return res.status(502).json({ success: false, error: "AI returned invalid JSON. Please try again." });
+        }
+
+        if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+            return res.status(502).json({ success: false, error: "AI did not return any questions." });
+        }
+
+        // Normalize & validate
+        const questions = parsed.questions.slice(0, numQ).map((q, i) => {
+            const options = Array.isArray(q.options) ? q.options.map(String).slice(0, 4) : [];
+            while (options.length < 4) options.push(`Option ${options.length + 1}`);
+            let answer = Number(q.answer);
+            if (!Number.isFinite(answer) || answer < 0 || answer > 3) answer = 0;
+            return {
+                question: String(q.question || `Question ${i + 1}`).trim(),
+                options,
+                answer,
+                explanation: String(q.explanation || "Good job!").trim(),
+                time_limit: Number(q.time_limit) || tPerQ,
+                media_url: null,
+                media_file_id: null,
+                media_type: null,
+                is_rapid_fire: false
+            };
+        });
+
+        res.json({
+            success: true,
+            title: String(parsed.title || `${topic.trim()} Quiz`).slice(0, 120),
+            description: String(parsed.description || "").slice(0, 300),
+            time_per_question: Number(parsed.time_per_question) || tPerQ,
+            questions
+        });
+    } catch (e) {
+        console.error("AI Quiz Generate Error:", e.message || e);
+        res.status(500).json({
+            success: false,
+            error: e.response?.data?.error?.message || e.message || "Failed to generate quiz with AI."
+        });
+    }
+});
+
+// ==========================================
+// USER ANTI-BYPASS LINK GENERATOR API (WITH SMART TRAP)
+// ==========================================
+app.post("/api/user_shorten", async (req, res) => {
+    try {
+        const { user_id, target_url } = req.body;
+        if (!user_id || !target_url) {
+            return res.status(400).json({ success: false, error: "Missing user_id or target_url" });
+        }
+
+        // Verify the URL structure
+        new URL(target_url);
+
+        // Fetch the user's active shortener configuration from MongoDB
+        const db = client.db("Mytho");
+        const shortener = await db.collection("user_shorteners").findOne({ 
+            user_id: parseInt(user_id), 
+            active: true 
+        });
+
+        if (!shortener) {
+            return res.status(400).json({ success: false, error: "No active shortener site found. Please use /addsite in the bot first." });
+        }
+
+        const { domain, api_token } = shortener;
+        const cleanDomain = domain.replace("https://", "").replace("http://", "").replace(/\/$/, "");
+
+        // ==========================================
+        // 🔥 SMART FAKE TRAP FOR BYPASS BOTS 🔥
+        // ==========================================
+        const realToken = crypto.randomBytes(8).toString("hex"); // Hidden secure token
+        
+        // 1. Fake target ab sidha "Bypass Detected" wale page par le jayega
+        const hostUrl = req.get('host') || req.hostname;
+        const fakeUrl = `https://${hostUrl}/AntiBypassError`; 
+        const fakeEncodedTarget = base62_encode(fakeUrl);
+        
+        // 2. Shield URL contains the REAL token for DB lookup, but a FAKE encoded target in 't'
+        const shieldUrl = `https://${hostUrl}/Bypass/${user_id}/${realToken}?t=${fakeEncodedTarget}`;
+
+        // 3. Save the REAL target in the database tied to the realToken securely
+        await urlShortenerCollection.insertOne({
+            token: realToken,
+            creator_id: parseInt(user_id),
+            target_url: target_url, // Real destination safely stored in DB
+            encoded_target: "hidden_in_db", 
+            created_at: new Date(),
+            clicks: 0,
+            access_logs: []
+        });
+
+        // Call the user's custom AdLinkFly/Shortener API
+        const apiUrl = `https://${cleanDomain}/api?api=${api_token}&url=${encodeURIComponent(shieldUrl)}`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+
+        if (data.status === 'success' || data.shortenedUrl || data.short_url) {
+            let finalUrl = data.shortenedUrl || data.short_url || data.url;
+            
+            // Force the link to use the exact site domain provided by the user
+            try {
+                const urlObj = new URL(finalUrl);
+                finalUrl = `https://${cleanDomain}${urlObj.pathname}${urlObj.search}`;
+            } catch(e) {
+                console.error("URL parsing error:", e);
+            }
+
+            res.json({ success: true, short_url: finalUrl });
+        } else {
+            res.status(400).json({ success: false, error: "External shortener API rejected the request", details: data });
+        }
+    } catch (error) {
+        console.error("User Shorten Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error or Invalid URL" });
+    }
+});
+
+
+// ==========================================
+// MONETAG DIRECT LINK INTERSTITIAL SYSTEM
+// ==========================================
+
+// 1. UI Page: Admin Link Generator Tab
+app.get("/ad-link-creator", (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Create Ad Link</title>
+        ${THEME_CSS}
+    </head>
+    <body>
+        <div class="container">
+            <div style="font-size:40px; margin-bottom:10px;">🔗</div>
+            <h2>Create Episode Link</h2>
+            <p>Paste original link to generate your Ad-enabled Monetag link.</p>
+            
+            <input type="text" id="originalUrl" placeholder="https://t.me/..." style="width:100%; padding:14px; margin-bottom:16px; border-radius:12px; border:1px solid rgba(191,90,242,0.5); background:rgba(0,0,0,0.4); color:#fff; outline:none; font-size:15px;">
+            <button id="generateBtn" class="btn">Generate Link</button>
+            
+            <div id="resultBox" style="display:none; margin-top:24px; background:rgba(255,255,255,0.06); padding:16px; border-radius:16px; border:0.5px solid rgba(255,255,255,0.1);">
+                <p style="margin:0 0 12px 0; font-size:15px; color:#30d158; font-weight:600;">✅ Link Successfully Generated!</p>
+                <input type="text" id="shortUrl" readonly style="width:100%; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.6); color:#ea80fc; margin-bottom:12px; font-size:13px;">
+                <button id="copyBtn" class="btn" style="padding:12px; font-size:15px; background:linear-gradient(135deg, #32d74b, #248a3d); box-shadow: 0 4px 15px rgba(48,209,88,0.3);">Copy & Share</button>
+            </div>
+        </div>
+        <script>
+            document.getElementById('generateBtn').onclick = async () => {
+                const url = document.getElementById('originalUrl').value.trim();
+                if(!url) return alert('Please enter a valid link first.');
+                
+                const btn = document.getElementById('generateBtn');
+                btn.innerText = "Generating...";
+                
+                try {
+                    const res = await fetch('/api/create-ad-link', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ url: url })
+                    });
+                    const data = await res.json();
+                    
+                    if(data.success) {
+                        const finalUrl = window.location.origin + '/get-episode/' + data.token;
+                        document.getElementById('shortUrl').value = finalUrl;
+                        document.getElementById('resultBox').style.display = 'block';
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                } catch(e) {
+                    alert('Network Error');
+                }
+                btn.innerText = "Generate Link";
+            };
+
+            document.getElementById('copyBtn').onclick = () => {
+                const copyText = document.getElementById('shortUrl');
+                copyText.select();
+                document.execCommand("copy");
+                alert('Link Copied! Send this to your users.');
+            };
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// 2. API to Save Target Link in DB
+app.post("/api/create-ad-link", async (req, res) => {
+    try {
+        const { url } = req.body;
+        if (!url) return res.status(400).json({ success: false, error: "URL is required" });
+        
+        // 8 character random hex token
+        const token = crypto.randomBytes(4).toString("hex");
+        
+        // Reusing your existing urlShortenerCollection
+        await urlShortenerCollection.insertOne({
+            token: token,
+            creator_id: "admin", 
+            target_url: url,
+            created_at: new Date(),
+            clicks: 0,
+            type: "monetag_redirect"
+        });
+        
+        res.json({ success: true, token: token });
+    } catch (error) {
+        console.error("Ad Link Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// 3. Interstitial Page: Force Ad click before content
+app.get("/get-episode/:token", async (req, res) => {
+    const { token } = req.params;
+    
+    try {
+        const dbRecord = await urlShortenerCollection.findOne({ token: token });
+        
+        if (!dbRecord) {
+            return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Link Expired or Invalid</h2><p>Please request a new link.</p></div></body></html>`);
+        }
+
+        // Update click tracking
+        await urlShortenerCollection.updateOne({ token: token }, { $inc: { clicks: 1 } });
+
+        // Aapki Monetag Link
+        const monetagLink = "https://uplcm.com/4/12021126";
+        const originalLink = dbRecord.target_url;
+
+        res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>Unlock Episode</title>
+            ${THEME_CSS}
+        </head>
+        <body>
+            <div class="container">
+                <div style="font-size:50px; margin-bottom:12px;">🎬</div>
+                <h2>Your Episode is Ready!</h2>
+                <p id="wait-text">Securing connection... Please wait <span id="timer" style="color:#bf5af2; font-size:18px; font-weight:bold;">5</span> seconds.</p>
+                
+                <button id="unlockBtn" class="btn" style="display:none; background: linear-gradient(135deg, #00e676, #00b359); box-shadow: 0 8px 20px rgba(48,209,88,0.3);">▶ Get Episode Now</button>
+                
+                <div style="margin-top:24px; padding:12px; background:rgba(255,255,255,0.05); border-radius:12px; border:0.5px solid rgba(255,255,255,0.1);">
+                    <p style="font-size:12px; color:#aaa; margin:0;">Clicking the button will open our sponsor to support the server, and instantly redirect you to the episode.</p>
+                </div>
+            </div>
+
+            <script>
+                let timeLeft = 5;
+                const timerEl = document.getElementById('timer');
+                const waitText = document.getElementById('wait-text');
+                const unlockBtn = document.getElementById('unlockBtn');
+                
+                const countdown = setInterval(() => {
+                    timeLeft--;
+                    timerEl.innerText = timeLeft;
+                    if(timeLeft <= 0) {
+                        clearInterval(countdown);
+                        waitText.style.display = 'none';
+                        unlockBtn.style.display = 'block';
+                    }
+                }, 1000);
+
+                unlockBtn.onclick = function() {
+                    // Monetag Ad naye tab me khulega (Revenue)
+                    window.open("${monetagLink}", "_blank");
+                    
+                    // Button disabled aur loading text show karega
+                    unlockBtn.innerText = "Redirecting...";
+                    unlockBtn.style.opacity = "0.7";
+                    unlockBtn.disabled = true;
+
+                    // Current page original link par chali jayegi (Content)
+                    setTimeout(() => {
+                        window.location.href = "${originalLink}";
+                    }, 500);
+                };
+            </script>
+        </body>
+        </html>
+        `);
+    } catch (error) {
+        res.redirect('https://t.me/MythoSerialBot');
+    }
+});
+
+
+
+// ==========================================
+// MINI APP ROUTE – PREMIUM FRONTEND (UPDATED with Search Section & Persistent Settings)
+// ==========================================
+
+app.get("/mini/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>MythoSerial</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+  <script src='//libtl.com/sdk.js' data-zone='9055307' data-sdk='show_9055307'></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    /* === RESET & GLOBAL === */
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+      background: #000000;
+      background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.09) 0%, transparent 55%), 
+                        radial-gradient(circle at 80% 80%, rgba(213,0,249,0.05) 0%, transparent 50%);
+      color: #ffffff;
+      min-height: 100vh;
+      padding-bottom: 80px;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-touch-callout: none;
+      letter-spacing: -0.01em;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 10px; }
+
+    /* === GLASS CARD (enhanced glassmorphism) === */
+    .glass {
+      background: linear-gradient(165deg, rgba(40,40,48,0.72) 0%, rgba(22,22,28,0.78) 100%);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 0.5px solid rgba(255,255,255,0.14);
+      border-radius: 22px;
+      padding: 18px;
+      margin: 12px 16px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 0.5px rgba(183,75,255,0.08);
+      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s;
+    }
+    .glass:active { transform: scale(0.99); }
+    .glass-title {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      letter-spacing: -0.4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .glass-title svg {
+      width: 22px;
+      height: 22px;
+      fill: #bf5af2;
+    }
+
+    /* === SETTINGS MODAL & FEATURES === */
+    .settings-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); backdrop-filter: blur(20px) saturate(150%); z-index: 900; justify-content: center; align-items: center; }
+    .settings-overlay.open { display: flex; animation: fadeIn 0.3s; }
+    .settings-box { background: rgba(28,28,30,0.92); backdrop-filter: blur(40px) saturate(180%); border-radius: 22px; width: 90%; max-width: 340px; padding: 22px; border: 0.5px solid rgba(255,255,255,0.12); box-shadow: 0 24px 60px rgba(0,0,0,0.6); max-height: 80vh; overflow-y: auto; }
+    .settings-box h3 { margin: 0 0 18px 0; color: #ffffff; text-align: center; font-weight: 600; letter-spacing: -0.3px; }
+    .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .setting-item:last-child { border-bottom: none; }
+    .setting-label { font-size: 14px; color: #fff; font-weight: 500; }
+    
+    /* Toggle Switch */
+    .toggle-switch { position: relative; width: 51px; height: 31px; appearance: none; background: rgba(120,120,128,0.32); border-radius: 31px; outline: none; cursor: pointer; transition: background 0.25s; }
+    .toggle-switch:checked { background: #30d158; }
+    .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; background: #fff; border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 3px 8px rgba(0,0,0,0.25); }
+    .toggle-switch:checked::after { transform: translateX(20px); }
+    
+    /* Privacy Blur */
+    .privacy-blur { filter: blur(8px); transition: filter 0.3s; user-select: none; }
+    
+    /* Floating Pill Nav Modifier */
+    .tab-bar.floating-pill { bottom: 15px; width: 92%; left: 4%; border-radius: 30px; border: 0.5px solid rgba(255,255,255,0.1); padding: 8px 0; box-shadow: 0 10px 40px rgba(0,0,0,0.5); background: rgba(28,28,30,0.85); }
+    
+    /* Settings Gear Icon - Smaller SVG */
+    .settings-gear { 
+      position: absolute; top: -5px; right: -5px; 
+      background: rgba(28,28,30,0.9); border: 1.5px solid #30d158; 
+      border-radius: 50%; width: 24px; height: 24px; 
+      display: flex; align-items: center; justify-content: center; 
+      cursor: pointer; color: #30d158; 
+      z-index: 10; transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1); 
+      box-shadow: 0 2px 10px rgba(48,209,88,0.25);
+      padding: 0;
+    }
+    .settings-gear svg { width: 14px; height: 14px; fill: #30d158; }
+    .settings-gear:active { transform: scale(0.85); }
+
+    /* === NAVBAR === */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(32px) saturate(180%);
+      -webkit-backdrop-filter: blur(32px) saturate(180%);
+      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      padding: 16px 20px;
+      text-align: center;
+      font-weight: 600;
+      font-size: 17px;
+      letter-spacing: -0.4px;
+      color: #fff;
+    }
+
+    /* === TAB CONTENT === */
+    .tab-content { display: none; animation: fadeSlide 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    .tab-content.active { display: block; }
+    @keyframes fadeSlide {
+      0% { opacity: 0; transform: translateY(16px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* === TAB BAR === */
+    .tab-bar {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(32px) saturate(180%);
+      -webkit-backdrop-filter: blur(32px) saturate(180%);
+      border-top: 0.5px solid rgba(255,255,255,0.08);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 20px)) 0;
+      z-index: 100;
+    }
+    .tab-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: rgba(255,255,255,0.35);
+      font-size: 10px;
+      font-weight: 600;
+      transition: color 0.2s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      min-width: 48px;
+      position: relative;
+    }
+    .tab-btn:active { transform: scale(0.88); }
+    .tab-btn svg {
+      width: 28px;
+      height: 28px;
+      margin-bottom: 3px;
+      fill: currentColor;
+      transition: all 0.3s;
+    }
+    .tab-btn.active { color: #ea80fc; }
+    .tab-btn.active svg { fill: #ea80fc; filter: drop-shadow(0 0 10px rgba(234,128,252,0.4)); }
+    .tab-btn::after {
+      content: '';
+      position: absolute;
+      top: -2px;
+      width: 0;
+      height: 2px;
+      background: #ea80fc;
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+    .tab-btn.active::after { width: 70%; }
+    
+    /* Unread badge on pay tab */
+    .tab-btn .unread-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: #ff453a;
+      color: #fff;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      font-size: 10px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #000000;
+    }
+    .tab-btn .unread-badge.show { display: flex; }
+
+    /* === WIDGETS === */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .widget {
+      background: rgba(28,28,30,0.65);
+      border: 0.5px solid rgba(255,255,255,0.09);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .widget:active { transform: scale(0.97); }
+    .widget-full { grid-column: span 2; }
+    .widget-icon { width: 28px; height: 28px; fill: rgba(255,255,255,0.5); margin-bottom: 8px; }
+    .widget-title { 
+      font-size: 11px; 
+      color: rgba(255,255,255,0.45); 
+      font-weight: 500; 
+      text-transform: uppercase; 
+      letter-spacing: 0.8px; 
+      margin-bottom: 4px; 
+    }
+    .widget-value { 
+      font-size: 26px; 
+      font-weight: 700; 
+      letter-spacing: -0.5px; 
+      display: flex; 
+      align-items: center; 
+      gap: 6px; 
+      position: relative;
+      color: #ffffff;
+    }
+    .widget-value .mytho-label {
+      position: absolute;
+      bottom: -8px;
+      right: 0;
+      font-size: 10px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.15);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .widget-sub { font-size: 12px; color: #ea80fc; margin-top: 4px; font-weight: 500; }
+    
+    /* Premium Widget Enhanced */
+    .w-premium { 
+      border: 0.5px solid rgba(255,214,10,0.2); 
+      background: linear-gradient(135deg, rgba(255,214,10,0.08), rgba(213,0,249,0.08));
+      position: relative;
+      overflow: hidden;
+    }
+    .w-premium::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at center, rgba(255,214,10,0.03), transparent 70%);
+      animation: premiumGlow 4s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes premiumGlow {
+      0% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+      100% { transform: translate(5%, 5%) scale(1.1); opacity: 1; }
+    }
+    .w-premium .widget-value { color: #ffd60a; position: relative; z-index: 1; }
+    .w-premium .widget-title { color: rgba(255,214,10,0.7); }
+    
+    .premium-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, #ffd60a, #f59e0b);
+      padding: 2px 10px;
+      border-radius: 30px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #000;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      box-shadow: 0 0 20px rgba(255,214,10,0.3);
+    }
+    
+    .upgrade-btn {
+      display: block;
+      width: 100%;
+      text-align: center;
+      margin-top: 14px;
+      background: linear-gradient(135deg, #ffd60a, #f59e0b);
+      color: #000;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 4px 15px rgba(255,214,10,0.3);
+      transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s;
+    }
+    .upgrade-btn:active {
+      transform: scale(0.92) !important;
+      box-shadow: 0 2px 8px rgba(255,214,10,0.6) !important;
+    }
+
+    .refill-btn {
+      display: block;
+      width: 100%;
+      text-align: center;
+      margin-top: 14px;
+      background: linear-gradient(135deg, #0a84ff, #5e5ce6);
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 4px 15px rgba(10,132,255,0.3);
+      transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s;
+    }
+    .refill-btn:active {
+      transform: scale(0.92) !important;
+      box-shadow: 0 2px 8px rgba(10,132,255,0.6) !important;
+    }
+
+    .w-search { border: 0.5px solid rgba(10,132,255,0.2); background: linear-gradient(135deg, rgba(10,132,255,0.08), rgba(0,230,118,0.05)); }
+    .w-search .widget-value { color: #0a84ff; }
+    .w-search .widget-title { color: rgba(10,132,255,0.7); }
+
+    .w-bank { border: 0.5px solid rgba(48,209,88,0.2); background: rgba(48,209,88,0.04); }
+    .w-bank .widget-value { color: #30d158; }
+
+    /* === PROFILE HEADER === */
+    .profile-hdr {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 16px 16px 8px;
+      position: relative;
+    }
+    .profile-pic {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 2px solid #00e676;
+      object-fit: cover;
+      background: #1c0a2b;
+      box-shadow: 0 0 20px rgba(0,230,118,0.25);
+    }
+    .profile-info { flex: 1; }
+    .profile-info h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+    .profile-info p { margin: 4px 0 0 0; font-size: 14px; color: #ea80fc; font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(213,0,249,0.12);
+      border-radius: 30px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      margin-top: 6px;
+      border: 0.5px solid rgba(213,0,249,0.15);
+    }
+    .switch-btn {
+      background: rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: 0.2s;
+      color: #ea80fc;
+      flex-shrink: 0;
+    }
+    .switch-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+    .switch-btn:active { transform: scale(0.9); background: rgba(213,0,249,0.15); }
+
+    /* === SEARCH WIDGET - Google Style === */
+    .search-widget {
+      margin: 8px 16px 12px;
+      border-radius: 30px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .search-widget:active {
+      transform: scale(0.97);
+      background: rgba(255,255,255,0.1);
+    }
+    .search-widget svg {
+      width: 20px;
+      height: 20px;
+      fill: rgba(255,255,255,0.4);
+      flex-shrink: 0;
+    }
+    .search-widget .search-text {
+      flex: 1;
+      color: rgba(255,255,255,0.5);
+      font-size: 15px;
+      font-weight: 400;
+    }
+    .search-widget .mic-icon {
+      width: 18px;
+      height: 18px;
+      fill: rgba(255,255,255,0.3);
+    }
+
+    /* === SEARCH OVERLAY === */
+    .search-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(20px);
+      z-index: 800;
+      flex-direction: column;
+      animation: fadeSlide 0.3s ease;
+    }
+    .search-overlay.open { display: flex; }
+    
+    .search-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .search-header .back-btn {
+      background: none;
+      border: none;
+      color: #ea80fc;
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+    }
+    .search-header .back-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+    .search-header .search-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+      transition: border 0.3s;
+    }
+    .search-header .search-input:focus {
+      border-color: #d500f9;
+    }
+    .search-header .search-input::placeholder {
+      color: rgba(255,255,255,0.3);
+    }
+
+    .search-serial-row {
+      padding: 12px 16px 8px;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .search-serial-row::-webkit-scrollbar { display: none; }
+    
+    .serial-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 30px;
+      padding: 6px 14px 6px 6px;
+      margin-right: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .serial-chip:active {
+      transform: scale(0.95);
+      background: rgba(213,0,249,0.15);
+    }
+    .serial-chip.active {
+      border-color: #d500f9;
+      background: rgba(213,0,249,0.12);
+    }
+    .serial-chip img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    .serial-chip span {
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+    }
+
+    .search-results-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 16px 20px;
+    }
+
+    /* YouTube-style thumbnail grid - one per row */
+    .serial-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .serial-list-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 16px;
+      padding: 10px 14px;
+      border: 1px solid rgba(255,255,255,0.04);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .serial-list-item:active {
+      transform: scale(0.97);
+      background: rgba(213,0,249,0.08);
+    }
+    .serial-list-item .thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: rgba(28,28,30,0.95);
+    }
+    .serial-list-item .info {
+      flex: 1;
+      min-width: 0;
+    }
+    .serial-list-item .info .title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .serial-list-item .info .sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 2px;
+    }
+    .serial-list-item .arrow {
+      color: rgba(255,255,255,0.2);
+      flex-shrink: 0;
+    }
+
+    .season-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .season-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .season-card:active {
+      transform: scale(0.95);
+      background: rgba(213,0,249,0.1);
+    }
+    .season-card .season-num {
+      font-size: 18px;
+      font-weight: 700;
+      color: #ea80fc;
+    }
+    .season-card .season-eps {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 4px;
+    }
+
+    .episode-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(65px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .episode-btn {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 10px 4px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+      text-decoration: none;
+      display: block;
+    }
+    .episode-btn:active {
+      transform: scale(0.92);
+      background: rgba(213,0,249,0.15);
+    }
+    .episode-btn .ep-label {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    .search-section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      margin: 16px 0 10px;
+      padding: 0 4px;
+    }
+
+    .search-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    /* === LIST CARD === */
+    .list-card { 
+      background: rgba(45,10,80,0.25); 
+      border-radius: 20px; 
+      border: 0.5px solid rgba(255,255,255,0.04); 
+      overflow: hidden; 
+    }
+    .list-item { 
+      display: flex; 
+      align-items: center;
+      padding: 14px 16px; 
+      border-bottom: 0.5px solid rgba(255,255,255,0.04); 
+      transition: background 0.15s;
+      gap: 12px;
+    }
+    .list-item:last-child { border-bottom: none; }
+    .list-item .tx-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .list-item .tx-icon svg {
+      width: 18px;
+      height: 18px;
+      fill: #fff;
+    }
+    .tx-icon.earn { background: rgba(48,209,88,0.2); border: 1px solid rgba(48,209,88,0.3); }
+    .tx-icon.spend { background: rgba(255,69,58,0.2); border: 1px solid rgba(255,69,58,0.3); }
+    .tx-icon.tax { background: rgba(255,214,10,0.2); border: 1px solid rgba(255,214,10,0.3); }
+    .tx-icon.default { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.05); }
+
+    .list-item .item-content {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .item-left { display: flex; flex-direction: column; gap: 2px; }
+    .item-left p { margin: 0; font-size: 15px; font-weight: 500; }
+    .item-left span { font-size: 12px; color: rgba(255,255,255,0.4); }
+    .item-right { font-weight: 600; font-size: 16px; color: #fff; }
+    .val-pos { color: #30d158; }
+    .val-neg { color: #ff453a; }
+
+    /* === LOADING === */
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(213,0,249,0.12); border-top-color: #d500f9; border-radius: 50%; animation: spin 1s linear infinite; margin: 40px auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty { text-align: center; color: rgba(255,255,255,0.3); padding: 30px 20px; font-size: 14px; }
+
+    /* === WATCH & EARN FAB (AI STYLE) === */
+    .earn-fab {
+      position: fixed;
+      bottom: 100px;
+      right: 20px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff); 
+      border: none;
+      box-shadow: 0 4px 30px rgba(213,0,249,0.5); 
+      color: white;
+      cursor: pointer;
+      z-index: 200;
+      display: none; /* only shown from Settings */
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+      animation: pulseGlow 2s infinite alternate; 
+      padding: 0;
+      line-height: 1;
+    }
+    .earn-fab.visible { display: flex; }
+    .earn-fab:active { transform: scale(0.9); }
+    
+    .earn-fab .fab-top {
+      font-size: 10px;
+      font-weight: 700;
+      opacity: 0.9;
+      margin-bottom: -2px;
+      transform: scale(0.65);
+    }
+    
+    .earn-fab .fab-mid {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      z-index: 2;
+    }
+    .earn-fab .fab-mid svg { width: 15px; height: 15px; }
+    .earn-fab .fab-mid span { font-size: 16px; font-weight: 900; }
+    
+    .earn-fab .fab-bot {
+      font-size: 10px;
+      font-weight: 600;
+      opacity: 0.9;
+      margin-top: -2px;
+      white-space: nowrap;
+      transform: scale(0.45);
+    }
+
+    @keyframes pulseGlow {
+      0% { box-shadow: 0 4px 30px rgba(213,0,249,0.3); }
+      100% { box-shadow: 0 4px 50px rgba(213,0,249,0.8); }
+    }
+
+    /* === LEADERBOARD === */
+    .lb-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 16px;
+      border-bottom: 0.5px solid rgba(255,255,255,0.04);
+      transition: all 0.2s;
+      cursor: default;
+      gap: 8px;
+    }
+    .lb-item:last-child { border-bottom: none; }
+
+    .lb-avatar-wrap {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+    .lb-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+      color: #fff;
+      background: #651fff;
+      text-transform: uppercase;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.1);
+    }
+    .lb-avatar-wrap .rank-badge {
+      position: absolute;
+      bottom: -4px;
+      right: -4px;
+      background: #000000;
+      border: 1.5px solid rgba(255,255,255,0.15);
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    }
+    .lb-rank.gold .lb-avatar { border-color: #FFD700; box-shadow: 0 0 20px rgba(255,215,0,0.4); }
+    .lb-rank.silver .lb-avatar { border-color: #C0C0C0; box-shadow: 0 0 20px rgba(192,192,192,0.3); }
+    .lb-rank.bronze .lb-avatar { border-color: #CD7F32; box-shadow: 0 0 20px rgba(205,127,50,0.3); }
+    .lb-rank.default .lb-avatar { border-color: rgba(255,255,255,0.08); }
+    .lb-rank.self .lb-avatar { border-color: #d500f9; box-shadow: 0 0 20px rgba(213,0,249,0.3); }
+
+    .lb-info { flex: 1; }
+    .lb-name { font-weight: 600; font-size: 16px; }
+    .lb-name.self-highlight { color: #ea80fc; }
+    .lb-name .you-tag { font-size: 11px; background: rgba(213,0,249,0.15); padding: 2px 8px; border-radius: 30px; margin-left: 8px; color: #ea80fc; }
+    .lb-pts { font-weight: 600; color: #ffffff; font-size: 15px; }
+
+    .lb-self-row {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: rgba(213,0,249,0.05);
+      border-radius: 16px;
+      border: 1px solid rgba(213,0,249,0.12);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: fadeSlide 0.5s ease;
+    }
+    .lb-self-rank { font-weight: 700; color: #fff; }
+    .lb-self-pts { font-weight: 700; color: #ffd60a; }
+
+    /* === PAYMENT - CHAT STYLE (Updated with reactions, ticks, online status) === */
+    .payment-chat-container {
+      max-height: 250px;
+      overflow-y: auto;
+      margin-bottom: 8px;
+      padding: 6px 8px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 16px;
+      min-height: 60px;
+    }
+    .payment-chat-container .chat-msg {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+      animation: fadeSlide 0.3s ease;
+    }
+    .payment-chat-container .chat-msg.sent { flex-direction: row-reverse; }
+    .payment-chat-container .chat-msg .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 10px;
+      color: #fff;
+    }
+    .payment-chat-container .chat-msg .bubble {
+      max-width: 75%;
+      padding: 6px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.3;
+      word-wrap: break-word;
+      position: relative;
+    }
+    .payment-chat-container .chat-msg.sent .bubble {
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .payment-chat-container .chat-msg.received .bubble {
+      background: rgba(255,255,255,0.06);
+      color: #eee;
+      border-bottom-left-radius: 4px;
+    }
+    .payment-chat-container .chat-msg .bubble .payment-card {
+      background: rgba(0,230,118,0.1);
+      border: 1px solid rgba(0,230,118,0.2);
+      border-radius: 10px;
+      padding: 4px 10px;
+      margin-top: 2px;
+      font-size: 12px;
+    }
+    .payment-chat-container .chat-msg .bubble .payment-card .amount {
+      font-weight: 700;
+      color: #30d158;
+    }
+    .payment-chat-container .chat-msg .time {
+      font-size: 9px;
+      color: rgba(255,255,255,0.2);
+      margin-top: 2px;
+    }
+    
+    /* Read receipt ticks */
+    .chat-msg .read-tick {
+      font-size: 10px;
+      margin-left: 4px;
+      color: rgba(255,255,255,0.3);
+    }
+    .chat-msg .read-tick.read { color: #30d158; }
+    
+    /* Online status indicator */
+    .online-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #30d158;
+      margin-left: 6px;
+      box-shadow: 0 0 10px rgba(48,209,88,0.5);
+      animation: pulse-dot 2s infinite;
+    }
+    .online-dot.offline {
+      background: #555;
+      box-shadow: none;
+      animation: none;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    
+    /* Reaction buttons */
+    .reaction-bar {
+      display: flex;
+      gap: 4px;
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+    .reaction-btn {
+      background: rgba(255,255,255,0.06);
+      border: none;
+      border-radius: 12px;
+      padding: 2px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .reaction-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.12); }
+    .reaction-btn .count { font-size: 9px; opacity: 0.5; }
+    
+    /* Message actions */
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 2px;
+      justify-content: flex-end;
+    }
+    .chat-msg:hover .msg-actions,
+    .chat-msg:active .msg-actions { display: flex; }
+    .msg-actions button {
+      background: rgba(255,255,255,0.05);
+      border: none;
+      border-radius: 8px;
+      padding: 2px 6px;
+      font-size: 10px;
+      cursor: pointer;
+      color: rgba(255,255,255,0.4);
+      transition: all 0.2s;
+    }
+    .msg-actions button:active { background: rgba(255,255,255,0.12); }
+
+    .payment-chat-input-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .payment-chat-input-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .payment-chat-input-row input::placeholder { color: rgba(255,255,255,0.2); }
+    .payment-chat-input-row button {
+      padding: 8px 14px;
+      border-radius: 20px;
+      border: none;
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
+      color: #fff;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .payment-chat-input-row button:active { transform: scale(0.95); }
+
+    .search-user-input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color: #fff;
+      font-size: 13px;
+      margin-bottom: 8px;
+      transition: border 0.3s;
+      outline: none;
+    }
+    .search-user-input:focus { border-color: #d500f9; }
+    .search-user-input::placeholder { color: rgba(255,255,255,0.2); }
+    .user-result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px;
+      border-bottom: 0.5px solid rgba(255,255,255,0.04);
+      cursor: pointer;
+      transition: background 0.15s;
+      border-radius: 8px;
+    }
+    .user-result:active { background: rgba(255,255,255,0.02); }
+    .user-result .result-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 12px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .user-result .result-info { flex: 1; }
+    .user-result .result-info .name { font-weight: 500; font-size: 13px; }
+    .user-result .result-info .sub { font-size: 10px; color: rgba(255,255,255,0.3); }
+    .quick-action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin: 12px 16px;
+    }
+    .quick-action {
+      background: rgba(45,10,80,0.3);
+      backdrop-filter: blur(12px);
+      border: 0.5px solid rgba(255,255,255,0.04);
+      border-radius: 16px;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .quick-action:active { transform: scale(0.94); }
+    .quick-action .icon { font-size: 28px; }
+    .quick-action .label { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+    .quick-action.bank { border-color: rgba(48,209,88,0.15); }
+    .quick-action.store { border-color: rgba(255,214,10,0.15); }
+    .quick-action.pay { border-color: rgba(10,132,255,0.15); }
+
+    /* === STORE === */
+    .store-section-title {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin: 20px 16px 10px;
+      font-weight: 700;
+    }
+    
+    .store-card {
+      background: rgba(45,10,80,0.3);
+      backdrop-filter: blur(12px);
+      border: 0.5px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 14px;
+      margin: 0 16px 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .store-card:active {
+      transform: scale(0.96);
+      background: rgba(213,0,249,0.1);
+    }
+    .store-icon-wrap {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: inset 0 0 10px rgba(255,255,255,0.05);
+    }
+    .store-icon-wrap svg { width: 24px; height: 24px; fill: currentColor; }
+    
+    .store-info { flex: 1; }
+    .store-info h4 { margin: 0; font-size: 15px; font-weight: 600; color: #fff; letter-spacing: -0.2px; }
+    .store-info p { margin: 4px 0 0; font-size: 11px; color: rgba(255,255,255,0.5); }
+    
+    .store-buy-btn {
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      box-shadow: 0 6px 15px rgba(213,0,249,0.3);
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .store-buy-btn:active { transform: scale(0.92); box-shadow: 0 2px 8px rgba(213,0,249,0.4); }
+
+    /* Coupon Grid */
+    .coupon-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 0 16px 20px;
+    }
+    .coupon-card {
+      background: linear-gradient(135deg, rgba(255,214,10,0.03), rgba(255,214,10,0.08));
+      border: 1.5px dashed rgba(255,214,10,0.3);
+      border-radius: 16px;
+      padding: 16px 12px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: transform 0.2s;
+    }
+    .coupon-card:active { transform: scale(0.95); background: rgba(255,214,10,0.1); }
+    .coupon-icon { color: #ffd60a; margin-bottom: 8px; filter: drop-shadow(0 2px 8px rgba(255,214,10,0.4)); }
+    .coupon-icon svg { width: 32px; height: 32px; fill: currentColor; }
+    .coupon-card h4 { margin: 0; font-size: 16px; font-weight: 800; color: #ffd60a; }
+    .coupon-card p { margin: 4px 0 12px; font-size: 10px; color: rgba(255,255,255,0.6); }
+    
+    .coupon-buy-btn {
+      width: 100%;
+      background: rgba(255,214,10,0.15);
+      color: #ffd60a;
+      border: 1px solid rgba(255,214,10,0.3);
+      padding: 8px 0;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .coupon-buy-btn:active { background: rgba(255,214,10,0.3); }
+
+    /* === RATING STARS === */
+    .star-rating {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin: 12px 0;
+    }
+    .star {
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      transition: all 0.2s;
+      fill: rgba(255,255,255,0.1);
+    }
+    .star.active { fill: #ffd60a; filter: drop-shadow(0 0 10px rgba(255,214,10,0.5)); }
+    .star:active { transform: scale(1.2); }
+
+    /* === WITHDRAW === */
+    .withdraw-input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color: #fff;
+      font-size: 14px;
+      margin-bottom: 8px;
+      outline: none;
+    }
+    .withdraw-input:focus { border-color: #d500f9; }
+    .withdraw-btn {
+      width: 100%;
+      padding: 12px;
+      border-radius: 20px;
+      border: none;
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s;
+      font-size: 14px;
+    }
+    .withdraw-btn:active { transform: scale(0.95); }
+
+    /* === STREAK RING === */
+    .streak-ring {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,215,0,0.06);
+      padding: 4px 12px 4px 8px;
+      border-radius: 30px;
+      border: 0.5px solid rgba(255,215,0,0.12);
+    }
+    .streak-ring .flame {
+      font-size: 18px;
+      animation: flicker 1.5s infinite alternate;
+    }
+    @keyframes flicker {
+      0% { opacity: 0.7; transform: scale(0.95); }
+      100% { opacity: 1; transform: scale(1.05); }
+    }
+
+    .mytho-label {
+      position: absolute;
+      bottom: -6px;
+      right: 0;
+      font-size: 10px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.12);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* === Confirm Modal === */
+    .confirm-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(10px);
+      z-index: 500;
+      justify-content: center;
+      align-items: center;
+    }
+    .confirm-overlay.open { display: flex; }
+    .confirm-box {
+      background: rgba(28,28,30,0.95);
+      border-radius: 24px;
+      padding: 24px 28px;
+      max-width: 340px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+    }
+    .confirm-box p { font-size: 16px; margin-bottom: 24px; color: #ddd; }
+    .confirm-box .btn-row { display: flex; gap: 12px; justify-content: center; }
+    .confirm-box .btn-row button {
+      padding: 10px 28px;
+      border-radius: 30px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .confirm-box .btn-row button:active { transform: scale(0.94); }
+    .confirm-box .btn-cancel { background: rgba(255,255,255,0.06); color: #aaa; }
+    .confirm-box .btn-confirm { background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff); color: #fff; }
+
+    /* === Success Overlay === */
+    .success-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      z-index: 600;
+      justify-content: center;
+      align-items: center;
+      animation: fadeIn 0.3s;
+    }
+    .success-overlay.open { display: flex; }
+    .success-box {
+      background: #000000;
+      border-radius: 32px;
+      padding: 30px 28px;
+      max-width: 340px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(0,230,118,0.2);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .success-box .check-circle {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #00e676;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+    .success-box .check-circle svg { fill: #fff; width: 36px; height: 36px; }
+    .success-box h3 { font-size: 22px; margin: 0; color: #fff; }
+    .success-box p { color: rgba(255,255,255,0.5); font-size: 14px; margin: 8px 0 0; }
+    @keyframes popIn {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    #ui-pts, #profile-pts, .lb-pts, .item-right, .widget-value, .lb-self-pts {
+      color: #ffffff !important;
+    }
+
+    /* ===== CHANT CARD STYLES ===== */
+    .chant-level {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      margin: 4px 0 2px;
+      background: linear-gradient(135deg, #ffd60a, #ff9f1c);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+    .chant-progress-container {
+      background: rgba(255,255,255,0.06);
+      border-radius: 30px;
+      height: 8px;
+      margin: 6px 0 10px;
+      overflow: hidden;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+    }
+    .chant-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #d500f9, #ffd60a);
+      border-radius: 30px;
+      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 20px rgba(213,0,249,0.4);
+    }
+    .chant-counter {
+      text-align: center;
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+    .chant-counter span { color: #fff; font-weight: 700; }
+    .chant-orb-container {
+      display: flex;
+      justify-content: center;
+      margin: 6px 0 10px;
+      position: relative;
+    }
+    .chant-orb {
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ff9f1c, #d500f9);
+      box-shadow: 0 0 40px rgba(213,0,249,0.5), 0 0 80px rgba(213,0,249,0.2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.2s;
+      user-select: none;
+      -webkit-user-select: none;
+      position: relative;
+      border: 2px solid rgba(255,255,255,0.15);
+    }
+    .chant-orb:active {
+      transform: scale(0.92);
+      box-shadow: 0 0 60px rgba(213,0,249,0.8);
+    }
+    .chant-orb .chant-text {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 0 20px rgba(0,0,0,0.5);
+      pointer-events: none;
+      text-align: center;
+      padding: 0 10px;
+    }
+    .chant-orb .edit-icon {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.2s;
+      color: #fff;
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .chant-orb .edit-icon:active { background: rgba(255,255,255,0.2); }
+
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+      transform: scale(0);
+      animation: rippleAnim 0.6s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes rippleAnim {
+      to { transform: scale(2); opacity: 0; }
+    }
+
+    .floating-tap {
+      position: fixed;
+      pointer-events: none;
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffd60a;
+      text-shadow: 0 0 20px rgba(255,214,10,0.8);
+      animation: floatUp 0.8s forwards ease-out;
+      z-index: 999;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-80px) scale(1.3); }
+    }
+
+    .chant-mint-animation {
+      animation: mintPulse 0.6s ease;
+    }
+    @keyframes mintPulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); box-shadow: 0 0 80px rgba(255,214,10,0.9); }
+      100% { transform: scale(1); }
+    }
+
+    .chant-leaderboard {
+      margin-top: 12px;
+    }
+    .chant-lb-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 0;
+      border-bottom: 0.5px solid rgba(255,255,255,0.04);
+      gap: 8px;
+    }
+    .chant-lb-item:last-child { border-bottom: none; }
+    .chant-lb-rank {
+      font-weight: 600;
+      color: rgba(255,255,255,0.3);
+      font-size: 11px;
+      width: 18px;
+    }
+    .chant-lb-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #651fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 10px;
+      color: #fff;
+    }
+    .chant-lb-name {
+      flex: 1;
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+    }
+    .chant-lb-taps {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    .upi-numpad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      max-width: 240px;
+      margin: 0 auto;
+    }
+    .upi-numpad button {
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 18px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 0.5px solid rgba(255,255,255,0.04);
+    }
+    .upi-numpad button:active {
+      transform: scale(0.92);
+      background: rgba(213,0,249,0.15);
+    }
+    .upi-numpad .clear-btn {
+      background: rgba(255,69,58,0.1);
+      color: #ff453a;
+    }
+    .upi-numpad .clear-btn:active {
+      background: rgba(255,69,58,0.2);
+    }
+    .upi-display {
+      font-size: 28px;
+      font-weight: 700;
+      text-align: center;
+      padding: 6px 0;
+      color: #fff;
+      letter-spacing: 2px;
+      min-height: 50px;
+    }
+
+    .payment-processing {
+      display: none;
+      text-align: center;
+      padding: 20px 0;
+    }
+    .payment-processing.active { display: block; }
+    .payment-processing .svg-loader {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 16px;
+    }
+
+    .chant-orb-3d {
+      perspective: 600px;
+      display: flex;
+      justify-content: center;
+    }
+    .chant-orb-3d .chant-orb {
+      transform-style: preserve-3d;
+      transition: transform 0.1s ease-out;
+    }
+
+    .selected-user-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(213,0,249,0.08);
+      border-radius: 30px;
+      border: 0.5px solid rgba(213,0,249,0.15);
+      margin: 4px 0 8px;
+      font-size: 12px;
+    }
+    .selected-user-badge .remove-btn {
+      background: none;
+      border: none;
+      color: #ff453a;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .selected-user-badge .remove-btn:active { transform: scale(0.9); }
+
+    /* === SCRATCH CARD BANNER === */
+    .scratch-btn-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(135deg, #ff9f1c, #d500f9);
+      border-radius: 20px;
+      padding: 12px 18px;
+      margin: 0 16px 16px 16px;
+      text-decoration: none;
+      box-shadow: 0 8px 25px rgba(213, 0, 249, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: transform 0.2s;
+    }
+    .scratch-btn-banner:active {
+      transform: scale(0.96);
+    }
+    .scratch-btn-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .scratch-icon-wrap {
+      background: rgba(255,255,255,0.2);
+      border-radius: 12px;
+      padding: 6px;
+      font-size: 20px;
+    }
+    .scratch-text-main {
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+      letter-spacing: 0.3px;
+    }
+    .scratch-text-sub {
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+    }
+    .scratch-arrow {
+      background: rgba(0,0,0,0.2);
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    /* === SPIN WHEEL STYLES (Enhanced) === */
+    .spin-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 12px 0 20px;
+    }
+    .spin-wheel-wrapper {
+      position: relative;
+      width: 250px;
+      height: 250px;
+      margin: 0 auto;
+      border-radius: 50%;
+      box-shadow: 0 0 60px rgba(255, 215, 0, 0.25), 0 0 30px rgba(213,0,249,0.3);
+      background: #000;
+    }
+    .spin-wheel-canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+    }
+    .spin-pointer {
+      position: absolute;
+      top: -18px;
+      left: 50%;
+      transform: translateX(-50%) rotate(180deg);
+      width: 0;
+      height: 0;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-bottom: 25px solid #FFD700;
+      filter: drop-shadow(0 -5px 12px rgba(255, 214, 10, 0.9));
+      z-index: 20;
+    }
+
+    .spin-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90px;
+      height: 90px;
+      background: url('https://i.ibb.co/S4ytTbQk/photo-2026-08-12-05-24-36-7673011816502394908.jpg') center center no-repeat;
+      background-size: cover;
+      border: 4px solid #FFD700;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFD700;
+      font-weight: 900;
+      font-size: 20px;
+      cursor: pointer;
+      z-index: 30;
+      box-shadow: 0 0 25px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.3);
+      transition: transform 0.1s, font-size 0.2s;
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
+      letter-spacing: 1px;
+    }
+
+    .spin-center:active { transform: translate(-50%, -50%) scale(0.92); }
+    .spin-center.disabled { 
+      opacity: 0.8; 
+      pointer-events: none; 
+      border-color: #666; 
+      color: #888; 
+      box-shadow: none; 
+      text-shadow: none;
+    }
+    .spin-btn, .spin-double-btn {
+      display: none !important;
+    }
+
+    .spin-result-box {
+      margin-top: 12px;
+      padding: 10px 16px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      width: 100%;
+      text-align: center;
+    }
+    .spin-result-box .result-roll {
+      font-size: 32px;
+      font-weight: 700;
+      color: #ffd60a;
+    }
+    .spin-result-box .result-points {
+      font-size: 18px;
+      color: #30d158;
+    }
+    .spin-countdown {
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+      margin: 4px 0;
+    }
+    .spin-streak {
+      font-size: 14px;
+      color: #ffd60a;
+      margin: 2px 0;
+    }
+    .spin-error {
+      color: #ff453a;
+      font-size: 14px;
+      margin: 4px 0;
+    }
+
+    /* Monetag overlay for spin */
+    .spin-ad-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 700;
+      flex-direction: column;
+    }
+    .spin-ad-overlay.open { display: flex; }
+    .spin-ad-overlay .ad-btn {
+      background: linear-gradient(135deg, #00e676, #00b359);
+      border: none;
+      padding: 16px 32px;
+      color: white;
+      font-weight: 700;
+      font-size: 18px;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(0,230,118,0.4);
+      text-transform: uppercase;
+      transition: transform 0.2s;
+    }
+    .spin-ad-overlay .ad-btn:active { transform: scale(0.94); }
+    .spin-ad-overlay .ad-title {
+      font-size: 22px;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .spin-ad-overlay .ad-sub {
+      font-size: 14px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 12px;
+    }
+
+    /* === PAYMENT - CHAT STYLE (Enhanced PhonePe/WhatsApp Style) === */
+    .pay-search-area { display: block; }
+    .pay-search-area.hidden { display: none; }
+
+    .pay-fullscreen {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      height: 100dvh;
+      max-height: 100dvh;
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      background: #000000;
+      z-index: 200;
+      overflow: hidden;
+    }
+    .pay-fullscreen.open { display: flex; animation: fadeSlide 0.3s ease; }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.85);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding-top: max(12px, env(safe-area-inset-top));
+      flex-shrink: 0;
+    }
+    .chat-header .back-btn {
+      background: none; border: none; padding: 4px; cursor: pointer; display: flex;
+      color: #ea80fc;
+    }
+    .chat-header .avatar {
+      width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #651fff;
+    }
+    .chat-header .info { flex: 1; }
+    .chat-header .info h3 { 
+      margin: 0; font-size: 16px; font-weight: 600; color: #fff; 
+      display: flex; align-items: center; gap: 6px;
+    }
+    .chat-header .info p { margin: 2px 0 0; font-size: 12px; color: rgba(255,255,255,0.5); }
+
+    .chat-area {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #000000;
+      background-image: radial-gradient(circle at 50% 0%, rgba(101,31,255,0.05) 0%, transparent 60%);
+    }
+    .encryption-msg {
+      text-align: center; font-size: 11px; color: rgba(255,255,255,0.4);
+      margin: 10px 0 20px; display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .chat-date {
+      text-align: center; font-size: 11px; color: rgba(255,255,255,0.5); margin: 16px 0 8px;
+    }
+
+    .chat-msg { display: flex; align-items: flex-end; gap: 8px; max-width: min(88%, 320px); width: fit-content; }
+    .chat-msg.sent { align-self: flex-end; flex-direction: row-reverse; }
+    .chat-msg.received { align-self: flex-start; }
+    
+    .chat-msg .avatar {
+      width: 26px; height: 26px; border-radius: 50%; object-fit: cover; margin-bottom: 18px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5); flex-shrink: 0;
+    }
+
+    .chat-msg .bubble-wrapper { display: flex; flex-direction: column; max-width: 100%; min-width: 0; overflow: hidden; }
+    .chat-msg.sent .bubble-wrapper { align-items: flex-end; }
+
+    .chat-msg .bubble {
+      padding: 10px 14px; border-radius: 18px; font-size: 14px; line-height: 1.4;
+      word-wrap: break-word; overflow-wrap: anywhere; word-break: break-word;
+      white-space: pre-wrap; max-width: 100%; box-sizing: border-box;
+      position: relative; overflow: hidden;
+    }
+    
+    .chat-msg.sent .bubble.text {
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff); color: #fff; border-bottom-right-radius: 4px;
+    }
+    .chat-msg.received .bubble.text {
+      background: rgba(255,255,255,0.08); color: #eee; border-bottom-left-radius: 4px;
+    }
+
+    .chat-msg .bubble.payment {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 16px;
+      width: 220px;
+      backdrop-filter: blur(10px);
+      background-image: repeating-radial-gradient(circle at 0 0, transparent 0, rgba(255,255,255,0.01) 12px, transparent 13px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .chat-msg.sent .bubble.payment { border-bottom-right-radius: 4px; }
+    .chat-msg.received .bubble.payment { border-bottom-left-radius: 4px; }
+
+    .payment-amount { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 12px; }
+    .payment-status { 
+      display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; 
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .payment-status.success { color: #30d158; }
+    
+    .chat-msg .time { 
+      font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; padding: 0 4px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .chat-msg .time .tick { font-size: 12px; }
+
+    .chat-footer {
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.92);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      position: relative;
+      flex-shrink: 0;
+      z-index: 5;
+    }
+    .chat-input-wrapper {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 24px;
+      padding: 4px 4px 4px 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .chat-input {
+      flex: 1; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; min-width: 0;
+    }
+    .chat-input::placeholder { color: rgba(255,255,255,0.3); }
+    .pay-send-btn, .chat-icon-btn {
+      background: linear-gradient(135deg, #ff3ec9, #b026ff 55%, #651fff);
+      border: none; border-radius: 50%; width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: transform 0.2s; flex-shrink: 0; color: #fff;
+    }
+    .chat-icon-btn {
+      background: transparent; width: 36px; height: 36px; color: rgba(255,255,255,0.7);
+    }
+    .chat-icon-btn:active, .pay-send-btn:active { transform: scale(0.9); }
+    .chat-icon-btn.recording { color: #ff453a; animation: pulseGlow 1s infinite; }
+
+    /* Reply / edit bar (Telegram-style) — stays inside chat footer on screen */
+    .reply-bar {
+      display: none; align-items: center; gap: 10px;
+      padding: 8px 12px; margin-bottom: 6px;
+      background: rgba(183,75,255,0.12); border-left: 3px solid #bf5af2;
+      border-radius: 10px; font-size: 13px;
+      max-width: 100%; box-sizing: border-box;
+      flex-shrink: 0;
+    }
+    .reply-bar.open { display: flex; }
+    .reply-bar .rb-body { flex: 1; min-width: 0; overflow: hidden; }
+    .reply-bar .rb-title { color: #bf5af2; font-weight: 600; font-size: 12px; }
+    .reply-bar .rb-text { color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .reply-bar .rb-close { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; padding: 4px; flex-shrink: 0; }
+
+    /* Inline reply quote inside bubble */
+    .reply-quote {
+      border-left: 3px solid #bf5af2; padding: 4px 8px; margin-bottom: 6px;
+      background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px; max-width: 100%;
+    }
+    .reply-quote .rq-name { color: #bf5af2; font-weight: 600; }
+    .reply-quote .rq-text { color: rgba(255,255,255,0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .msg-edited { font-size: 10px; color: rgba(255,255,255,0.35); margin-left: 4px; font-style: italic; }
+    .bubble.deleted { opacity: 0.55; font-style: italic; color: rgba(255,255,255,0.45) !important; background: rgba(255,255,255,0.04) !important; }
+    .bubble.sticker-bubble { background: transparent !important; padding: 4px; font-size: 48px; line-height: 1; }
+    .bubble img.chat-media { max-width: 220px; border-radius: 12px; display: block; }
+    .bubble audio.chat-voice { width: 180px; height: 32px; }
+
+    /* Context menu */
+    .msg-ctx {
+      position: fixed; z-index: 950; min-width: 180px;
+      background: rgba(28,28,30,0.96); backdrop-filter: blur(30px);
+      border: 0.5px solid rgba(255,255,255,0.12); border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.55); padding: 6px; display: none;
+    }
+    .msg-ctx.open { display: block; animation: fadeSlide 0.15s ease; }
+    .msg-ctx button {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      background: none; border: none; color: #fff; font-size: 14px;
+      padding: 11px 12px; border-radius: 10px; cursor: pointer; text-align: left;
+    }
+    .msg-ctx button:active { background: rgba(255,255,255,0.08); }
+    .msg-ctx button.danger { color: #ff453a; }
+
+    /* Sticker panel */
+    .sticker-panel {
+      display: none; max-height: 180px; overflow-y: auto;
+      padding: 8px; margin-bottom: 6px;
+      background: rgba(20,20,22,0.95); border-radius: 14px;
+      border: 0.5px solid rgba(255,255,255,0.08);
+      grid-template-columns: repeat(6, 1fr); gap: 4px;
+    }
+    .sticker-panel.open { display: grid; }
+    .sticker-panel button {
+      background: none; border: none; font-size: 28px; padding: 6px;
+      border-radius: 10px; cursor: pointer; line-height: 1;
+    }
+    .sticker-panel button:active { background: rgba(255,255,255,0.08); transform: scale(1.15); }
+
+    /* Scroll to bottom FAB */
+    .chat-scroll-fab {
+      position: absolute; right: 16px; bottom: 78px; z-index: 40;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(40,40,48,0.95); border: 0.5px solid rgba(255,255,255,0.14);
+      color: #fff; display: none; align-items: center; justify-content: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4); cursor: pointer;
+    }
+    .chat-scroll-fab.show { display: flex; }
+    .chat-scroll-fab .new-badge {
+      position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
+      background: #bf5af2; border-radius: 8px; font-size: 10px; font-weight: 700;
+      display: none; align-items: center; justify-content: center; padding: 0 4px;
+    }
+    .chat-scroll-fab .new-badge.show { display: flex; }
+
+    .typing-indicator {
+      font-size: 12px; color: rgba(255,255,255,0.45); padding: 0 4px 6px; display: none;
+    }
+    .typing-indicator.show { display: block; }
+    
+    /* Reaction popup */
+    .reaction-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      background: rgba(20,0,30,0.95);
+      backdrop-filter: blur(16px);
+      border-radius: 20px;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      z-index: 50;
+      gap: 6px;
+      flex-wrap: wrap;
+      max-width: 200px;
+    }
+    .reaction-popup.open { display: flex; }
+    .reaction-popup .reaction-option {
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 6px;
+      border-radius: 8px;
+      transition: all 0.2s;
+      background: none;
+      border: none;
+    }
+    .reaction-popup .reaction-option:active { transform: scale(1.3); background: rgba(255,255,255,0.05); }
+  </style>
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <div class="navbar" id="navTitle">Home</div>
+
+  <!-- ========== TAB: HOME ========== -->
+  <div id="tab-home" class="tab-content active">
+    <div class="profile-hdr">
+      <div style="position:relative;">
+        <img id="ui-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+      </div>
+      <div class="profile-info">
+        <h1 id="ui-name">Loading...</h1>
+        <p id="ui-id">ID: ${userId}</p>
+        <div class="badge" id="ui-verified">Checking...</div>
+      </div>
+      <a href="/" onclick="openStreamSite('/'); return false;" class="switch-btn" title="Open Stream">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+      </a>
+    </div>
+
+    <!-- ========== SEARCH WIDGET - Google Style ========== -->
+    <div class="search-widget" id="searchWidget">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <span class="search-text">Search episodes...</span>
+      <svg class="mic-icon" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+    </div>
+
+    <!-- ========== SEARCH OVERLAY ========== -->
+    <div class="search-overlay" id="searchOverlay">
+      <div class="search-header">
+        <button class="back-btn" id="searchBackBtn">
+          <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search episodes..." autofocus />
+      </div>
+      
+      <div class="search-serial-row" id="serialRow">
+        <!-- Serial chips will be rendered here -->
+      </div>
+
+      <div class="search-results-scroll" id="searchResults">
+        <div class="search-section-title" id="searchSectionTitle">Top Serials</div>
+        <div id="searchContent">
+          <div class="spinner"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SCRATCH CARD BANNER & HISTORY BUTTON ========== -->
+    <div style="display: flex; gap: 12px; margin: 0 16px 16px 16px;">
+      <!-- Daily Scratch Banner -->
+      <a href="https://t.me/MythoSerialBot?start=scratchcard" class="scratch-btn-banner" onclick="tg.HapticFeedback.impactOccurred('medium')" style="flex: 1; margin: 0;">
+        <div class="scratch-btn-content">
+          <div class="scratch-icon-wrap">🎟️</div>
+          <div>
+            <div class="scratch-text-main">Daily Scratch Card</div>
+            <div class="scratch-text-sub">Win Mythopoints every day!</div>
+          </div>
+        </div>
+        <div class="scratch-arrow">➔</div>
+      </a>
+      
+      <!-- Small Square Scratch History Button -->
+      <button onclick="openScratchHistory()" oncontextmenu="return false;" style="width: 62px; height: 62px; flex-shrink: 0; border-radius: 18px; background: transparent; border: 1px solid rgba(213, 0, 249, 0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: transform 0.2s; padding: 0; margin: 0; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent;">
+  
+        <img src="https://i.ibb.co/270qsDjw/photo-2026-08-12-06-02-04-7673021475883843620.jpg" 
+             draggable="false" 
+             oncontextmenu="return false;" 
+             style="width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none;" 
+             alt="History">
+       
+      </button>
+
+
+
+      
+    </div>
+
+    <!-- ========== SPIN & WIN SECTION (Enhanced) ========== -->
+    <div class="glass" style="margin: 12px 16px 8px;">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 2.07c3.61.45 6.48 3.33 6.93 6.93h-6.93zM11 4.07v6.93H4.07c.45-3.6 3.32-6.48 6.93-6.93zm-6.93 8.93H11v6.93c-3.61-.45-6.48-3.32-6.93-6.93zm8.93 6.93V13h6.93c-.45 3.61-3.32 6.48-6.93 6.93z"/></svg>
+        Spin & Win
+      </div>
+
+      <div class="spin-streak" id="spin-streak">🔥 Streak: 0 days</div>
+      <div class="spin-countdown" id="spin-countdown">⏳ Next spin: Available now!</div>
+      
+      <div class="spin-container">
+        <div class="spin-wheel-wrapper">
+          <canvas id="spinWheel" class="spin-wheel-canvas" width="400" height="400"></canvas>
+          <div class="spin-pointer"></div>
+          <div class="spin-center" id="spinCenterBtn">SPIN</div>
+        </div>
+      </div>
+
+      <div id="spin-result" class="spin-result-box" style="display:none;">
+        <div class="result-roll" id="spin-roll">🎲 0</div>
+        <div class="result-points" id="spin-points">+0 MythoPoints</div>
+        <div id="spin-bonus" style="font-size:14px; color:#ffd60a;"></div>
+      </div>
+      <div id="spin-error" class="spin-error"></div>
+    </div>
+
+    <div class="grid-2" style="padding:0 16px;">
+      <div class="widget widget-full">
+        <div class="widget-title">Wallet Balance</div>
+        <div class="widget-value" style="font-size:36px; position:relative;">
+          <span id="ui-pts">0</span>
+          <span class="mytho-label">Mythopoints</span>
+        </div>
+        <div class="widget-sub" id="ui-streak">
+          <span class="streak-ring">
+            <span class="flame">🔥</span>
+            <span id="streak-count">0 Day Streak</span>
+          </span>
+        </div>
+      </div>
+      <!-- Premium Widget - Enhanced -->
+      <div class="widget w-premium">
+        <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#ffd60a"><path d="M12 2L15.09 8.5L22 9.24L17.5 13.75L18.18 20.5L12 17.5L5.82 20.5L6.5 13.75L2 9.24L8.91 8.5L12 2Z"/></svg>
+            <span class="widget-title" style="font-size:10px; margin:0;">Premium</span>
+          </div>
+        </div>
+        <div class="widget-value" style="font-size:20px; margin-top:4px;">
+          <span id="ui-prem-status">Free</span>
+          <span id="ui-prem-days" style="font-size:12px; color:rgba(255,255,255,0.3); font-weight:400; margin-left:4px;"></span>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
+          <span id="ui-prem-plan">No active plan</span>
+        </div>
+        <a href="https://t.me/MythoSerialBot?start=upgrade" class="upgrade-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Upgrade</a>
+      </div>
+      <!-- Search Credits Widget - Enhanced -->
+      <div class="widget w-search">
+        <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="#0a84ff"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <span class="widget-title" style="font-size:10px; margin:0;">Search Credits</span>
+          </div>
+        </div>
+        <div class="widget-value" style="font-size:22px; margin-top:4px;">
+          <span id="ui-credits">0</span>
+          <span style="font-size:14px; color:rgba(255,255,255,0.2)">/5</span>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.2); margin-top:2px;">
+          Refill With /get
+        </div>
+        <a href="https://t.me/MythoSerialBot?start=get" class="refill-btn" onclick="tg.HapticFeedback.impactOccurred('medium');">Refill</a>
+      </div>
+    </div>
+
+    <div class="quick-action-grid">
+      <div class="quick-action bank" onclick="switchTab('bank')">
+        <div class="icon">🏦</div>
+        <div class="label">Bank</div>
+      </div>
+      <div class="quick-action store" onclick="switchTab('store')">
+        <div class="icon">🛍️</div>
+        <div class="label">Store</div>
+      </div>
+      <div class="quick-action pay" onclick="switchTab('pay')">
+        <div class="icon">💸</div>
+        <div class="label">Pay</div>
+      </div>
+    </div>
+
+    <!-- ========== CHANT & EARN CARD ========== -->
+    <div class="glass" style="margin: 12px 16px 8px;">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c4.97 0 9-4.03 9-9-4.97 0-9-9-9-9s-4.03 9-9 9c0 4.97 4.03 9 9 9zm0-15.53c1.78 3.52 4.14 5.92 6.32 7.15-1.57 2.12-4.08 3.53-6.32 3.53s-4.75-1.41-6.32-3.53c2.18-1.23 4.54-3.63 6.32-7.15z"/></svg>
+        Chant & Earn
+      </div>
+
+      <div class="chant-level" id="chant-level">Seeker</div>
+      <div class="chant-progress-container">
+        <div class="chant-progress-bar" id="chant-progress" style="width:0%;"></div>
+      </div>
+      <div class="chant-counter">
+        <span id="chant-tap-count">0</span> / 1000 taps • <span id="chant-reward-multiplier">1</span>× reward
+      </div>
+      <div class="chant-orb-container chant-orb-3d" id="orb3d-container">
+        <div class="chant-orb" id="chant-orb">
+          <span class="chant-text" id="chant-text">Radha Radha</span>
+          <div class="edit-icon" id="chant-edit">✎</div>
+        </div>
+      </div>
+      <div class="chant-leaderboard" id="chant-leaderboard">
+        <div style="font-size:11px; color:rgba(255,255,255,0.3); margin-bottom:4px;">Top Chanters</div>
+        <div id="chant-lb-list"><div class="spinner" style="width:20px;height:20px;margin:4px auto;"></div></div>
+      </div>
+    </div>
+
+    <h3 style="font-size:16px; margin: 8px 16px 4px; font-weight:600;">Lifetime Stats</h3>
+    <div class="grid-2" style="padding:0 16px;">
+      <div class="widget" style="padding:10px 14px;">
+        <div class="widget-title">Total Earned</div>
+        <div class="widget-value" style="font-size:18px; color:#30d158; position:relative;">
+          <span id="ui-life-earn">0</span>
+          <span class="mytho-label" style="font-size:7px;">Mythopoints</span>
+        </div>
+      </div>
+      <div class="widget" style="padding:10px 14px;">
+        <div class="widget-title">Total Spent</div>
+        <div class="widget-value" style="font-size:18px; color:#ff453a; position:relative;">
+          <span id="ui-life-spent">0</span>
+          <span class="mytho-label" style="font-size:7px;">Mythopoints</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== REFERRAL CONTROL PANEL ========== -->
+    <h3 style="font-size:16px; margin: 16px 16px 4px; font-weight:600;">🚀 Refer & Earn</h3>
+    <div class="glass" style="margin: 0 16px 20px;">
+        <div class="grid-2" style="margin-bottom: 12px; gap:8px;">
+            <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; text-align:center;">
+                <div style="font-size:11px; color:rgba(255,255,255,0.4); text-transform:uppercase;">My Referrals</div>
+                <div style="font-size:24px; font-weight:700; color:#00e676;" id="ui-refs-count">0</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; text-align:center;">
+                <div style="font-size:11px; color:rgba(255,255,255,0.4); text-transform:uppercase;">Next Milestone</div>
+                <div style="font-size:18px; font-weight:700; color:#ffd60a; margin-top:4px;" id="ui-refs-target">0/3</div>
+            </div>
+        </div>
+
+        <div class="chant-progress-container" style="height:6px; margin: 0 0 16px 0;">
+            <div class="chant-progress-bar" id="ref-progress" style="width:0%; background: linear-gradient(90deg, #00e676, #ffd60a);"></div>
+        </div>
+        
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button class="store-buy-btn" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:linear-gradient(135deg, #00e676, #00b359); box-shadow:0 4px 15px rgba(0,230,118,0.3);" onclick="shareReferral()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+                Share Link
+            </button>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button class="coupon-buy-btn" style="flex:1; padding:8px 6px; border-color:rgba(10,132,255,0.3); color:#0a84ff; background:rgba(10,132,255,0.1);" onclick="showRefRewards()">🎁 Rewards</button>
+            <button class="coupon-buy-btn" style="flex:1; padding:8px 6px; border-color:rgba(213,0,249,0.3); color:#ea80fc; background:rgba(213,0,249,0.1);" onclick="showRefLeaderboard()">🏆 Leaderboard</button>
+        </div>
+    </div>
+  </div>
+
+  <!-- ========== TAB: BANK ========== -->
+  <div id="tab-bank" class="tab-content">
+    <div class="glass w-bank">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M11.5 1L2 6v2h19V6l-9.5-5zm0 2.5L18 6H5l6.5-2.5zM2 10v2h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v-2H2z"/></svg>
+        MythoFund Vault
+      </div>
+      <div class="widget-value" style="color:#30d158; position:relative;">
+        <span id="ui-bank-invest">0 pts</span>
+        <span class="mytho-label">Invested</span>
+      </div>
+      <div class="widget-sub">Active Investment</div>
+    </div>
+    <div class="grid-2" style="padding:0 16px;">
+      <div class="widget">
+        <div class="widget-title">Pending Yield</div>
+        <div class="widget-value" style="color:#ffd60a; position:relative;">
+          <span id="ui-bank-yield">+0</span>
+          <span class="mytho-label" style="font-size:8px;">Mythopoints</span>
+        </div>
+        <div class="widget-sub" id="bank-claim-btn" style="color:#ea80fc; cursor:pointer;">Claim</div>
+      </div>
+      <div class="widget">
+        <div class="widget-title">Active Loan</div>
+        <div class="widget-value" style="color:#ff453a;" id="ui-bank-loan">0</div>
+        <div class="widget-sub" id="ui-loan-status">No Debt</div>
+      </div>
+    </div>
+    <div style="padding:0 16px;">
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <input type="number" id="invest-amount" placeholder="Amount" style="flex:1; padding:8px 12px; border-radius:20px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff; font-size:13px; outline:none;">
+        <button id="invest-btn" style="padding:8px 16px; border-radius:20px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600; font-size:12px;">Invest</button>
+        <button id="withdraw-btn" style="padding:8px 16px; border-radius:20px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600; font-size:12px;">Withdraw</button>
+      </div>
+      <div style="margin-top:8px; display:flex; gap:6px;">
+        <button id="loan-apply-btn" style="flex:1; padding:8px; border-radius:20px; border:none; background:linear-gradient(135deg,#d500f9,#651fff); color:#fff; font-weight:600; font-size:12px;">Apply Loan (100 pts)</button>
+        <button id="loan-repay-btn" style="flex:1; padding:8px; border-radius:20px; border:none; background:rgba(255,69,58,0.2); color:#ff453a; font-weight:600; font-size:12px;">Repay Loan</button>
+      </div>
+    </div>
+
+    <div class="glass" style="margin-top:16px;">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+        Withdraw to Real Money
+      </div>
+      <p style="font-size:11px; color:rgba(255,255,255,0.4);">10,000 pts = ₹1 | Min ₹10</p>
+      <input type="number" id="withdraw-amount" class="withdraw-input" placeholder="Amount in INR" />
+      <input type="text" id="withdraw-method" class="withdraw-input" placeholder="Payment Method (UPI, Bank)" />
+      <button id="withdraw-request-btn" class="withdraw-btn">Request Withdraw</button>
+      <div id="withdraw-history" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- ========== TAB: STORE ========== -->
+  <div id="tab-store" class="tab-content">
+    
+    <div class="glass">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
+        MythoStore
+      </div>
+      <p style="font-size: 13px; color: rgba(255,255,255,0.5); margin:0;">Spend Mythopoints to enhance your experience.</p>
+    </div>
+
+    <div class="store-section-title">Premium Boosts</div>
+    
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(10,132,255,0.15); color: #0a84ff;">
+        <svg viewBox="0 0 24 24"><path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4h2.35v4h4v-4h2v-4h-8.35zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>
+      </div>
+      <div class="store-info">
+        <h4>5 Search Credits</h4>
+        <p>Instantly refill your search limit</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('credits')">50 pts</button>
+    </div>
+
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(48,209,88,0.15); color: #30d158;">
+        <svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+      </div>
+      <div class="store-info">
+        <h4>Skip Cooldown</h4>
+        <p>Bypass the waiting timer immediately</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('skip_cooldown')">50 pts</button>
+    </div>
+
+    <div class="store-card">
+      <div class="store-icon-wrap" style="background: rgba(213,0,249,0.15); color: #ea80fc;">
+        <svg viewBox="0 0 24 24"><path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1h-4v-1c0-.55.45-1 1-1 1.14 0 2.12.58 2.66 1.44l.34.46.34-.46C15.88 4.58 16.86 4 18 4zM9 4c.55 0 1 .45 1 1v1H6c0-.55.45-1 1-1s1-.45 1-1zm11 16H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v7z"/></svg>
+      </div>
+      <div class="store-info">
+        <h4>Mystery Box</h4>
+        <p>Win credits, coupons, or a jackpot!</p>
+      </div>
+      <button class="store-buy-btn" onclick="purchase('mystery')">100 pts</button>
+    </div>
+
+    <div class="store-section-title">Discount Coupons</div>
+    <div class="coupon-grid">
+      
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>10% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_10')">200 pts</button>
+      </div>
+
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>20% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_20')">500 pts</button>
+      </div>
+
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>30% OFF</h4>
+          <p>Store-wide discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_30')">800 pts</button>
+      </div>
+
+      <div class="coupon-card">
+        <div class="coupon-icon">
+          <svg viewBox="0 0 24 24"><path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2 7.54c-1.2.77-2 2.11-2 3.46H6c0-1.35-.8-2.69-2-3.46v-3.08c1.2-.77 2-2.11 2-3.46H4V6h16v2.54c-1.2.77-2 2.11-2 3.46v3.08z"/></svg>
+        </div>
+        <div>
+          <h4>50% OFF</h4>
+          <p>Ultimate discount</p>
+        </div>
+        <button class="coupon-buy-btn" onclick="purchase('coupon_50')">1500 pts</button>
+      </div>
+      
+    </div>
+  </div>
+
+  <!-- ========== TAB: PAY (UPDATED with read receipts, reactions, online status) ========== -->
+  <div id="tab-pay" class="tab-content">
+    
+    <div class="pay-search-area" id="paySearchArea">
+      <div class="glass" style="padding:12px 14px;">
+        <div class="glass-title" style="font-size:15px; margin-bottom:6px;">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          Payments & Chat
+        </div>
+        <input type="text" id="search-user" class="search-user-input" placeholder="Search name or ID..." autocomplete="off" />
+        <div id="search-results"></div>
+        
+        <div id="recent-chats-container">
+          <div style="font-size:12px; color:rgba(255,255,255,0.4); margin: 16px 4px 8px; text-transform:uppercase; font-weight:600;">Recent Chats</div>
+          <div id="recent-chats-list">
+            <div class="empty" style="font-size:12px; padding:12px;">Loading recents...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pay-fullscreen" id="payFullscreen">
+      <div class="chat-header">
+        <button class="back-btn" id="payBackBtn">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <img id="payUserAvatar" class="avatar" src="https://via.placeholder.com/100" alt="User" />
+        <div class="info">
+          <h3 id="payUserName">User Name <span class="online-dot offline" id="payOnlineDot"></span></h3>
+          <p id="payUserId">ID: 0</p>
+        </div>
+        <button onclick="clearChatHistory()" title="Clear chat" style="background:none;border:none;color:#ff453a;font-size:16px;cursor:pointer;padding:6px;">✕</button>
+      </div>
+
+      <div class="chat-area" id="payChatArea"></div>
+
+      <div class="chat-footer">
+        <button type="button" class="chat-scroll-fab" id="chatScrollFab" title="Jump to latest">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+          <span class="new-badge" id="chatNewBadge">0</span>
+        </button>
+        <div class="typing-indicator" id="typingIndicator">typing...</div>
+        <div id="payStatus" style="width: 100%; text-align:center; font-size:11px; margin-bottom:4px;"></div>
+        <div class="reply-bar" id="replyBar">
+          <div class="rb-body">
+            <div class="rb-title" id="replyBarTitle">Reply</div>
+            <div class="rb-text" id="replyBarText"></div>
+          </div>
+          <button type="button" class="rb-close" id="replyBarClose" aria-label="Cancel">×</button>
+        </div>
+        <div class="sticker-panel" id="stickerPanel"></div>
+        <div class="chat-input-wrapper">
+          <button type="button" class="chat-icon-btn" id="stickerBtn" title="Stickers">😀</button>
+          <button type="button" class="chat-icon-btn" id="attachBtn" title="Photo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+          </button>
+          <input type="file" id="chatImageInput" accept="image/*" style="display:none" />
+          <input type="text" id="payAmountInput" class="chat-input" placeholder="Message or amount..." autocomplete="off" />
+          <button type="button" class="chat-icon-btn" id="voiceBtn" title="Hold to record">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          </button>
+          <button class="pay-send-btn" id="paySendBtn" title="Send">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.3); text-align:center; margin-top:4px;">Numbers ≥200 = payment • text = chat • long-press msg for actions</div>
+      </div>
+      <div class="msg-ctx" id="msgCtxMenu"></div>
+    </div>
+
+    <div class="payment-processing" id="payment-processing" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:300; background:rgba(0,0,0,0.8); padding:20px; border-radius:20px;">
+      <svg class="svg-loader" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#d500f9" stroke-width="6" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="animation: dash 1.5s ease-in-out infinite; transform-origin: center; transform: rotate(-90deg);"/>
+      </svg>
+      <p style="color:rgba(255,255,255,0.8); font-size:13px; margin-top:10px;">Verifying transaction...</p>
+    </div>
+  </div>
+
+  <!-- ========== TAB: PROFILE ========== -->
+  <div id="tab-profile" class="tab-content">
+    <div class="glass">
+      <div class="profile-hdr" style="margin-bottom:12px; position:relative;">
+        <div style="position:relative;">
+          <img id="profile-dp" class="profile-pic" src="https://via.placeholder.com/150/2d0a50/ea80fc?text=User" alt="DP">
+          <div class="settings-gear" id="openSettingsBtn" title="Settings">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.04 7.04 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.22 0 .43-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></svg>
+          </div>
+        </div>
+        <div class="profile-info">
+          <h2 id="profile-name">Loading...</h2>
+          <p id="profile-id">ID: ${userId}</p>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:14px;">
+        <span>Mythopoints</span>
+        <span id="profile-pts" style="color:#ffffff;">0</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:14px;">
+        <span>Streak</span>
+        <span id="profile-streak">0</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; padding:8px 0; font-size:14px;">
+        <span>Verification</span>
+        <span id="profile-verified" style="color:#ff453a;">Unverified</span>
+      </div>
+    </div>
+
+    <div class="glass" style="padding:14px 16px;">
+      <div class="glass-title" style="margin-bottom:8px;">
+        <svg viewBox="0 0 24 24"><path d="M10 8v8l6-4-6-4zm2-6C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+        Watch &amp; Earn
+      </div>
+      <p style="font-size:12px; color:rgba(255,255,255,0.45); margin:0 0 12px 0; line-height:1.4;">Watch a short ad and earn 1–3 MythoPoints (max 5/day).</p>
+      <button type="button" class="withdraw-btn" id="profileWatchAdBtn" style="background: linear-gradient(135deg, #32d74b, #248a3d); margin:0; width:100%;">
+        ▶ Watch Ad to Earn MythoPoints
+      </button>
+    </div>
+
+    <div class="glass">
+      <div class="glass-title">
+        <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        Rate MythoBot
+      </div>
+      <p style="font-size:11px; color:rgba(255,255,255,0.4);">Earn 10 MythoPoints for rating!</p>
+      <div id="rating-status"></div>
+      <div class="star-rating" id="star-container">
+        <svg class="star" data-value="1" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="2" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="3" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="4" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <svg class="star" data-value="5" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+      </div>
+      <div id="rating-message" style="text-align:center; font-size:12px; margin-top:4px;"></div>
+    </div>
+
+    <div style="padding:0 16px 4px 24px; font-size:11px; color:rgba(255,255,255,0.3); text-transform:uppercase;">Recent Transactions</div>
+    <div class="list-card" id="ui-history-list" style="margin:0 16px; max-height:300px; overflow-y:auto;">
+      <div class="spinner"></div>
+    </div>
+    <div id="history-loader" style="text-align:center; padding:8px; display:none;">
+      <div class="spinner" style="width:24px;height:24px;"></div>
+    </div>
+
+    <div style="padding:12px 16px 4px; font-size:14px; font-weight:600;">🏆 Mythopoints Leaderboard</div>
+    <div style="padding:0 16px; display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="lb-filter active" data-filter="all" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:rgba(213,0,249,0.1); color:#fff; font-weight:600; font-size:11px;">All-Time</button>
+      <button class="lb-filter" data-filter="weekly" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4); font-size:11px;">Weekly</button>
+      <button class="lb-filter" data-filter="monthly" style="flex:1; padding:4px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:rgba(255,255,255,0.4); font-size:11px;">Monthly</button>
+    </div>
+    <div id="lb-list" style="margin:8px 16px;">
+      <div class="spinner"></div>
+    </div>
+    <div style="display:flex; justify-content:center; gap:12px; padding:4px 16px;">
+      <button id="lb-prev" style="padding:4px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff; font-size:12px;"><</button>
+      <span id="lb-page-info" style="color:rgba(255,255,255,0.3); font-size:12px;">Page 1</span>
+      <button id="lb-next" style="padding:4px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:#fff; font-size:12px;">></button>
+    </div>
+  </div>
+
+  <!-- ========== SETTINGS MODAL ========== -->
+  <div class="settings-overlay" id="settingsModal">
+    <div class="settings-box" style="position:relative;">
+      <button type="button" onclick="closeSettings()" aria-label="Close" style="position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;border:0.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.08);color:#fff;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;">×</button>
+      <h3 style="padding-right:28px;">⚙️ App Settings</h3>
+      <div class="setting-item">
+        <span class="setting-label">Sound Effects</span>
+        <input type="checkbox" class="toggle-switch" id="setting-sound" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Haptic Feedback</span>
+        <input type="checkbox" class="toggle-switch" id="setting-haptic" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Visual Animations</span>
+        <input type="checkbox" class="toggle-switch" id="setting-visual" checked>
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Privacy Mode</span>
+        <input type="checkbox" class="toggle-switch" id="setting-privacy">
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Floating Pill Nav</span>
+        <input type="checkbox" class="toggle-switch" id="setting-pill">
+      </div>
+      <div class="setting-item">
+        <span class="setting-label">Short Numbers</span>
+        <input type="checkbox" class="toggle-switch" id="setting-shortnum">
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== TAB BAR (with unread badge) ========== -->
+  <div class="tab-bar">
+    <div class="tab-btn active" data-tab="home">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      <span>Home</span>
+    </div>
+    <div class="tab-btn" data-tab="bank">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M11.5 1L2 6v2h19V6l-9.5-5zm0 2.5L18 6H5l6.5-2.5zM2 10v2h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v6h2v-6h2v-2H2z"/></svg>
+      <span>Bank</span>
+    </div>
+    <div class="tab-btn" data-tab="store">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7 14h10l3-8H5.72l-.48-2H3v2h1.22l1.9 7.2L5 14.76c-.66 1.35.34 2.24 2 2.24h10v-2H7c-.54 0-.84-.45-.62-.9L7 14z"/></svg>
+      <span>Store</span>
+    </div>
+    <div class="tab-btn" data-tab="pay" id="payTabBtn">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v10zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+      <span>Pay</span>
+      <span class="unread-badge" id="payUnreadBadge">0</span>
+    </div>
+    <div class="tab-btn" data-tab="profile">
+      <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      <span>Profile</span>
+    </div>
+  </div>
+
+  <!-- ========== WATCH & EARN FAB ========== -->
+  <button class="earn-fab" id="earnFab" title="Watch Ad to Earn">
+    <div class="fab-top">WATCH</div>
+    <div class="fab-mid">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 8v8l6-4-6-4zm2-6C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+      </svg>
+      <span>AD</span>
+    </div>
+    <div class="fab-bot">EARN MYTHOPOINTS</div>
+  </button>
+
+  <!-- ========== SPIN AD OVERLAY ========== -->
+  <div class="spin-ad-overlay" id="spinAdOverlay">
+    <div class="ad-title" id="spinAdTitle">🎰 Watch Ad to Spin</div>
+    <button class="ad-btn" id="spinAdBtn">▶ Watch Ad</button>
+    <div class="ad-sub">Ad completes in seconds</div>
+  </div>
+
+  <!-- Referral Rewards Modal -->
+  <div class="confirm-overlay" id="refRewardsModal">
+    <div class="confirm-box" style="text-align:left; max-width:320px;">
+        <h3 style="margin:0 0 16px 0; color:#ffd60a; text-align:center; font-size:20px;">🎁 Referral Rewards</h3>
+        <div style="font-size:14px; color:#ddd; margin-bottom:20px; line-height:1.6;">
+            <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:12px; margin-bottom:12px;">
+                <b style="color:#fff;">Per Referral:</b><br>
+                • You get <b style="color:#00e676;">+3 MythoPoints</b><br>
+                • Friend gets <b style="color:#00e676;">+2 MythoPoints</b>
+            </div>
+            <b style="color:#fff;">Milestone Bonuses:</b><br>
+            <div style="padding-left:8px; margin-top:6px;">
+                1 Ref → +3 pts<br>
+                3 Refs → 🥉 +10 pts<br>
+                5 Refs → 🎡 +25 pts<br>
+                10 Refs → 🥈 +70 pts<br>
+                25 Refs → 🥇 +200 pts<br>
+                50 Refs → 👑 +500 pts
+            </div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('refRewardsModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
+  <!-- Referral Leaderboard Modal -->
+  <div class="confirm-overlay" id="refLeaderboardModal">
+    <div class="confirm-box" style="text-align:left; padding:24px 16px; max-height:80vh; display:flex; flex-direction:column; max-width:340px;">
+        <h3 style="margin:0 0 12px 0; color:#ea80fc; text-align:center; font-size:18px;">🏆 Top Referrers</h3>
+        <div id="ref-lb-content" style="overflow-y:auto; flex:1; margin-bottom:16px; min-height:200px;">
+            <div class="spinner"></div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('refLeaderboardModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
+  <!-- ========== SCRATCH HISTORY MODAL (Add before closing </body> tag) ========== -->
+  <div class="confirm-overlay" id="scratchHistoryModal">
+    <div class="confirm-box" style="text-align:left; max-width:340px; padding: 24px 16px; max-height: 80vh; display: flex; flex-direction: column;">
+        <h3 style="margin:0 0 16px 0; color:#ea80fc; text-align:center; font-size:18px;">🎟️ Scratch Cards</h3>
+        <div id="scratch-list-content" style="overflow-y:auto; flex:1; margin-bottom:16px; min-height:220px; padding-right: 4px;">
+            <div class="spinner"></div>
+        </div>
+        <button class="withdraw-btn" style="background:rgba(255,255,255,0.1); color:#fff;" onclick="document.getElementById('scratchHistoryModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+
+  <script>
+    // ─── TELEGRAM WEB APP ───
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    tg.setHeaderColor('#0A0014');
+    tg.setBackgroundColor('#000000');
+
+    // ─── USER SETTINGS (Persistent) ───
+    const userId = ${userId};
+    let userSettings = {};
+
+    // ─── PAYMENT CHAT STATE ───
+    let selectedReceiver = null;
+    let payChatPollInterval = null;
+    let currentChatMessages = [];
+    let unreadCountCache = {};
+
+    async function loadUserSettings() {
+      try {
+        const res = await fetch('/api/settings/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          userSettings = data.settings;
+          applySettingsToUI();
+        }
+      } catch (e) {
+        console.warn('Failed to load settings:', e);
+        // Apply defaults
+        userSettings = {
+          sound: true,
+          haptic: true,
+          visual: true,
+          privacy: false,
+          pillNav: false,
+          shortNum: false,
+          forceVerify: false
+        };
+        applySettingsToUI();
+      }
+    }
+
+    function applySettingsToUI() {
+      document.getElementById('setting-sound').checked = userSettings.sound !== undefined ? userSettings.sound : true;
+      document.getElementById('setting-haptic').checked = userSettings.haptic !== undefined ? userSettings.haptic : true;
+      document.getElementById('setting-visual').checked = userSettings.visual !== undefined ? userSettings.visual : true;
+      document.getElementById('setting-privacy').checked = userSettings.privacy || false;
+      document.getElementById('setting-pill').checked = userSettings.pillNav || false;
+      document.getElementById('setting-shortnum').checked = userSettings.shortNum || false;
+      // Force verification removed – not required for users
+
+      // Apply pill nav
+      const tabBar = document.querySelector('.tab-bar');
+      if (userSettings.pillNav) {
+        tabBar.classList.add('floating-pill');
+      } else {
+        tabBar.classList.remove('floating-pill');
+      }
+
+      // Apply visual animations
+      if (userSettings.visual === false) {
+        let style = document.getElementById('kill-anims');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'kill-anims';
+          style.innerHTML = '* { animation: none !important; transition: none !important; }';
+          document.head.appendChild(style);
+        }
+      } else {
+        const style = document.getElementById('kill-anims');
+        if (style) style.remove();
+      }
+
+      updateUI();
+    }
+
+    async function saveUserSettings() {
+      try {
+        const settings = {
+          sound: document.getElementById('setting-sound').checked,
+          haptic: document.getElementById('setting-haptic').checked,
+          visual: document.getElementById('setting-visual').checked,
+          privacy: document.getElementById('setting-privacy').checked,
+          pillNav: document.getElementById('setting-pill').checked,
+          shortNum: document.getElementById('setting-shortnum').checked,
+          forceVerify: false
+        };
+        userSettings = settings;
+        const res = await fetch('/api/settings/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, settings: settings })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          console.warn('Failed to save settings:', data.error);
+        }
+      } catch (e) {
+        console.warn('Failed to save settings:', e);
+      }
+    }
+
+    function closeSettings() {
+      document.getElementById('settingsModal').classList.remove('open');
+      saveUserSettings();
+    }
+    window.closeSettings = closeSettings;
+
+    // ─── PURE CODE SOUND ENGINE & SETTINGS LOGIC ───
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+        if (!document.getElementById('setting-sound').checked) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        
+        if (type === 'click') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, now);
+            osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+            gain.gain.setValueAtTime(0.5, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'tick') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(1200, now);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+            osc.start(now); osc.stop(now + 0.05);
+        } else if (type === 'win') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.linearRampToValueAtTime(800, now + 0.2);
+            osc.frequency.linearRampToValueAtTime(1200, now + 0.4);
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.5, now + 0.1);
+            gain.gain.linearRampToValueAtTime(0, now + 0.6);
+            osc.start(now); osc.stop(now + 0.6);
+        }
+    }
+
+    // Intercept Haptics for Sound Sync
+    const origImpact = tg.HapticFeedback.impactOccurred.bind(tg.HapticFeedback);
+    const origNotify = tg.HapticFeedback.notificationOccurred.bind(tg.HapticFeedback);
+    const origSelect = tg.HapticFeedback.selectionChanged.bind(tg.HapticFeedback);
+    
+    tg.HapticFeedback.impactOccurred = (style) => {
+        if (document.getElementById('setting-haptic').checked) origImpact(style);
+        playSound('tick');
+    };
+    tg.HapticFeedback.notificationOccurred = (type) => {
+        if (document.getElementById('setting-haptic').checked) origNotify(type);
+        if (type === 'success') playSound('win');
+    };
+    tg.HapticFeedback.selectionChanged = () => {
+        if (document.getElementById('setting-haptic').checked) origSelect();
+        playSound('click');
+    };
+
+    // Settings Event Listeners
+    document.getElementById('openSettingsBtn').addEventListener('click', () => {
+        playSound('click');
+        document.getElementById('settingsModal').classList.add('open');
+    });
+
+    document.querySelectorAll('.toggle-switch').forEach(el => {
+        el.addEventListener('change', () => {
+            playSound('click');
+            updateUI();
+            
+            if (el.id === 'setting-pill') {
+                const tabBar = document.querySelector('.tab-bar');
+                el.checked ? tabBar.classList.add('floating-pill') : tabBar.classList.remove('floating-pill');
+            }
+            if (el.id === 'setting-visual') {
+                let style = document.getElementById('kill-anims');
+                if (!el.checked && !style) {
+                    style = document.createElement('style');
+                    style.id = 'kill-anims';
+                    style.innerHTML = '* { animation: none !important; transition: none !important; }';
+                    document.head.appendChild(style);
+                } else if (el.checked && style) {
+                    style.remove();
+                }
+            }
+            // Save settings on any toggle change
+            saveUserSettings();
+        });
+    });
+
+    // Helper: Short Number Formatter
+    function formatNum(num) {
+        if (!document.getElementById('setting-shortnum')?.checked) return num.toLocaleString();
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+        return num.toString();
+    }
+
+    // ─── USER DATA ───
+    const tgUser = tg.initDataUnsafe?.user;
+    if (tgUser) {
+      const name = tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '');
+      document.querySelectorAll('#ui-name, #profile-name').forEach(el => el.innerText = name);
+      const idEls = document.querySelectorAll('#ui-id, #profile-id');
+      if (tgUser.username) {
+        idEls.forEach(el => el.innerText = '@' + tgUser.username + ' | ID: ' + tgUser.id);
+      } else {
+        idEls.forEach(el => el.innerText = 'ID: ' + tgUser.id);
+      }
+      if (tgUser.photo_url) {
+        document.querySelectorAll('#ui-dp, #profile-dp').forEach(el => el.src = tgUser.photo_url);
+        fetch('/api/sync-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, photo_url: tgUser.photo_url })
+        }).catch(err => console.warn('Sync profile failed:', err));
+      }
+    }
+
+    // ─── CONFIRM & SUCCESS MODALS ───
+    const confirmOverlay = document.createElement('div');
+    confirmOverlay.className = 'confirm-overlay';
+    confirmOverlay.innerHTML = \`
+      <div class="confirm-box">
+        <p id="confirm-text">Are you sure?</p>
+        <div class="btn-row">
+          <button class="btn-cancel" id="confirm-no">Cancel</button>
+          <button class="btn-confirm" id="confirm-yes">Yes</button>
+        </div>
+      </div>
+    \`;
+    document.body.appendChild(confirmOverlay);
+    let confirmCallback = null;
+    document.getElementById('confirm-yes').addEventListener('click', () => {
+      confirmOverlay.classList.remove('open');
+      if (confirmCallback) confirmCallback(true);
+    });
+    document.getElementById('confirm-no').addEventListener('click', () => {
+      confirmOverlay.classList.remove('open');
+      if (confirmCallback) confirmCallback(false);
+    });
+
+    function showConfirm(text) {
+      return new Promise((resolve) => {
+        document.getElementById('confirm-text').innerText = text;
+        confirmOverlay.classList.add('open');
+        confirmCallback = (result) => {
+          resolve(result);
+          confirmCallback = null;
+        };
+      });
+    }
+
+    const successOverlay = document.createElement('div');
+    successOverlay.className = 'success-overlay';
+    successOverlay.innerHTML = \`
+      <div class="success-box">
+        <div class="check-circle">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+        <h3 id="success-title">Success!</h3>
+        <p id="success-message">Transaction completed.</p>
+      </div>
+    \`;
+    document.body.appendChild(successOverlay);
+
+    function showSuccess(message, title = 'Success!') {
+      return new Promise((resolve) => {
+        document.getElementById('success-title').innerText = title;
+        document.getElementById('success-message').innerText = message;
+        successOverlay.classList.add('open');
+        tg.HapticFeedback.notificationOccurred('success');
+        setTimeout(() => {
+          successOverlay.classList.remove('open');
+          resolve();
+        }, 2000);
+      });
+    }
+
+    // ─── REACTIVE STATE MANAGEMENT ───
+    const state = new Proxy({
+      mythopoints: 0,
+      streak: 0,
+      credits: 0,
+      referrals: 0,
+      premium: { active: false, plan: 'Free', daysLeft: 0 },
+      bank: { invested: 0, pendingYield: 0, loan: 0 },
+      stats: { earned: 0, spent: 0 },
+      chant: { totalTaps: 0, level: 'Seeker', multiplier: 1 },
+      verified: false,
+      payment: { used: 0, limit: 1 },
+      spin: { canSpin: false, streak: 0, countdown: 'Available now!', roll: null, doubleUsed: false }
+    }, {
+      set(target, prop, value) {
+        target[prop] = value;
+        updateUI();
+        return true;
+      }
+    });
+
+    function updateUI() {
+      // 1. Privacy Mode Logic
+      const privacyOn = document.getElementById('setting-privacy')?.checked;
+      const ptsNodes = ['ui-pts', 'ui-life-earn', 'ui-life-spent', 'profile-pts', 'ui-bank-invest', 'ui-bank-yield', 'ui-bank-loan'];
+      
+      ptsNodes.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) privacyOn ? el.classList.add('privacy-blur') : el.classList.remove('privacy-blur');
+      });
+
+      // 2. Short Number Formatter Injection
+      document.getElementById('ui-pts').innerText = formatNum(state.mythopoints);
+      document.getElementById('ui-credits').innerText = formatNum(state.credits);
+      document.getElementById('streak-count').innerText = formatNum(state.streak) + ' Day Streak';
+      document.getElementById('ui-life-earn').innerText = formatNum(state.stats.earned);
+      document.getElementById('ui-life-spent').innerText = formatNum(state.stats.spent);
+      document.getElementById('profile-pts').innerText = formatNum(state.mythopoints);
+      const profileStreakEl = document.getElementById('profile-streak');
+      if (profileStreakEl) profileStreakEl.innerText = formatNum(state.streak) + ' days';
+      
+      // Verification is optional – do not block users
+      const isVerified = true; // always treat as verified in mini app UI
+
+      const badge = document.getElementById('ui-verified');
+      if (isVerified) {
+        badge.innerText = 'Online';
+        badge.style.background = 'rgba(48,209,88,0.12)';
+        badge.style.color = '#30d158';
+      } else {
+        badge.innerText = '! Unverified';
+        badge.style.background = 'rgba(255,69,58,0.12)';
+        badge.style.color = '#ff453a';
+      }
+      
+      // Premium widget update
+      if (state.premium.active) {
+        document.getElementById('ui-prem-status').innerText = state.premium.plan || 'Premium';
+        document.getElementById('ui-prem-days').innerText = state.premium.daysLeft + 'd left';
+        document.getElementById('ui-prem-plan').innerText = 'Active subscription';
+      } else {
+        document.getElementById('ui-prem-status').innerText = 'Free';
+        document.getElementById('ui-prem-days').innerText = '';
+        document.getElementById('ui-prem-plan').innerText = 'No active plan';
+      }
+      
+      document.getElementById('ui-bank-invest').innerText = formatNum(state.bank.invested) + ' pts';
+      document.getElementById('ui-bank-yield').innerText = '+' + formatNum(state.bank.pendingYield);
+      document.getElementById('ui-bank-loan').innerText = formatNum(state.bank.loan);
+      
+      // Chant
+      document.getElementById('chant-level').innerText = state.chant.level;
+      document.getElementById('chant-reward-multiplier').innerText = state.chant.multiplier;
+      const remainder = state.chant.totalTaps % 1000;
+      document.getElementById('chant-tap-count').innerText = remainder;
+      
+      const levels = [
+        { name: 'Seeker', min: 0, multiplier: 1 },
+        { name: 'Devotee', min: 100, multiplier: 1 },
+        { name: 'Priest', min: 500, multiplier: 1 },
+        { name: 'Ascended', min: 2000, multiplier: 2 },
+        { name: 'Moksha', min: 10000, multiplier: 3 }
+      ];
+      let currentLevel = levels[0];
+      for (let i = levels.length - 1; i >= 0; i--) {
+        if (state.chant.totalTaps >= levels[i].min) {
+          currentLevel = levels[i];
+          break;
+        }
+      }
+      let nextLevel = null;
+      for (let i = 0; i < levels.length; i++) {
+        if (levels[i].min > currentLevel.min) {
+          nextLevel = levels[i];
+          break;
+        }
+      }
+      const progressEl = document.getElementById('chant-progress');
+      if (nextLevel) {
+        const progress = (state.chant.totalTaps - currentLevel.min) / (nextLevel.min - currentLevel.min) * 100;
+        progressEl.style.width = Math.min(progress, 100) + '%';
+      } else {
+        progressEl.style.width = '100%';
+      }
+      
+      const profileVerified = document.getElementById('profile-verified');
+      if (isVerified) {
+        profileVerified.innerText = '✅ Verified';
+        profileVerified.style.color = '#30d158';
+      } else {
+        profileVerified.innerText = '❌ Unverified';
+        profileVerified.style.color = '#ff453a';
+      }
+      
+      // Spin
+      document.getElementById('spin-streak').innerText = '🔥 Streak: ' + state.spin.streak + ' days';
+      document.getElementById('spin-countdown').innerText = '⏳ Next spin: ' + state.spin.countdown;
+
+      // Referral Progress Logic
+      document.getElementById('ui-refs-count').innerText = formatNum(state.referrals);
+      const milestones = [3, 5, 10, 25, 50];
+      let nextTarget = milestones.find(m => state.referrals < m);
+      let targetText, progressPercent;
+      
+      if (nextTarget) {
+          targetText = formatNum(state.referrals) + "/" + formatNum(nextTarget);
+          progressPercent = (state.referrals / nextTarget) * 100;
+      } else {
+          targetText = "MAX";
+          progressPercent = 100;
+      }
+      
+      document.getElementById('ui-refs-target').innerText = targetText;
+      document.getElementById('ref-progress').style.width = Math.min(progressPercent, 100) + "%";
+    }
+
+    // ─── TAB SWITCHING ───
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabContents = {
+      home: document.getElementById('tab-home'),
+      bank: document.getElementById('tab-bank'),
+      store: document.getElementById('tab-store'),
+      pay: document.getElementById('tab-pay'),
+      profile: document.getElementById('tab-profile')
+    };
+    const navTitle = document.getElementById('navTitle');
+
+    function switchTab(tabId) {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      document.querySelector(\`.tab-btn[data-tab="\${tabId}"]\`).classList.add('active');
+      Object.keys(tabContents).forEach(key => {
+        tabContents[key].classList.toggle('active', key === tabId);
+      });
+      navTitle.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+      tg.HapticFeedback.selectionChanged();
+      if (tabId === 'bank') { loadBankData(); loadWithdrawHistory(); }
+      if (tabId === 'profile') { loadHistory(1, true); loadLeaderboard(); loadRatingStatus(); }
+      if (tabId === 'pay') { 
+        loadRecentChats(); 
+        checkUnreadCount(); 
+      }
+    }
+    window.switchTab = switchTab;
+
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', function() {
+        switchTab(this.dataset.tab);
+      });
+    });
+
+    // ─── SEARCH OVERLAY LOGIC ───
+    const searchWidget = document.getElementById('searchWidget');
+    const searchOverlay = document.getElementById('searchOverlay');
+    const searchBackBtn = document.getElementById('searchBackBtn');
+    const searchInput = document.getElementById('searchInput');
+    const serialRow = document.getElementById('serialRow');
+    const searchContent = document.getElementById('searchContent');
+    const searchSectionTitle = document.getElementById('searchSectionTitle');
+
+    let serialsData = [];
+    let selectedSerial = null;
+    let selectedSeason = null;
+
+    // Open the Stream site (same domain) with automatic Telegram login
+    async function openStreamSite(path) {
+      try { tg.HapticFeedback.impactOccurred('medium'); } catch (e) {}
+      try {
+        const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+        if (u) {
+          await fetch('/api/tg-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initData: tg.initData, user: u })
+          });
+        }
+      } catch (e) { console.error('Stream login failed', e); }
+      window.location.href = path;
+    }
+
+    // Search widget now opens the Stream site search page (old bot-link overlay kept below, unused)
+    searchWidget.addEventListener('click', () => {
+      openStreamSite('/search');
+    });
+
+    /* OLD overlay opener (kept for reference)
+    searchWidget.addEventListener('click', () => {
+      searchOverlay.classList.add('open');
+      setTimeout(() => searchInput.focus(), 300);
+      loadSerials();
+    });
+    */
+
+    // Close search overlay
+    searchBackBtn.addEventListener('click', () => {
+      searchOverlay.classList.remove('open');
+      selectedSerial = null;
+      selectedSeason = null;
+    });
+
+    // Search input handler
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase().trim();
+      if (query.length > 0) {
+        filterSerials(query);
+      } else {
+        showSerials();
+      }
+    });
+
+    // Load serials from API
+    async function loadSerials() {
+      try {
+        const res = await fetch('/api/serials');
+        const data = await res.json();
+        if (data.success) {
+          serialsData = data.serials;
+          showSerials();
+        }
+      } catch (e) {
+        console.error('Failed to load serials:', e);
+      }
+    }
+
+    // Show serials as chips and list
+    function showSerials() {
+      renderSerialChips(serialsData);
+      searchSectionTitle.innerText = 'Top Serials';
+      renderSerialList(serialsData);
+    }
+
+    // Filter serials based on search
+    function filterSerials(query) {
+      const filtered = serialsData.filter(s => 
+        s.displayName.toLowerCase().includes(query) || 
+        s.name.toLowerCase().includes(query)
+      );
+      renderSerialChips(filtered);
+      searchSectionTitle.innerText = filtered.length > 0 ? 'Search Results' : 'No Results Found';
+      if (filtered.length > 0) {
+        renderSerialList(filtered);
+      } else {
+        searchContent.innerHTML = \`
+          <div class="search-empty">
+            <div style="font-size:48px; margin-bottom:16px;">🔍</div>
+            <p>No serials found matching "<strong>\${query}</strong>"</p>
+            <p style="font-size:12px; color:rgba(255,255,255,0.3); margin-top:8px;">Try searching with a different name</p>
+          </div>
+        \`;
+      }
+    }
+
+    // Render serial chips (scrollable row)
+    function renderSerialChips(serials) {
+      if (serials.length === 0) {
+        serialRow.innerHTML = '';
+        return;
+      }
+      let html = '';
+      const showSerials = serials.slice(0, 20);
+      showSerials.forEach(s => {
+        const isActive = selectedSerial === s.name;
+        html += \`
+          <div class="serial-chip \${isActive ? 'active' : ''}" onclick="selectSerial('\${s.name}')">
+            <img src="\${s.thumbnail}" alt="\${s.displayName}" onerror="this.src='https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg'" />
+            <span>\${s.displayName}</span>
+          </div>
+        \`;
+      });
+      serialRow.innerHTML = html;
+    }
+
+    // Render serial list (YouTube-style one per row)
+    function renderSerialList(serials) {
+      if (serials.length === 0) {
+        searchContent.innerHTML = \`
+          <div class="search-empty">
+            <p>No serials available</p>
+          </div>
+        \`;
+        return;
+      }
+
+      // If a serial is selected, show its seasons
+      if (selectedSerial) {
+        const serial = serialsData.find(s => s.name === selectedSerial);
+        if (serial) {
+          renderSeasons(serial);
+          return;
+        }
+      }
+
+      // Show all serials as a list (YouTube-style one per row)
+      let html = '<div class="serial-list">';
+      serials.forEach(s => {
+        const totalEps = Object.values(s.seasons).reduce((a, b) => a + b, 0);
+        html += \`
+          <div class="serial-list-item" onclick="selectSerial('\${s.name}')">
+            <img src="\${s.thumbnail}" class="thumb" alt="\${s.displayName}" onerror="this.src='https://i.ibb.co/7tvrS3gS/photo-2026-05-12-05-30-43-7641102945387282464.jpg'" />
+            <div class="info">
+              <div class="title">\${s.displayName}</div>
+              <div class="sub">\${totalEps} episodes • \${Object.keys(s.seasons).length} seasons</div>
+            </div>
+            <div class="arrow">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="rgba(255,255,255,0.2)"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+            </div>
+          </div>
+        \`;
+      });
+      html += '</div>';
+      searchContent.innerHTML = html;
+    }
+
+    // Render seasons for a selected serial
+    function renderSeasons(serial) {
+      const seasonKeys = Object.keys(serial.seasons).map(Number).sort((a, b) => a - b);
+      let html = \`
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:0 4px;">
+          <button onclick="selectSerial(null)" style="background:none; border:none; color:#ea80fc; cursor:pointer; font-size:14px;">
+            ← Back
+          </button>
+          <div style="font-size:16px; font-weight:600; flex:1;">\${serial.displayName}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.4);">\${seasonKeys.length} seasons</div>
+        </div>
+        <div class="season-grid">
+      \`;
+      
+      seasonKeys.forEach(season => {
+        const eps = serial.seasons[season];
+        html += \`
+          <div class="season-card" onclick="selectSeason(\${season})">
+            <div class="season-num">S\${String(season).padStart(2, '0')}</div>
+            <div class="season-eps">\${eps} episodes</div>
+          </div>
+        \`;
+      });
+      html += \`</div>\`;
+      searchContent.innerHTML = html;
+      searchSectionTitle.innerText = 'Select Season';
+    }
+
+    // Render episodes for a selected season
+    function renderEpisodes(serial, season) {
+      const totalEps = serial.seasons[season];
+      const command = serial.command;
+      const displayName = serial.displayName;
+      
+      let html = \`
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:0 4px;">
+          <button onclick="selectSeason(null)" style="background:none; border:none; color:#ea80fc; cursor:pointer; font-size:14px;">
+            ← Back
+          </button>
+          <div style="font-size:16px; font-weight:600; flex:1;">\${displayName} - S\${String(season).padStart(2, '0')}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.4);">\${totalEps} eps</div>
+        </div>
+        <div class="episode-grid">
+      \`;
+      
+      // Generate episode buttons
+      for (let ep = 1; ep <= Math.min(totalEps, 100); ep++) {
+        const epStr = String(ep).padStart(2, '0');
+        const seasonStr = String(season).padStart(2, '0');
+        let url = \`https://t.me/MythoSerialBot?start=\${command}_s\${seasonStr}e\${epStr}\`;
+        
+        // Special cases from csearch.py
+        if (command === 'kr') {
+          url = \`https://t.me/MythoSerialBot?start=kr_s01e\${epStr}\`;
+        } else if (command === 'rlk') {
+          const displaySeason = season === 1 ? 2 : season;
+          url = \`https://t.me/MythoSerialBot?start=rlk_s\${String(displaySeason).padStart(2, '0')}e\${epStr}\`;
+        } else if (command === 'spk') {
+          const actualEp = (season - 1) * 100 + ep;
+          url = \`https://t.me/MythoSerialBot?start=spk_s\${String(season).padStart(2, '0')}e\${actualEp}\`;
+        } else if (command === 'srb') {
+          const seasonNum = Math.floor((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=srb_s\${String(seasonNum).padStart(2, '0')}e\${ep}\`;
+        } else if (command === 'vg') {
+          const seasonNum = Math.floor((ep - 1) / 100) + 1;
+          url = \`https://t.me/MythoSerialBot?start=vg_s\${String(seasonNum).padStart(2, '0')}e\${ep}\`;
+        } else if (command === 'jklk') {
+          url = \`https://t.me/MythoSerialBot?start=jklk_s\${season}_e\${epStr}\`;
+        } else if (command === 'rk') {
+          url = \`https://t.me/MythoSerialBot?start=rk_s\${season}_e\${epStr}\`;
+        }
+        
+        html += \`
+          <a href="\${url}" class="episode-btn" onclick="tg.HapticFeedback.impactOccurred('light'); tg.openTelegramLink('\${url}'); return false;">
+            E\${String(ep).padStart(2, '0')}
+          </a>
+        \`;
+      }
+      html += \`</div>\`;
+      
+      if (totalEps > 100) {
+        html += \`
+          <div style="text-align:center; margin-top:12px; font-size:12px; color:rgba(255,255,255,0.3);">
+            Showing first 100 episodes. Use the bot command for more: /<b>\${command}</b>
+          </div>
+        \`;
+      }
+      
+      searchContent.innerHTML = html;
+      searchSectionTitle.innerText = 'Select Episode';
+    }
+
+    // Global functions for onclick
+    window.selectSerial = function(name) {
+      if (selectedSerial === name) {
+        selectedSerial = null;
+      } else {
+        selectedSerial = name;
+      }
+      selectedSeason = null;
+      showSerials();
+      renderSerialChips(serialsData);
+    };
+
+    window.selectSeason = function(season) {
+      if (selectedSeason === season) {
+        selectedSeason = null;
+      } else {
+        selectedSeason = season;
+      }
+      const serial = serialsData.find(s => s.name === selectedSerial);
+      if (serial && selectedSeason) {
+        renderEpisodes(serial, selectedSeason);
+      } else if (serial) {
+        renderSeasons(serial);
+      }
+    };
+
+    // ─── LOAD DASHBOARD DATA ───
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/ios-dashboard-data/' + userId);
+        const data = await res.json();
+        if (!data.success) return;
+        
+        state.mythopoints = data.profile.mythopoints || 0;
+        state.streak = data.profile.streak || 0;
+        state.verified = data.profile.is_verified || false;
+        state.referrals = data.profile.referrals || 0;
+        state.credits = data.search.credits || 0;
+        state.premium = {
+          active: data.premium.active || false,
+          plan: data.premium.plan || 'Free',
+          daysLeft: data.premium.daysLeft || 0
+        };
+        state.bank = {
+          invested: data.bank.invested || 0,
+          pendingYield: data.bank.pendingInterest || 0,
+          loan: data.bank.loanDue || 0
+        };
+        state.stats = {
+          earned: data.stats.lifetimeEarned || 0,
+          spent: data.stats.lifetimeSpent || 0
+        };
+        state.payment = {
+          used: data.payment?.usedToday || 0,
+          limit: data.payment?.dailyLimit || 1
+        };
+        updateUI();
+        loadSpinStatus();
+      } catch (e) {
+        console.error('Dashboard error:', e);
+      }
+    }
+
+    // ─── SPIN & WIN (Enhanced) ───
+    const spinAdOverlay = document.getElementById('spinAdOverlay');
+    const spinAdBtn = document.getElementById('spinAdBtn');
+    const spinAdTitle = document.getElementById('spinAdTitle');
+    let spinAdResolve = null;
+    let spinAdType = 'spin';
+
+    function showSpinAd(type) {
+      return new Promise((resolve) => {
+        spinAdType = type;
+        spinAdTitle.innerText = type === 'spin' ? '🎰 Watch Ad to Spin' : '🎯 Watch Ad to Double';
+        spinAdOverlay.classList.add('open');
+        spinAdResolve = resolve;
+        tg.HapticFeedback.impactOccurred('medium');
+      });
+    }
+
+    spinAdBtn.addEventListener('click', function() {
+      if (typeof show_9055307 !== 'function') {
+        alert('Ad service is loading or unavailable. Once Check If you enabled DNS OR Adblocker please disable it!');
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(false);
+        return;
+      }
+      
+      show_9055307().then(() => {
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(true);
+        tg.HapticFeedback.notificationOccurred('success');
+      }).catch((error) => {
+        alert("Ad failed or was closed early. Please try again.");
+        console.error("Monetag Error:", error);
+        spinAdOverlay.classList.remove('open');
+        if (spinAdResolve) spinAdResolve(false);
+      });
+    });
+
+    spinAdOverlay.addEventListener('click', (e) => {
+      if (e.target === spinAdOverlay) {
+        // Do not close by clicking outside
+      }
+    });
+
+    // === SPIN WHEEL LOGIC ===
+    const spinCenterBtn = document.getElementById('spinCenterBtn');
+    const spinResult = document.getElementById('spin-result');
+    const spinRoll = document.getElementById('spin-roll');
+    const spinPoints = document.getElementById('spin-points');
+    const spinBonus = document.getElementById('spin-bonus');
+    const spinError = document.getElementById('spin-error');
+
+    let isSpinning = false;
+    let lastSegment = -1;
+
+    const wheelCanvas = document.getElementById('spinWheel');
+    const ctx = wheelCanvas.getContext('2d');
+    
+    const segments = [
+      { label: '1', color: '#ff0055', glow: '#ff4d4d' },
+      { label: '2', color: '#6600ff', glow: '#9933ff' },
+      { label: '3', color: '#ffaa00', glow: '#ffcc00' },
+      { label: '4', color: '#00aa00', glow: '#00ff55' },
+      { label: '5', color: '#0055ff', glow: '#00aaff' },
+      { label: '6', color: '#aa00ff', glow: '#ff00aa' }
+    ];
+    const segmentAngle = (2 * Math.PI) / segments.length;
+
+    function drawWheel(rotation = 0) {
+      const w = wheelCanvas.width = 400; 
+      const h = wheelCanvas.height = 400;
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = Math.min(w, h) / 2 - 20; 
+      
+      ctx.clearRect(0, 0, w, h);
+      
+      for (let i = 0; i < segments.length; i++) {
+        const startAngle = rotation + i * segmentAngle;
+        const endAngle = startAngle + segmentAngle;
+        const midAngle = startAngle + segmentAngle / 2;
+        
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        grad.addColorStop(0, '#1a001a'); 
+        grad.addColorStop(0.5, segments[i].color);
+        grad.addColorStop(1, segments[i].glow);
+        
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        const textX = cx + Math.cos(midAngle) * radius * 0.7;
+        const textY = cy + Math.sin(midAngle) * radius * 0.7;
+        
+        ctx.save();
+        ctx.translate(textX, textY);
+        ctx.rotate(midAngle + Math.PI / 2);
+        ctx.font = '900 36px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 3;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(segments[i].label, 0, 0);
+        ctx.restore();
+      }
+      
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+      const rimGrad = ctx.createLinearGradient(0, 0, w, h);
+      rimGrad.addColorStop(0, '#FFDF00');
+      rimGrad.addColorStop(0.5, '#FFF8DC');
+      rimGrad.addColorStop(1, '#B8860B');
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = rimGrad;
+      ctx.stroke();
+      
+      const numDots = 24;
+      for (let j = 0; j < numDots; j++) {
+        const dotAngle = rotation + (j * 2 * Math.PI / numDots);
+        const dotX = cx + Math.cos(dotAngle) * radius;
+        const dotY = cy + Math.sin(dotAngle) * radius;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = (j % 2 === 0) ? '#FFFFFF' : '#FFD700'; 
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    let currentRotation = 0;
+    drawWheel(currentRotation);
+
+    spinCenterBtn.addEventListener('click', async function() {
+        if (isSpinning) return;
+        
+        if (this.innerText === 'DOUBLE') {
+            handleDouble();
+            return;
+        }
+
+        if (!state.spin.canSpin) {
+            spinError.innerText = 'You already spun today. Come back tomorrow!';
+            return;
+        }
+        spinError.innerText = '';
+        
+        isSpinning = true;
+        this.classList.add('disabled');
+        spinResult.style.display = 'none';
+        
+        try {
+            const res = await fetch('/api/spin/do/' + userId, { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.success) {
+                const targetSegmentIndex = data.roll - 1; 
+                const currentRotMod = currentRotation % (2 * Math.PI);
+                
+                const offsetAngle = -Math.PI / 2 - (targetSegmentIndex + 0.5) * segmentAngle;
+                
+                let rotationNeeded = offsetAngle - currentRotMod;
+                while (rotationNeeded < 0) rotationNeeded += 2 * Math.PI;
+                
+                const extraSpins = 25 * 2 * Math.PI; 
+                const targetRotation = currentRotation + rotationNeeded + extraSpins;
+                
+                const duration = 15000;
+                const start = performance.now();
+                const startRot = currentRotation;
+                
+                function animateSpin(time) {
+                    const progress = Math.min((time - start) / duration, 1);
+                    
+                    const eased = 1 - Math.pow(1 - progress, 5); 
+                    const rot = startRot + (targetRotation - startRot) * eased;
+                    
+                    drawWheel(rot);
+                    
+                    let topAngle = (3 * Math.PI / 2 - rot) % (2 * Math.PI);
+                    if (topAngle < 0) topAngle += 2 * Math.PI;
+                    const currentSegment = Math.floor(topAngle / segmentAngle);
+                    
+                    if (currentSegment !== lastSegment && progress < 0.99) {
+                        tg.HapticFeedback.impactOccurred('light');
+                        lastSegment = currentSegment;
+                    }
+                    
+                    if (progress < 1) {
+                        requestAnimationFrame(animateSpin);
+                    } else {
+                        currentRotation = targetRotation;
+                        tg.HapticFeedback.impactOccurred('heavy');
+                        showSpinResult(data);
+                    }
+                }
+                requestAnimationFrame(animateSpin);
+            } else {
+                spinError.innerText = data.error || 'Spin failed.';
+                isSpinning = false;
+                spinCenterBtn.classList.remove('disabled');
+            }
+        } catch (e) {
+            spinError.innerText = 'Network error. Please try again.';
+            isSpinning = false;
+            spinCenterBtn.classList.remove('disabled');
+        }
+    });
+
+    async function handleDouble() {
+        const adCompleted = await showSpinAd('double');
+        if (!adCompleted) {
+            spinError.innerText = 'Ad not completed. Double failed.';
+            return;
+        }
+        
+        spinCenterBtn.classList.add('disabled');
+        spinCenterBtn.innerText = 'WAIT...';
+        
+        try {
+            const res = await fetch('/api/spin/double/' + userId, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                state.mythopoints = data.newBalance;
+                state.spin.doubleUsed = true;
+                updateUI();
+                
+                spinPoints.innerText = '+' + data.pointsAdded + ' MythoPoints (doubled)';
+                spinCenterBtn.innerText = 'DONE';
+                tg.HapticFeedback.notificationOccurred('success');
+                await showSuccess('You doubled your spin!', 'Double Success');
+            } else {
+                spinError.innerText = data.error || 'Double failed.';
+                spinCenterBtn.classList.remove('disabled');
+                spinCenterBtn.innerText = 'DOUBLE';
+            }
+        } catch (e) {
+            spinError.innerText = 'Network error.';
+            spinCenterBtn.classList.remove('disabled');
+            spinCenterBtn.innerText = 'DOUBLE';
+        }
+    }
+
+    function showSpinResult(data) {
+        state.mythopoints = data.newBalance;
+        state.spin.canSpin = false;
+        state.spin.streak = data.streak;
+        state.spin.roll = data.roll;
+        state.spin.doubleUsed = false;
+        updateUI();
+        
+        spinResult.style.display = 'block';
+        spinRoll.innerText = '🎲 ' + data.roll;
+        
+        let pointsMsg = '+' + data.pointsAdded + ' MythoPoints';
+        if (data.bonus > 0) {
+          pointsMsg += ' (incl. ' + data.bonus + ' bonus)';
+          spinBonus.innerText = '🔥 Streak Bonus: +' + data.bonus + ' MythoPoints!';
+        } else {
+          spinBonus.innerText = '';
+        }
+        spinPoints.innerText = pointsMsg;
+        
+        if (data.canDouble !== false) {
+          spinCenterBtn.classList.remove('disabled');
+          spinCenterBtn.innerText = 'DOUBLE';
+          spinCenterBtn.style.fontSize = '16px';
+        } else {
+          spinCenterBtn.classList.add('disabled');
+          spinCenterBtn.innerText = 'DONE';
+        }
+        
+        isSpinning = false;
+        loadSpinStatus();
+        triggerSpinCelebration(data.roll);
+    }
+
+    function triggerSpinCelebration(roll) {
+      const end = Date.now() + 1500;
+      (function frame() {
+        confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#ffd60a', '#d500f9', '#00e676'] });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      }());
+    }
+
+    async function loadSpinStatus() {
+      try {
+        const res = await fetch('/api/spin/status/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          state.spin.canSpin = data.canSpin;
+          state.spin.streak = data.streak;
+          state.spin.countdown = data.countdown;
+          state.spin.roll = data.roll;
+          state.spin.doubleUsed = data.doubleUsed;
+          updateUI();
+          
+          if (data.roll !== null && !data.doubleUsed && !isSpinning) {
+            spinResult.style.display = 'block';
+            spinRoll.innerText = '🎲 ' + data.roll;
+            spinPoints.innerText = '+' + data.roll + ' MythoPoints';
+            spinCenterBtn.innerText = 'DOUBLE';
+            spinCenterBtn.style.fontSize = '16px';
+            spinCenterBtn.classList.remove('disabled');
+          } else if (data.roll !== null && data.doubleUsed && !isSpinning) {
+            spinResult.style.display = 'block';
+            spinRoll.innerText = '🎲 ' + data.roll;
+            spinPoints.innerText = '+' + data.roll + ' MythoPoints (doubled)';
+            spinCenterBtn.innerText = 'DONE';
+            spinCenterBtn.classList.add('disabled');
+          } else if (!isSpinning) {
+            spinResult.style.display = 'none';
+            if (data.canSpin) {
+              spinCenterBtn.innerText = 'SPIN';
+              spinCenterBtn.style.fontSize = '20px';
+              spinCenterBtn.classList.remove('disabled');
+            } else {
+              spinCenterBtn.innerText = 'WAIT';
+              spinCenterBtn.classList.add('disabled');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Spin status error:', e);
+      }
+    }
+
+    setInterval(loadSpinStatus, 1000);
+
+    // ─── BANK DATA ───
+    async function loadBankData() {
+      try {
+        const res = await fetch('/api/bank/status/' + userId);
+        const data = await res.json();
+        if (!data.success) return;
+        state.bank.invested = data.invested || 0;
+        state.bank.pendingYield = data.pendingInterest || 0;
+        state.bank.loan = data.loanDue || 0;
+        
+        const claimBtn = document.getElementById('bank-claim-btn');
+        if (data.pendingInterest > 0) {
+          claimBtn.style.display = 'block';
+          claimBtn.innerText = 'Claim +' + data.pendingInterest;
+          claimBtn.onclick = () => claimInterest();
+        } else {
+          claimBtn.style.display = 'none';
+        }
+        updateUI();
+      } catch (e) {}
+    }
+
+    async function claimInterest() {
+      try {
+        const res = await fetch('/api/bank/claim/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          await showSuccess('Claimed ' + data.claimed + ' MythoPoints!', 'Interest Claimed');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error || 'Failed to claim.');
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('invest-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('invest-amount').value);
+      if (!amount || amount < 1) return alert('Enter a valid amount.');
+      const confirmed = await showConfirm(\`Invest \${amount} Mythopoints into MythoFund?\`);
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/bank/invest/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Investment Successful');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('withdraw-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('invest-amount').value);
+      if (!amount || amount < 1) return alert('Enter a valid amount.');
+      const confirmed = await showConfirm(\`Withdraw \${amount} Mythopoints from investment?\`);
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/bank/withdraw/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Withdrawal Successful');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('loan-apply-btn').addEventListener('click', async () => {
+      const confirmed = await showConfirm('Apply for a loan of 100 Mythopoints? (10% daily interest)');
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/bank/loan/apply/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Loan Granted');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    document.getElementById('loan-repay-btn').addEventListener('click', async () => {
+      const confirmed = await showConfirm('Repay your active loan with interest?');
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/bank/loan/repay/' + userId, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Loan Repaid');
+          loadBankData();
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    // ─── WITHDRAW ───
+    async function loadWithdrawHistory() {
+      try {
+        const res = await fetch('/api/withdraw/history/' + userId);
+        const data = await res.json();
+        if (data.success && data.requests.length) {
+          let html = '<div style="font-size:11px; color:rgba(255,255,255,0.3); margin-bottom:4px;">Recent Withdrawals</div>';
+          data.requests.forEach(w => {
+            const statusColor = w.status === 'Pending' ? '#ffd60a' : (w.status === 'Paid' ? '#30d158' : '#ff453a');
+            html += \`
+              <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:12px;">
+                <span>₹\${w.amount} via \${w.method}</span>
+                <span style="color:\${statusColor};">\${w.status}</span>
+              </div>
+            \`;
+          });
+          document.getElementById('withdraw-history').innerHTML = html;
+        } else {
+          document.getElementById('withdraw-history').innerHTML = '<div class="empty" style="font-size:12px; padding:8px;">No withdrawals yet.</div>';
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('withdraw-request-btn').addEventListener('click', async () => {
+      const amount = parseInt(document.getElementById('withdraw-amount').value);
+      const method = document.getElementById('withdraw-method').value.trim();
+      if (!amount || amount < 10) return alert('Minimum withdraw is ₹10.');
+      if (!method) return alert('Please enter a payment method.');
+      const confirmed = await showConfirm(\`Withdraw ₹\${amount} via \${method}? This will deduct \${amount*10000} Mythopoints.\`);
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/withdraw/request/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, method })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Withdraw Requested');
+          loadDashboard();
+          loadWithdrawHistory();
+          document.getElementById('withdraw-amount').value = '';
+          document.getElementById('withdraw-method').value = '';
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    });
+
+    // ─── STORE ───
+    const storeCosts = {
+      'credits': 50,
+      'skip_cooldown': 50,
+      'mystery': 100,
+      'coupon_10': 200,
+      'coupon_20': 500,
+      'coupon_30': 800,
+      'coupon_50': 1500
+    };
+    const storeNames = {
+      'credits': '5 Search Credits',
+      'skip_cooldown': 'Skip Cooldown',
+      'mystery': 'Mystery Box',
+      'coupon_10': '10% OFF Coupon',
+      'coupon_20': '20% OFF Coupon',
+      'coupon_30': '30% OFF Coupon',
+      'coupon_50': '50% OFF Coupon'
+    };
+
+    async function purchase(item) {
+      const cost = storeCosts[item];
+      const name = storeNames[item] || item;
+      if (!cost) return alert('Invalid item.');
+      const confirmed = await showConfirm(\`Purchase \${name} for \${cost} Mythopoints?\`);
+      if (!confirmed) return;
+      try {
+        const res = await fetch('/api/store/purchase/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await showSuccess(data.message, 'Purchase Successful');
+          loadDashboard();
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {}
+    }
+    window.purchase = purchase;
+
+    // ─── PAYMENT ─── (UPDATED with read receipts, reactions, online status)
+    
+    const searchInputPay = document.getElementById('search-user');
+    const searchResults = document.getElementById('search-results');
+    const recentChatsContainer = document.getElementById('recent-chats-container');
+
+    // Update online status periodically
+    async function updateOnlineStatus() {
+      try {
+        await fetch('/api/payment/online', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId })
+        });
+      } catch (e) {
+        console.warn('Failed to update online status:', e);
+      }
+    }
+    
+    // Update online status every 30 seconds
+    updateOnlineStatus();
+    setInterval(updateOnlineStatus, 30000);
+
+    searchInputPay.addEventListener('input', async function() {
+      const query = this.value.trim();
+      if (query.length < 2) {
+        searchResults.innerHTML = '';
+        recentChatsContainer.style.display = 'block'; 
+        return;
+      }
+      
+      recentChatsContainer.style.display = 'none'; 
+      
+      try {
+        const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
+        const data = await res.json();
+        if (data.success && data.users.length) {
+          let html = '';
+          data.users.forEach(u => {
+            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
+                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+            html += \`
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                \${avatar}
+                <div class="result-info" style="flex:1;">
+                  <div class="name" style="font-size:15px; font-weight:500;">\${u.name} \${u.username ? '@'+u.username : ''}</div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px;">\${u.points} pts</div>
+                </div>
+                <div style="font-size:12px; color:rgba(255,255,255,0.3);">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+                </div>
+              </div>
+            \`;
+          });
+          searchResults.innerHTML = html;
+        } else {
+          searchResults.innerHTML = '<div class="empty" style="font-size:12px; padding:12px;">No users found.</div>';
+        }
+      } catch (e) {}
+    });
+
+    async function loadRecentChats() {
+      try {
+        const res = await fetch('/api/payment/recent/' + userId);
+        const data = await res.json();
+        const listContainer = document.getElementById('recent-chats-list');
+        
+        if (data.success && data.recent.length > 0) {
+          let html = '';
+          data.recent.forEach(u => {
+            const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="result-avatar" />\` :
+                          \`<div class="result-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+            
+            const unreadBadge = u.unreadCount > 0 
+                ? \`<div style="background:#00e676; color:#000; font-size:10px; font-weight:bold; padding:2px 6px; border-radius:10px;">\${u.unreadCount}</div>\` 
+                : '';
+                
+            const onlineDot = u.isOnline 
+                ? \`<span class="online-dot" style="width:8px;height:8px;display:inline-block;"></span>\`
+                : \`<span class="online-dot offline" style="width:8px;height:8px;display:inline-block;"></span>\`;
+
+            html += \`
+              <div class="user-result" onclick="selectUserForPay(\${u.id}, '\${u.name}', '\${u.photo_url || ''}')" style="padding: 12px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                \${avatar}
+                <div class="result-info" style="flex:1; overflow:hidden;">
+                  <div class="name" style="font-size:15px; font-weight:500; display:flex; align-items:center; gap:4px;">
+                    \${u.name} \${onlineDot}
+                  </div>
+                  <div class="sub" style="font-size:12px; color:rgba(255,255,255,0.4); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">\${u.lastMessage}</div>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                  \${unreadBadge}
+                  <div style="font-size:12px; color:rgba(255,255,255,0.3);">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+                  </div>
+                </div>
+              </div>
+            \`;
+          });
+          listContainer.innerHTML = html;
+        } else {
+          listContainer.innerHTML = '<div class="empty" style="font-size:12px; padding:12px;">No recent chats yet. Send a payment to start!</div>';
+        }
+      } catch (e) {
+        console.error("Error loading recent chats:", e);
+      }
+    }
+
+    async function selectUserForPay(id, name, photo) {
+      selectedReceiver = id;
+      chatStickToBottom = true;
+      userScrolledUp = false;
+      pendingNewWhileUp = 0;
+      lastChatFingerprint = '';
+      try { cancelReplyEdit(); } catch (e) {}
+      document.getElementById('paySearchArea').classList.add('hidden');
+      document.getElementById('payFullscreen').classList.add('open');
+      
+      document.getElementById('payUserAvatar').src = photo || 'https://via.placeholder.com/100';
+      document.getElementById('payUserName').innerHTML = name + ' <span class="online-dot offline" id="payOnlineDot"></span>';
+      document.getElementById('payUserId').innerText = 'ID: ' + id;
+      
+      // Check online status
+      checkUserOnlineStatus(id);
+      
+      loadPayChat(id, false, true);
+      document.getElementById('payAmountInput').focus();
+      document.getElementById('payStatus').innerHTML = '';
+
+      // Mark messages as read
+      fetch('/api/payment/chat/mark-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, otherId: id })
+      }).then(() => {
+          checkUnreadCount();
+      }).catch(e => console.log(e));
+      
+      // Start polling for new messages
+      if (payChatPollInterval) {
+        clearInterval(payChatPollInterval);
+      }
+      payChatPollInterval = setInterval(() => {
+        if (selectedReceiver) {
+          loadPayChat(selectedReceiver, true, false);
+          pollTypingStatus();
+        }
+      }, 4000);
+    }
+
+    window.selectUserForPay = selectUserForPay;
+
+    document.getElementById('payBackBtn').addEventListener('click', function() {
+      document.getElementById('payFullscreen').classList.remove('open');
+      document.getElementById('paySearchArea').classList.remove('hidden');
+      selectedReceiver = null;
+      if (payChatPollInterval) {
+        clearInterval(payChatPollInterval);
+        payChatPollInterval = null;
+      }
+      loadRecentChats(); 
+      checkUnreadCount();
+    });
+
+    async function checkUserOnlineStatus(userId) {
+      try {
+        const res = await fetch('/api/payment/online-status/' + userId);
+        const data = await res.json();
+        const dot = document.getElementById('payOnlineDot');
+        if (data.success) {
+          if (data.isOnline) {
+            dot.className = 'online-dot';
+          } else {
+            dot.className = 'online-dot offline';
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check online status:', e);
+      }
+    }
+
+    // ─── Telegram-style chat state ───
+    let replyToMessage = null;
+    let editingMessageId = null;
+    let chatStickToBottom = true;
+    let userScrolledUp = false; // sticky until user returns to bottom
+    let lastChatFingerprint = '';
+    let pendingNewWhileUp = 0;
+    let mediaRecorder = null;
+    let voiceChunks = [];
+    let typingPollTimer = null;
+
+    function isNearBottom(el, threshold = 120) {
+      if (!el) return true;
+      return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
+    }
+    function scrollChatToBottom(smooth = false) {
+      const container = document.getElementById('payChatArea');
+      if (!container) return;
+      chatStickToBottom = true;
+      userScrolledUp = false;
+      pendingNewWhileUp = 0;
+      updateScrollFab();
+      requestAnimationFrame(() => {
+        if (smooth) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        else container.scrollTop = container.scrollHeight;
+      });
+    }
+    function updateScrollFab() {
+      const fab = document.getElementById('chatScrollFab');
+      const badge = document.getElementById('chatNewBadge');
+      if (!fab) return;
+      if (!userScrolledUp) {
+        fab.classList.remove('show');
+        if (badge) badge.classList.remove('show');
+      } else {
+        fab.classList.add('show');
+        if (badge && pendingNewWhileUp > 0) {
+          badge.textContent = pendingNewWhileUp > 99 ? '99+' : String(pendingNewWhileUp);
+          badge.classList.add('show');
+        } else if (badge) badge.classList.remove('show');
+      }
+    }
+    // Only content that user cares about while scrolled up
+    function chatFingerprint(chats) {
+      return (chats || []).map(c => c.messageId + ':' + (c.message||'') + ':' + (c.edited?1:0) + ':' + (c.reactions||[]).map(r=>r.reaction).join('') + ':' + (c.deletedForEveryone?1:0) + ':' + (c.type||'')).join('|');
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function loadPayChat(receiverId, silent = false, forceScrollBottom = false) {
+      try {
+        const res = await fetch('/api/payment/chat/' + userId + '?otherId=' + receiverId);
+        const data = await res.json();
+        if (!data.success) return;
+
+        const container = document.getElementById('payChatArea');
+        // Snapshot BEFORE any DOM change
+        const prevScrollTop = container.scrollTop;
+        const prevScrollHeight = container.scrollHeight;
+        // If user scrolled up, NEVER auto-jump to bottom on poll
+        const stayUp = userScrolledUp && !forceScrollBottom;
+        const wasNearBottom = forceScrollBottom || (!userScrolledUp && (isNearBottom(container) || chatStickToBottom));
+
+        const sorted = [...data.chats].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const visible = sorted.filter(c => !(c.deletedFor && c.deletedFor.includes(userId)));
+        const fp = chatFingerprint(visible);
+        const isNewContent = fp !== lastChatFingerprint;
+        if (silent && !isNewContent) return; // nothing changed – keep scroll position
+        if (silent && isNewContent && stayUp) {
+          const oldIds = new Set((currentChatMessages || []).map(c => c.messageId));
+          pendingNewWhileUp += visible.filter(c => !oldIds.has(c.messageId) && c.senderId !== userId).length;
+        }
+        lastChatFingerprint = fp;
+        currentChatMessages = data.chats;
+
+        let html = \`
+          <div class="encryption-msg">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            Messages are end-to-end style encrypted in transit
+          </div>
+        \`;
+
+        if (visible.length === 0) {
+          html += \`
+            <div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.3);">
+              <div style="font-size:48px; margin-bottom:16px;">💬</div>
+              <p>No messages yet. Say hello or send a payment!</p>
+            </div>
+          \`;
+        } else {
+          let lastDate = '';
+          visible.forEach(c => {
+            const isSent = c.senderId === userId;
+            const dateObj = new Date(c.timestamp);
+            const time = dateObj.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+            const dateStr = dateObj.toLocaleDateString(undefined, {month:'long', day:'numeric', year:'numeric'});
+            if (dateStr !== lastDate) {
+              html += \`<div class="chat-date">\${dateStr}</div>\`;
+              lastDate = dateStr;
+            }
+
+            const senderPhoto = isSent ? (tgUser?.photo_url || null) : c.senderPhoto;
+            const senderName = isSent ? (tgUser?.first_name || 'You') : (c.senderName || 'User');
+            const avatar = senderPhoto
+              ? \`<img src="\${senderPhoto}" class="avatar" />\`
+              : \`<div class="avatar" style="background:#651fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">\${escapeHtml(senderName.charAt(0))}</div>\`;
+
+            // reply quote
+            let replyHtml = '';
+            if (c.replyTo) {
+              const rqName = c.replyTo.senderId === userId ? 'You' : (c.senderName || 'User');
+              const rqText = c.replyTo.sticker || c.replyTo.message || c.replyTo.type || 'Message';
+              replyHtml = \`<div class="reply-quote" onclick="scrollToMsg('\${c.replyTo.messageId}')"><div class="rq-name">\${escapeHtml(rqName)}</div><div class="rq-text">\${escapeHtml(String(rqText).slice(0,80))}</div></div>\`;
+            }
+
+            let bubbleHtml = '';
+            if (c.deletedForEveryone || c.type === 'deleted') {
+              bubbleHtml = \`<div class="bubble text deleted">This message was deleted</div>\`;
+            } else if (c.type === 'payment') {
+              const statusText = isSent ? 'SENT' : 'RECEIVED';
+              bubbleHtml = \`
+                <div class="bubble payment">
+                  \${replyHtml}
+                  <div class="payment-amount">M \${c.amount}</div>
+                  <div class="payment-status success">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="background:#30d158; color:#0a0014; border-radius:50%; padding:2px;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    \${statusText} SECURELY
+                  </div>
+                  \${isSent ? '<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:12px;">Tax: ' + (c.tax || 0) + ' pts</div>' : ''}
+                </div>
+              \`;
+            } else if (c.type === 'sticker' && c.sticker) {
+              bubbleHtml = \`<div class="bubble sticker-bubble">\${replyHtml}\${c.sticker}</div>\`;
+            } else if (c.type === 'image' && c.mediaUrl) {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}<img class="chat-media" src="\${c.mediaUrl}" alt="photo" loading="lazy" /></div>\`;
+            } else if (c.type === 'voice' && c.mediaUrl) {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}<audio class="chat-voice" controls preload="none" src="\${c.mediaUrl}"></audio></div>\`;
+            } else {
+              bubbleHtml = \`<div class="bubble text">\${replyHtml}\${escapeHtml(c.message)}</div>\`;
+            }
+
+            let reactionsHtml = '';
+            if (c.reactions && c.reactions.length > 0 && !c.deletedForEveryone) {
+              const reactionMap = {};
+              c.reactions.forEach(r => {
+                if (!reactionMap[r.reaction]) reactionMap[r.reaction] = [];
+                reactionMap[r.reaction].push(r.userId);
+              });
+              reactionsHtml = \`<div class="reaction-bar">\`;
+              Object.keys(reactionMap).forEach(emoji => {
+                reactionsHtml += \`<button class="reaction-btn" onclick="addReaction('\${c.messageId}', '\${emoji}')">\${emoji} <span class="count">\${reactionMap[emoji].length}</span></button>\`;
+              });
+              reactionsHtml += \`</div>\`;
+            }
+
+            let tickHtml = '';
+            if (isSent && !c.deletedForEveryone) {
+              tickHtml = c.read
+                ? \`<span class="tick" style="color:#30d158;">✓✓</span>\`
+                : \`<span class="tick" style="color:rgba(255,255,255,0.3);">✓</span>\`;
+            }
+            const editedHtml = c.edited ? \`<span class="msg-edited">edited</span>\` : '';
+
+            // Edit / Delete only via long-press context menu (not under messages)
+            const actionsHtml = '';
+
+            html += \`
+              <div class="chat-msg \${isSent ? 'sent' : 'received'}" data-message-id="\${c.messageId}" data-sent="\${isSent ? '1' : '0'}">
+                \${avatar}
+                <div class="bubble-wrapper">
+                  \${bubbleHtml}
+                  \${reactionsHtml}
+                  \${actionsHtml}
+                  <div class="time">\${time}\${editedHtml} \${tickHtml}</div>
+                </div>
+              </div>
+            \`;
+          });
+        }
+
+        container.innerHTML = html;
+
+        // long-press / context menu on messages
+        container.querySelectorAll('.chat-msg').forEach(el => {
+          let pressTimer = null;
+          const mid = el.getAttribute('data-message-id');
+          const openCtx = (x, y) => showMsgContextMenu(mid, x, y);
+          el.addEventListener('contextmenu', (e) => { e.preventDefault(); openCtx(e.clientX, e.clientY); });
+          el.addEventListener('touchstart', (e) => {
+            const t = e.touches[0];
+            pressTimer = setTimeout(() => openCtx(t.clientX, t.clientY), 450);
+          }, { passive: true });
+          el.addEventListener('touchend', () => clearTimeout(pressTimer));
+          el.addEventListener('touchmove', () => clearTimeout(pressTimer));
+        });
+
+        // restore scroll – never yank user down while they are reading older messages
+        if (forceScrollBottom || (!stayUp && wasNearBottom)) {
+          requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight;
+            chatStickToBottom = true;
+            userScrolledUp = false;
+            pendingNewWhileUp = 0;
+            updateScrollFab();
+          });
+        } else {
+          // Preserve exact visual position after full re-render
+          const delta = container.scrollHeight - prevScrollHeight;
+          container.scrollTop = prevScrollTop + delta;
+          chatStickToBottom = false;
+          userScrolledUp = true;
+          updateScrollFab();
+        }
+
+        if (!silent && selectedReceiver) {
+          fetch('/api/payment/chat/mark-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId, otherId: selectedReceiver })
+          }).then(() => checkUnreadCount()).catch(() => {});
+        }
+      } catch (e) {
+        console.error('Pay chat load error:', e);
+      }
+    }
+
+    // track user scroll in chat
+    (function bindChatScroll() {
+      const area = document.getElementById('payChatArea');
+      if (!area || area._scrollBound) return;
+      area._scrollBound = true;
+      area.addEventListener('scroll', () => {
+        const near = isNearBottom(area);
+        chatStickToBottom = near;
+        if (near) {
+          userScrolledUp = false;
+          pendingNewWhileUp = 0;
+        } else {
+          userScrolledUp = true;
+        }
+        updateScrollFab();
+      }, { passive: true });
+      const fab = document.getElementById('chatScrollFab');
+      if (fab) fab.addEventListener('click', () => scrollChatToBottom(true));
+    })();
+
+
+    let typingSendTimer = null;
+    let lastTypingSent = 0;
+    (function bindTypingInput() {
+      const input = document.getElementById('payAmountInput');
+      if (!input || input._typingBound) return;
+      input._typingBound = true;
+      input.addEventListener('input', function() {
+        if (!selectedReceiver) return;
+        const now = Date.now();
+        if (now - lastTypingSent > 2000) {
+          lastTypingSent = now;
+          fetch('/api/payment/chat/typing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, otherId: selectedReceiver, typing: true })
+          }).catch(function(){});
+        }
+        clearTimeout(typingSendTimer);
+        typingSendTimer = setTimeout(function() {
+          fetch('/api/payment/chat/typing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, otherId: selectedReceiver, typing: false })
+          }).catch(function(){});
+        }, 3000);
+      });
+    })();
+
+    async function pollTypingStatus() {
+      if (!selectedReceiver) return;
+      try {
+        const res = await fetch('/api/payment/chat/typing/' + userId + '?otherId=' + selectedReceiver);
+        const data = await res.json();
+        const el = document.getElementById('typingIndicator');
+        if (!el) return;
+        if (data.success && data.typing) el.classList.add('show');
+        else el.classList.remove('show');
+      } catch (e) {}
+    }
+
+    window.scrollToMsg = function(messageId) {
+      const el = document.querySelector('.chat-msg[data-message-id="' + messageId + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.outline = '2px solid #bf5af2';
+        setTimeout(() => { el.style.outline = ''; }, 1200);
+      }
+    };
+
+    // ─── REACTIONS / CONTEXT MENU / REPLY / EDIT ───
+    let reactionPickerMessageId = null;
+    const reactionOptions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏', '🔥'];
+    const STICKERS = ['😀','😂','🥰','😎','🔥','💯','🎉','✨','❤️','💜','🙏','👏','🤝','💪','🚀','⚡','🌟','🏆','💎','🎮','🍕','☕','🌙','☀️','🎯','✅','❌','💬','📎','🎤'];
+
+    function findMsg(messageId) {
+      return (currentChatMessages || []).find(m => m.messageId === messageId);
+    }
+
+    function cancelReplyEdit() {
+      replyToMessage = null;
+      editingMessageId = null;
+      const bar = document.getElementById('replyBar');
+      if (bar) bar.classList.remove('open');
+      const input = document.getElementById('payAmountInput');
+      if (input && input.placeholder.indexOf('Edit') === 0) input.placeholder = 'Message or amount...';
+    }
+    document.getElementById('replyBarClose')?.addEventListener('click', cancelReplyEdit);
+
+    function startReply(messageId) {
+      const m = findMsg(messageId);
+      if (!m || m.deletedForEveryone) return;
+      editingMessageId = null;
+      replyToMessage = m;
+      const bar = document.getElementById('replyBar');
+      document.getElementById('replyBarTitle').textContent = 'Reply to ' + (m.senderId === userId ? 'yourself' : (m.senderName || 'user'));
+      document.getElementById('replyBarText').textContent = m.sticker || m.message || m.type || 'Message';
+      bar.classList.add('open');
+      // Keep reply bar + input on screen (chat-area shrinks via flex min-height:0)
+      requestAnimationFrame(() => {
+        const area = document.getElementById('payChatArea');
+        if (area) area.scrollTop = area.scrollHeight;
+        const input = document.getElementById('payAmountInput');
+        if (input) {
+          input.focus({ preventScroll: true });
+          try { input.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+        }
+      });
+      hideMsgContextMenu();
+    }
+    window.startReply = startReply;
+
+    function startEdit(messageId) {
+      const m = findMsg(messageId);
+      if (!m || m.senderId !== userId || m.type !== 'message') return;
+      replyToMessage = null;
+      editingMessageId = messageId;
+      const bar = document.getElementById('replyBar');
+      document.getElementById('replyBarTitle').textContent = 'Edit message';
+      document.getElementById('replyBarText').textContent = m.message || '';
+      bar.classList.add('open');
+      const input = document.getElementById('payAmountInput');
+      input.value = m.message || '';
+      input.placeholder = 'Edit message...';
+      input.focus();
+      hideMsgContextMenu();
+    }
+    window.startEdit = startEdit;
+
+    function hideMsgContextMenu() {
+      const menu = document.getElementById('msgCtxMenu');
+      if (menu) menu.classList.remove('open');
+    }
+    function showMsgContextMenu(messageId, x, y) {
+      const m = findMsg(messageId);
+      if (!m) return;
+      const isSent = m.senderId === userId;
+      const deleted = m.deletedForEveryone || m.type === 'deleted';
+      const menu = document.getElementById('msgCtxMenu');
+      let items = '';
+      if (!deleted) {
+        items += \`<button onclick="startReply('\${messageId}')">↩️ Reply</button>\`;
+        items += \`<button onclick="showReactionPicker('\${messageId}'); hideMsgContextMenu();">😊 React</button>\`;
+        items += \`<button onclick="copyMsgText('\${messageId}')">📋 Copy</button>\`;
+        if (isSent && m.type === 'message') items += \`<button onclick="startEdit('\${messageId}')">✏️ Edit</button>\`;
+        items += \`<button class="danger" onclick="deleteMessageForSelf('\${messageId}')">🗑 Delete for me</button>\`;
+        if (isSent) items += \`<button class="danger" onclick="deleteMessageForEveryone('\${messageId}')">🗑 Delete for everyone</button>\`;
+      } else {
+        items += \`<button class="danger" onclick="deleteMessageForSelf('\${messageId}')">🗑 Remove</button>\`;
+      }
+      menu.innerHTML = items;
+      menu.classList.add('open');
+      const pad = 8;
+      const mw = menu.offsetWidth || 180;
+      const mh = menu.offsetHeight || 200;
+      let left = Math.min(x, window.innerWidth - mw - pad);
+      let top = Math.min(y, window.innerHeight - mh - pad);
+      menu.style.left = Math.max(pad, left) + 'px';
+      menu.style.top = Math.max(pad, top) + 'px';
+      setTimeout(() => {
+        const closer = (e) => {
+          if (!menu.contains(e.target)) { hideMsgContextMenu(); document.removeEventListener('touchstart', closer); document.removeEventListener('mousedown', closer); }
+        };
+        document.addEventListener('touchstart', closer, { passive: true });
+        document.addEventListener('mousedown', closer);
+      }, 30);
+    }
+    window.hideMsgContextMenu = hideMsgContextMenu;
+
+    window.copyMsgText = function(messageId) {
+      const m = findMsg(messageId);
+      if (!m) return;
+      const t = m.message || m.sticker || '';
+      if (navigator.clipboard) navigator.clipboard.writeText(t).catch(() => {});
+      hideMsgContextMenu();
+      tg.HapticFeedback.notificationOccurred('success');
+    };
+
+    function showReactionPicker(messageId) {
+      reactionPickerMessageId = messageId;
+      const existing = document.querySelector('.reaction-popup');
+      if (existing) existing.remove();
+      
+      const popup = document.createElement('div');
+      popup.className = 'reaction-popup open';
+      reactionOptions.forEach(emoji => {
+        const btn = document.createElement('button');
+        btn.className = 'reaction-option';
+        btn.textContent = emoji;
+        btn.onclick = () => {
+          addReaction(messageId, emoji);
+          popup.remove();
+        };
+        popup.appendChild(btn);
+      });
+      
+      const msgElement = document.querySelector(\`.chat-msg[data-message-id="\${messageId}"]\`);
+      if (msgElement) {
+        const bubble = msgElement.querySelector('.bubble-wrapper');
+        if (bubble) {
+          bubble.style.position = 'relative';
+          bubble.appendChild(popup);
+          setTimeout(() => {
+            if (popup.parentNode) popup.remove();
+          }, 5000);
+        }
+      }
+      tg.HapticFeedback.impactOccurred('light');
+    }
+    window.showReactionPicker = showReactionPicker;
+
+    async function addReaction(messageId, reaction) {
+      try {
+        const res = await fetch('/api/payment/chat/reaction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId, reaction })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.impactOccurred('light');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Reaction error:', e);
+      }
+    }
+    window.addReaction = addReaction;
+
+    // ─── DELETE MESSAGE FOR SELF ───
+    async function deleteMessageForSelf(messageId) {
+      const confirmed = await showConfirm('Delete this message for yourself?');
+      if (!confirmed) return;
+      
+      try {
+        const res = await fetch('/api/payment/chat/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Delete error:', e);
+      }
+    }
+    window.deleteMessageForSelf = deleteMessageForSelf;
+
+    async function deleteMessageForEveryone(messageId) {
+      const confirmed = await showConfirm('Delete this message for everyone?');
+      if (!confirmed) return;
+      hideMsgContextMenu();
+      try {
+        const res = await fetch('/api/payment/chat/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId, userId, forEveryone: true })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          if (selectedReceiver) loadPayChat(selectedReceiver, true);
+        } else {
+          alert(data.error || 'Could not delete');
+        }
+      } catch (e) {
+        console.error('Delete for everyone error:', e);
+      }
+    }
+    window.deleteMessageForEveryone = deleteMessageForEveryone;
+
+    // ─── CLEAR CHAT HISTORY ───
+    async function clearChatHistory() {
+      if (!selectedReceiver) return;
+      const confirmed = await showConfirm('Clear all messages with this user for yourself?');
+      if (!confirmed) return;
+      
+      try {
+        const res = await fetch('/api/payment/chat/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, otherId: selectedReceiver })
+        });
+        const data = await res.json();
+        if (data.success) {
+          tg.HapticFeedback.notificationOccurred('success');
+          await showSuccess('Chat history cleared for you.', 'Cleared');
+          if (selectedReceiver) {
+            loadPayChat(selectedReceiver, true);
+          }
+        }
+      } catch (e) {
+        console.error('Clear chat error:', e);
+      }
+    }
+    window.clearChatHistory = clearChatHistory;
+
+    // ─── SEND (text / payment / edit / reply) + media helpers ───
+    async function sendChatPayload(payload) {
+      const res = await fetch('/api/payment/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.json();
+    }
+
+    document.getElementById('paySendBtn').addEventListener('click', async function() {
+      const inputVal = document.getElementById('payAmountInput').value.trim();
+      if (!selectedReceiver) return;
+
+      if (editingMessageId) {
+        if (!inputVal) return;
+        try {
+          const res = await fetch('/api/payment/chat/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messageId: editingMessageId, userId, message: inputVal })
+          });
+          const data = await res.json();
+          if (data.success) {
+            document.getElementById('payAmountInput').value = '';
+            cancelReplyEdit();
+            loadPayChat(selectedReceiver, true, true);
+          } else alert(data.error || 'Edit failed');
+        } catch (e) { console.error(e); }
+        return;
+      }
+
+      if (!inputVal) return;
+      const isNumeric = /^\\d+$/.test(inputVal) && !replyToMessage;
+
+      if (isNumeric) {
+          const amount = parseInt(inputVal);
+          if (amount < 200) {
+              document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Minimum 200 MythoPoints.</span>';
+              return;
+          }
+          const processing = document.getElementById('payment-processing');
+          processing.classList.add('active');
+          this.disabled = true;
+          try {
+            const res = await fetch('/api/payment/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ senderId: userId, receiverId: selectedReceiver, amount: amount })
+            });
+            const data = await res.json();
+            processing.classList.remove('active');
+            this.disabled = false;
+            if (data.success) {
+              tg.HapticFeedback.notificationOccurred('success');
+              document.getElementById('payAmountInput').value = '';
+              document.getElementById('payStatus').innerHTML = '';
+              cancelReplyEdit();
+              loadDashboard();
+              loadPayChat(selectedReceiver, false, true);
+            } else {
+              document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">' + data.error + '</span>';
+              tg.HapticFeedback.notificationOccurred('error');
+            }
+          } catch (e) {
+            processing.classList.remove('active');
+            this.disabled = false;
+            document.getElementById('payStatus').innerHTML = '<span style="color:#ff453a;">Network error.</span>';
+          }
+      } else {
+          try {
+              const body = {
+                senderId: userId,
+                receiverId: selectedReceiver,
+                message: inputVal,
+                senderName: tgUser?.first_name || 'User',
+                type: 'message'
+              };
+              if (replyToMessage) body.replyTo = replyToMessage.messageId;
+              const data = await sendChatPayload(body);
+              if (data.success) {
+                  document.getElementById('payAmountInput').value = '';
+                  document.getElementById('payStatus').innerHTML = '';
+                  cancelReplyEdit();
+                  loadPayChat(selectedReceiver, false, true);
+              }
+          } catch(e) {
+              console.error(e);
+          }
+      }
+    });
+
+    document.getElementById('payAmountInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') document.getElementById('paySendBtn').click();
+    });
+
+    // Stickers
+    (function initStickers() {
+      const panel = document.getElementById('stickerPanel');
+      const btn = document.getElementById('stickerBtn');
+      if (!panel || !btn) return;
+      panel.innerHTML = STICKERS.map(s => '<button type="button" data-s="' + s + '">' + s + '</button>').join('');
+      btn.addEventListener('click', () => panel.classList.toggle('open'));
+      panel.addEventListener('click', async (e) => {
+        const b = e.target.closest('button[data-s]');
+        if (!b || !selectedReceiver) return;
+        panel.classList.remove('open');
+        const sticker = b.getAttribute('data-s');
+        const body = {
+          senderId: userId, receiverId: selectedReceiver,
+          senderName: tgUser?.first_name || 'User',
+          type: 'sticker', sticker, message: sticker
+        };
+        if (replyToMessage) body.replyTo = replyToMessage.messageId;
+        try {
+          const data = await sendChatPayload(body);
+          if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+        } catch (err) { console.error(err); }
+      });
+    })();
+
+    // Image attach
+    document.getElementById('attachBtn')?.addEventListener('click', () => {
+      document.getElementById('chatImageInput')?.click();
+    });
+    document.getElementById('chatImageInput')?.addEventListener('change', async function() {
+      const file = this.files && this.files[0];
+      this.value = '';
+      if (!file || !selectedReceiver) return;
+      if (file.size > 280000) { alert('Image too large (max ~280KB). Compress and retry.'); return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const mediaUrl = reader.result;
+        const body = {
+          senderId: userId, receiverId: selectedReceiver,
+          senderName: tgUser?.first_name || 'User',
+          type: 'image', mediaUrl, mediaType: file.type || 'image/jpeg', message: 'Photo'
+        };
+        if (replyToMessage) body.replyTo = replyToMessage.messageId;
+        try {
+          const data = await sendChatPayload(body);
+          if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+          else alert(data.error || 'Upload failed');
+        } catch (e) { alert('Upload failed'); }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Voice note (hold to record)
+    (function initVoice() {
+      const btn = document.getElementById('voiceBtn');
+      if (!btn || !navigator.mediaDevices) return;
+      const startRec = async (e) => {
+        e.preventDefault();
+        if (!selectedReceiver) return;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          voiceChunks = [];
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (ev) => { if (ev.data.size) voiceChunks.push(ev.data); };
+          mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            btn.classList.remove('recording');
+            const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+            if (blob.size < 500) return;
+            if (blob.size > 280000) { alert('Voice too long. Keep under ~15s.'); return; }
+            const reader = new FileReader();
+            reader.onload = async () => {
+              const body = {
+                senderId: userId, receiverId: selectedReceiver,
+                senderName: tgUser?.first_name || 'User',
+                type: 'voice', mediaUrl: reader.result, mediaType: 'audio/webm', message: 'Voice'
+              };
+              if (replyToMessage) body.replyTo = replyToMessage.messageId;
+              try {
+                const data = await sendChatPayload(body);
+                if (data.success) { cancelReplyEdit(); loadPayChat(selectedReceiver, false, true); }
+                else alert(data.error || 'Voice send failed');
+              } catch (err) { console.error(err); }
+            };
+            reader.readAsDataURL(blob);
+          };
+          mediaRecorder.start();
+          btn.classList.add('recording');
+          tg.HapticFeedback.impactOccurred('medium');
+        } catch (err) {
+          alert('Microphone permission needed for voice notes.');
+        }
+      };
+      const stopRec = () => {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      };
+      btn.addEventListener('mousedown', startRec);
+      btn.addEventListener('mouseup', stopRec);
+      btn.addEventListener('mouseleave', stopRec);
+      btn.addEventListener('touchstart', startRec, { passive: false });
+      btn.addEventListener('touchend', stopRec);
+    })();
+
+    // ─── CHECK UNREAD COUNT & UPDATE BADGE ───
+    async function checkUnreadCount() {
+      try {
+        const res = await fetch('/api/payment/unread/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const badge = document.getElementById('payUnreadBadge');
+          const total = data.total || 0;
+          if (total > 0) {
+            badge.textContent = total > 99 ? '99+' : total;
+            badge.classList.add('show');
+          } else {
+            badge.classList.remove('show');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check unread count:', e);
+      }
+    }
+    
+    // Check unread count every 10 seconds
+    setInterval(checkUnreadCount, 10000);
+    checkUnreadCount();
+
+    // ─── HISTORY ───
+    let historyPage = 1;
+    let historyLoading = false;
+    let historyHasMore = true;
+    const historyContainer = document.getElementById('ui-history-list');
+
+    async function loadHistory(page, reset = false) {
+      if (historyLoading) return;
+      historyLoading = true;
+      
+      if (reset) {
+        historyPage = 1;
+        historyHasMore = true;
+        historyContainer.innerHTML = '';
+        document.getElementById('history-loader').style.display = 'none';
+      }
+      
+      const loader = document.getElementById('history-loader');
+      if (page > 1) loader.style.display = 'block';
+      
+      try {
+        const res = await fetch(\`/api/history/\${userId}?filter=ALL&page=\${page}\`);
+        const data = await res.json();
+        if (!data.success || data.history.length === 0) {
+          historyHasMore = false;
+          loader.style.display = 'none';
+          if (page === 1) {
+            historyContainer.innerHTML = '<div class="empty">No transactions found.</div>';
+          }
+          historyLoading = false;
+          return;
+        }
+        
+        const html = data.history.map(item => {
+          const isEarn = item.type === 'EARNED';
+          const isTax = item.type === 'TAX';
+          const sign = isEarn ? '+' : '-';
+          const cls = isEarn ? 'val-pos' : 'val-neg';
+          const date = new Date(item.date).toLocaleDateString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+          let iconClass = 'default';
+          let iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>';
+          if (isEarn) {
+            iconClass = 'earn';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+          } else if (isTax) {
+            iconClass = 'tax';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>';
+          } else {
+            iconClass = 'spend';
+            iconSvg = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+          }
+          return \`
+            <div class="list-item" style="padding:8px 12px;">
+              <div class="tx-icon" style="width:28px;height:28px;">\${iconSvg}</div>
+              <div class="item-content">
+                <div class="item-left">
+                  <p style="font-size:13px;">\${item.reason || item.type}</p>
+                  <span style="font-size:10px;">\${date}</span>
+                </div>
+                <div class="item-right \${cls}" style="font-size:13px;">\${sign}\${item.amount}</div>
+              </div>
+            </div>
+          \`;
+        }).join('');
+        
+        if (reset || page === 1) {
+          historyContainer.innerHTML = html;
+        } else {
+          historyContainer.innerHTML += html;
+        }
+        
+        historyPage = page;
+        historyHasMore = data.history.length >= 15;
+        loader.style.display = 'none';
+        historyLoading = false;
+        setupHistoryObserver();
+      } catch (e) {
+        console.error('History error:', e);
+        historyContainer.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load history.</div>';
+        loader.style.display = 'none';
+        historyLoading = false;
+      }
+    }
+
+    let historyObserver = null;
+    function setupHistoryObserver() {
+      if (historyObserver) historyObserver.disconnect();
+      const sentinel = document.createElement('div');
+      sentinel.id = 'history-sentinel';
+      sentinel.style.height = '2px';
+      sentinel.style.opacity = '0';
+      historyContainer.appendChild(sentinel);
+      historyObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && historyHasMore && !historyLoading) {
+          loadHistory(historyPage + 1, false);
+        }
+      }, { root: historyContainer, rootMargin: '100px' });
+      historyObserver.observe(sentinel);
+    }
+
+    // ─── LEADERBOARD ───
+    let lbPage = 1, lbFilter = 'all', lbTotalPages = 1;
+    async function loadLeaderboard() {
+      const list = document.getElementById('lb-list');
+      list.innerHTML = '<div class="spinner"></div>';
+      try {
+        const res = await fetch(\`/api/leaderboard/\${userId}?timeframe=\${lbFilter}&page=\${lbPage}\`);
+        const data = await res.json();
+        if (!data.success) throw new Error('API error');
+        lbTotalPages = data.totalPages || 1;
+        document.getElementById('lb-page-info').innerText = \`Page \${data.page} of \${lbTotalPages}\`;
+        if (!data.users || data.users.length === 0) {
+          const msg = lbFilter === 'weekly'
+            ? 'No earnings this week yet.'
+            : lbFilter === 'monthly'
+              ? 'No earnings this month yet.'
+              : 'No users found.';
+          list.innerHTML = '<div class="empty">' + msg + '</div>';
+          if (data.currentUser) {
+            list.innerHTML += '<div class="lb-self-row" style="margin:8px 0;"><span>Your Rank: <strong>#' + (data.currentUser.rank || 'Unranked') + '</strong></span><span class="lb-self-pts">' + data.currentUser.points + ' pts</span></div>';
+          }
+          return;
+        }
+        let html = '<div class="list-card">';
+        data.users.forEach((u, idx) => {
+          const rank = (data.page - 1) * 10 + idx + 1;
+          let rankClass = 'lb-rank';
+          if (rank === 1) rankClass += ' gold';
+          else if (rank === 2) rankClass += ' silver';
+          else if (rank === 3) rankClass += ' bronze';
+          else rankClass += ' default';
+          const isSelf = u.user_id == userId;
+          if (isSelf) rankClass += ' self';
+          const nameClass = isSelf ? 'lb-name self-highlight' : 'lb-name';
+          const youTag = isSelf ? '<span class="you-tag">You</span>' : '';
+          let avatarHtml = '';
+          if (u.photo_url) {
+            avatarHtml = \`<img src="\${u.photo_url}" class="lb-avatar" style="object-fit: cover;" />\`;
+          } else {
+            const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
+            const hue = (u.user_id * 137) % 360;
+            const bgColor = \`hsl(\${hue}, 70%, 40%)\`;
+            avatarHtml = \`<div class="lb-avatar" style="background:\${bgColor};">\${initial}</div>\`;
+          }
+          const rankBadge = \`#\${rank}\`;
+          html += \`
+            <div class="lb-item \${rankClass}" style="\${isSelf ? 'background:rgba(213,0,249,0.05); border-left:3px solid #d500f9;' : ''}">
+              <div class="lb-avatar-wrap">
+                \${avatarHtml}
+                <div class="rank-badge">\${rankBadge}</div>
+              </div>
+              <div class="lb-info">
+                <span class="\${nameClass}">\${u.name} \${youTag}</span>
+              </div>
+              <div class="lb-pts">\${u.points} pts</div>
+            </div>
+          \`;
+        });
+        if (data.currentUser) {
+          const cu = data.currentUser;
+          html += \`
+            <div class="lb-self-row">
+              <span>🕵️‍♀️ Your Rank: <strong class="lb-self-rank">#\${cu.rank || 'Unranked'}</strong></span>
+              <span class="lb-self-pts">\${cu.points} pts</span>
+            </div>
+          \`;
+        }
+        html += '</div>';
+        list.innerHTML = html;
+      } catch (e) {
+        console.error('Leaderboard load error:', e);
+        list.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load leaderboard.</div>';
+      }
+    }
+
+    document.querySelectorAll('.lb-filter').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.lb-filter').forEach(b => {
+          b.classList.remove('active');
+          b.style.background = 'transparent';
+          b.style.color = 'rgba(255,255,255,0.4)';
+          b.style.fontWeight = '400';
+        });
+        this.classList.add('active');
+        this.style.background = 'rgba(213,0,249,0.1)';
+        this.style.color = '#fff';
+        this.style.fontWeight = '600';
+        lbFilter = this.dataset.filter;
+        lbPage = 1;
+        loadLeaderboard();
+      });
+    });
+    document.getElementById('lb-prev').addEventListener('click', () => {
+      if (lbPage > 1) { lbPage--; loadLeaderboard(); }
+    });
+    document.getElementById('lb-next').addEventListener('click', () => {
+      if (lbPage < lbTotalPages) { lbPage++; loadLeaderboard(); }
+    });
+
+    // ─── RATING ───
+    let userRated = false;
+    async function loadRatingStatus() {
+      try {
+        const res = await fetch('/api/rating/status/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const statusDiv = document.getElementById('rating-status');
+          const starContainer = document.getElementById('star-container');
+          const msgDiv = document.getElementById('rating-message');
+          if (data.userRating) {
+            userRated = true;
+            statusDiv.innerHTML = \`<p style="color:#ffd60a; font-size:12px;">You rated \${data.userRating} ⭐ | Avg: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            starContainer.style.display = 'none';
+            msgDiv.innerText = 'Thanks for rating!';
+          } else {
+            userRated = false;
+            statusDiv.innerHTML = \`<p style="color:rgba(255,255,255,0.3); font-size:12px;">Avg Rating: \${data.average.toFixed(1)} (\${data.totalRatings} ratings)</p>\`;
+            starContainer.style.display = 'flex';
+            msgDiv.innerText = 'Tap a star to rate!';
+          }
+        }
+      } catch (e) {}
+    }
+
+    document.querySelectorAll('.star').forEach(star => {
+      star.addEventListener('click', async function() {
+        if (userRated) return;
+        const rating = parseInt(this.dataset.value);
+        const confirmed = await showConfirm(\`Rate MythoBot \${rating} stars? You'll earn 10 Mythopoints.\`);
+        if (!confirmed) return;
+        try {
+          const res = await fetch('/api/rating/submit/' + userId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating })
+          });
+          const data = await res.json();
+          if (data.success) {
+            await showSuccess(data.message, 'Rating Submitted');
+            loadRatingStatus();
+            loadDashboard();
+          } else {
+            alert(data.error);
+          }
+        } catch (e) {}
+      });
+    });
+
+    // ─── WATCH & EARN (Profile) ───
+    async function runWatchAdEarn() {
+        if (typeof show_9055307 !== 'function') {
+            alert('Ad service is still loading. Please wait a moment.');
+            return;
+        }
+        const confirmed = await showConfirm('Watch a quick ad to earn 1 to 3 MythoPoints? (Max 5 per day)');
+        if (!confirmed) return;
+        show_9055307().then(() => {
+            tg.HapticFeedback.notificationOccurred('success');
+            fetch('/api/watch-earn/claim/' + userId, { method: 'POST' })
+                .then(res => res.json())
+                .then(async data => {
+                    if (data.success) {
+                        state.mythopoints = data.newBalance;
+                        updateUI();
+                        await showSuccess('+' + data.reward + ' MythoPoints!', 'Reward Claimed');
+                    } else {
+                        alert(data.error || "Error claiming reward.");
+                    }
+                }).catch(() => alert("Network error while claiming reward."));
+        }).catch((error) => {
+            alert("Ad failed to load or was closed early.");
+            console.error("Monetag Error:", error);
+        });
+    }
+    const profileWatchAdBtn = document.getElementById('profileWatchAdBtn');
+    if (profileWatchAdBtn) profileWatchAdBtn.addEventListener('click', runWatchAdEarn);
+    // Legacy settings id (if present) + FAB
+    const settingsWatchAdBtn = document.getElementById('settingsWatchAdBtn');
+    if (settingsWatchAdBtn) settingsWatchAdBtn.addEventListener('click', runWatchAdEarn);
+    const earnFab = document.getElementById('earnFab');
+    if (earnFab) earnFab.addEventListener('click', runWatchAdEarn);
+  
+    // ─── CHANT & EARN ───
+    const CHANT_KEY = 'mytho_chant_' + userId;
+    let chantTapCount = 0;
+    const orb = document.getElementById('chant-orb');
+    const textEl = document.getElementById('chant-text');
+    const editBtn = document.getElementById('chant-edit');
+    
+    let chantText = localStorage.getItem('chantText') || 'Radha Radha';
+    textEl.innerText = chantText;
+    
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const newText = prompt('Enter your chant:', chantText);
+      if (newText && newText.trim().length > 0) {
+        chantText = newText.trim();
+        textEl.innerText = chantText;
+        localStorage.setItem('chantText', chantText);
+        tg.HapticFeedback.selectionChanged();
+      }
+    });
+
+    function loadChantPersistence() {
+      try {
+        const saved = localStorage.getItem(CHANT_KEY);
+        if (saved) {
+          const data = JSON.parse(saved);
+          chantTapCount = data.taps || 0;
+          const lastTap = data.lastTap || 0;
+          if (Date.now() - lastTap > 600000) {
+            chantTapCount = 0;
+            localStorage.removeItem(CHANT_KEY);
+          }
+        }
+      } catch (e) {}
+    }
+
+    function saveChantPersistence() {
+      try {
+        localStorage.setItem(CHANT_KEY, JSON.stringify({
+          taps: chantTapCount,
+          lastTap: Date.now()
+        }));
+      } catch (e) {}
+    }
+
+    async function fetchChantStats() {
+      try {
+        const res = await fetch('/api/chant/stats/' + userId);
+        const data = await res.json();
+        if (data.success) {
+          const serverTaps = data.totalTaps || 0;
+          const total = serverTaps + chantTapCount;
+          state.chant.totalTaps = total;
+          updateUI();
+          
+          const levels = [
+            { name: 'Seeker', min: 0, multiplier: 1 },
+            { name: 'Devotee', min: 100, multiplier: 1 },
+            { name: 'Priest', min: 500, multiplier: 1 },
+            { name: 'Ascended', min: 2000, multiplier: 2 },
+            { name: 'Moksha', min: 10000, multiplier: 3 }
+          ];
+          let currentLevel = levels[0];
+          for (let i = levels.length - 1; i >= 0; i--) {
+            if (state.chant.totalTaps >= levels[i].min) {
+              currentLevel = levels[i];
+              break;
+            }
+          }
+          state.chant.level = currentLevel.name;
+          state.chant.multiplier = currentLevel.multiplier;
+          updateUI();
+        }
+      } catch (e) {
+        console.error('Failed to fetch chant stats:', e);
+      }
+    }
+
+    const orbContainer = document.getElementById('orb3d-container');
+    orbContainer.addEventListener('mousemove', (e) => {
+      const rect = orbContainer.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width - 0.5;
+      const y = (e.clientY - rect.top) / rect.height - 0.5;
+      orb.style.transform = \`rotateY(\${x * 15}deg) rotateX(\${-y * 15}deg)\`;
+    });
+    orbContainer.addEventListener('mouseleave', () => {
+      orb.style.transform = 'rotateY(0deg) rotateX(0deg)';
+    });
+
+    let lastTapTime = 0;
+    orb.addEventListener('click', async function(e) {
+      const now = Date.now();
+      if (now - lastTapTime < 1000) {
+        tg.HapticFeedback.impactOccurred('light');
+        return;
+      }
+      lastTapTime = now;
+      
+      this.style.transform = 'scale(0.92)';
+      setTimeout(() => { this.style.transform = ''; }, 150);
+      
+      const rect = this.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const ripple = document.createElement('div');
+      ripple.className = 'ripple';
+      ripple.style.width = '20px';
+      ripple.style.height = '20px';
+      ripple.style.left = (x - 10) + 'px';
+      ripple.style.top = (y - 10) + 'px';
+      this.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 600);
+      
+      tg.HapticFeedback.impactOccurred('light');
+      
+      spawnFloatingText(e.clientX || (rect.left + rect.width/2), e.clientY || (rect.top + rect.height/2), '+1');
+      
+      chantTapCount++;
+      saveChantPersistence();
+      
+      const currentTotal = state.chant.totalTaps || 0;
+      state.chant.totalTaps = currentTotal + 1;
+      updateUI();
+      
+      if (chantTapCount >= 1000) {
+        tg.HapticFeedback.impactOccurred('heavy');
+        await syncChantTaps(chantTapCount);
+        chantTapCount = 0;
+        localStorage.removeItem(CHANT_KEY);
+        await fetchChantStats();
+        orb.classList.add('chant-mint-animation');
+        setTimeout(() => orb.classList.remove('chant-mint-animation'), 600);
+        const multiplier = state.chant.multiplier || 1;
+        await showSuccess(\`You earned \${multiplier} Mythopoint(s) for 1000 chants!\`, 'Chant Rewarded!');
+        loadDashboard();
+      }
+    });
+
+    function spawnFloatingText(x, y, text) {
+      const el = document.createElement('div');
+      el.className = 'floating-tap';
+      el.innerText = text;
+      el.style.left = (x - 15) + 'px';
+      el.style.top = (y - 15) + 'px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 800);
+    }
+
+    async function syncChantTaps(taps) {
+      try {
+        const res = await fetch('/api/chant/sync/' + userId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newTaps: taps })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          console.error('Sync failed:', data.error);
+        }
+      } catch (e) {
+        console.error('Sync error:', e);
+      }
+    }
+
+    async function loadChantLeaderboard() {
+      const list = document.getElementById('chant-lb-list');
+      try {
+        const res = await fetch('/api/chant/leaderboard?limit=5');
+        const data = await res.json();
+        if (data.success && data.leaderboard.length) {
+          let html = '';
+          data.leaderboard.forEach((item, index) => {
+            const avatar = item.photo ? \`<img src="\${item.photo}" class="chant-lb-avatar" />\` :
+                          \`<div class="chant-lb-avatar" style="background:#651fff;">\${item.name.charAt(0)}</div>\`;
+            html += \`
+              <div class="chant-lb-item">
+                <span class="chant-lb-rank">#\${index+1}</span>
+                \${avatar}
+                <span class="chant-lb-name">\${item.name}</span>
+                <span class="chant-lb-taps">\${item.taps}</span>
+              </div>
+            \`;
+          });
+          list.innerHTML = html;
+        } else {
+          list.innerHTML = '<div class="empty" style="font-size:11px; padding:4px 0;">No chanters yet.</div>';
+        }
+      } catch (e) {
+        list.innerHTML = '<div class="empty" style="font-size:11px; padding:4px 0;">Failed to load.</div>';
+      }
+    }
+
+    // ─── REFERRAL FUNCTIONS ───
+    function shareReferral() {
+        const botUsername = "MythoSerialBot"; 
+        const link = \`https://t.me/\${botUsername}?start=${userId}\`;
+        const text = \`Join me on MythoserialBot and Watch Mythology Serials Free & earn free Mythopoints! 🚀\\n\\n\${link}\`;
+        
+        tg.openTelegramLink(\`https://t.me/share/url?url=\${encodeURIComponent(link)}&text=\${encodeURIComponent(text)}\`);
+    }
+
+    function showRefRewards() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('refRewardsModal').classList.add('open');
+    }
+
+    async function showRefLeaderboard() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('refLeaderboardModal').classList.add('open');
+        const content = document.getElementById('ref-lb-content');
+        content.innerHTML = '<div class="spinner"></div>';
+        
+        try {
+            const res = await fetch('/api/referral/leaderboard');
+            const data = await res.json();
+            
+            if (data.success && data.leaderboard.length > 0) {
+                let html = '';
+                data.leaderboard.forEach((u, i) => {
+                    const rank = i + 1;
+                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🔹';
+                    const avatar = u.photo 
+                        ? \`<img src="\${u.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" />\` 
+                        : \`<div style="width:32px;height:32px;border-radius:50%;background:#651fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">\${u.name.charAt(0).toUpperCase()}</div>\`;
+                    
+                    html += \`
+                        <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:0.5px solid rgba(255,255,255,0.06);">
+                            <div style="width:24px; text-align:center; font-size:16px;">\${medal}</div>
+                            \${avatar}
+                            <div style="flex:1; font-weight:500; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">\${u.name}</div>
+                            <div style="font-weight:700; color:#00e676; font-size:14px; background:rgba(0,230,118,0.1); padding:4px 8px; border-radius:12px;">\${u.refs}</div>
+                        </div>
+                    \`;
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="empty" style="padding:20px;">No referrals yet. Be the first!</div>';
+            }
+        } catch (e) {
+            content.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load leaderboard.</div>';
+        }
+    }
+
+    // ─── SCRATCH CARD HISTORY LOGIC ───
+    async function openScratchHistory() {
+        tg.HapticFeedback.impactOccurred('light');
+        document.getElementById('scratchHistoryModal').classList.add('open');
+        const content = document.getElementById('scratch-list-content');
+        content.innerHTML = '<div class="spinner"></div>';
+        
+        try {
+            const res = await fetch('/api/scratch/history/' + userId);
+            const data = await res.json();
+            
+            if (data.success && data.cards.length > 0) {
+                let html = '';
+                data.cards.forEach(card => {
+                    if (card.scratched) {
+                        html += \`
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:rgba(255,255,255,0.05); border-radius:12px; margin-bottom:8px; border:1px solid rgba(48,209,88,0.2);">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="font-size:24px;">🎉</div>
+                                    <div>
+                                        <div style="font-size:14px; font-weight:600; color:#fff;">Claimed Card</div>
+                                        <div style="font-size:11px; color:rgba(255,255,255,0.4);">Token: \${card.token.substring(0,6)}...</div>
+                                    </div>
+                                </div>
+                                <div style="font-weight:700; color:#30d158; font-size:15px;">+\${card.reward || 0} pts</div>
+                            </div>
+                        \`;
+                    } else {
+                        html += \`
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:linear-gradient(135deg, rgba(213,0,249,0.1), rgba(255,159,28,0.1)); border-radius:12px; margin-bottom:8px; border:1px solid rgba(213,0,249,0.3);">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div style="font-size:24px;">🎁</div>
+                                    <div>
+                                        <div style="font-size:14px; font-weight:600; color:#fff;">Unscratched</div>
+                                        <div style="font-size:11px; color:#ea80fc;">Ready to reveal!</div>
+                                    </div>
+                                </div>
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=scratch_\${card.token}')" style="background: linear-gradient(135deg, #ff9f1c, #d500f9); border:none; padding:6px 12px; border-radius:12px; color:#fff; font-weight:600; font-size:12px; cursor:pointer; box-shadow: 0 4px 10px rgba(213,0,249,0.3);">Scratch</button>
+                            </div>
+                        \`;
+                    }
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="empty" style="padding:20px;">No scratch cards found. Claim your daily card in the bot!</div>';
+            }
+        } catch (e) {
+            content.innerHTML = '<div class="empty" style="color:#ff453a;">Failed to load cards.</div>';
+        }
+    }
+
+    // ─── INIT ───
+    async function init() {
+      await loadUserSettings();
+      loadChantPersistence();
+      await loadDashboard();
+      await fetchChantStats();
+      await loadChantLeaderboard();
+      await loadSpinStatus();
+      loadRecentChats();
+      checkUnreadCount();
+      
+      if (document.getElementById('tab-bank').classList.contains('active')) { 
+        loadBankData(); 
+        loadWithdrawHistory(); 
+      }
+      if (document.getElementById('tab-profile').classList.contains('active')) { 
+        loadHistory(1, true); 
+        loadLeaderboard(); 
+        loadRatingStatus(); 
+      }
+
+      if (typeof show_9055307 === 'function') {
+          show_9055307({
+            type: 'inApp',
+            inAppSettings: {
+              frequency: 2,
+              capping: 0.1,
+              interval: 30,
+              timeout: 5,
+              everyPage: false
+            }
+          }).catch(e => console.log("Auto-ad skipped or not ready:", e));
+      }
+    }
+    
+    init();
+
+  </script>
+</body>
+</html>
+    `);
+});
+                
+    
+
+// ==========================================
+// QUIZ CREATOR MINI APP UI – Premium Telegram Style (No Emojis)
+// ==========================================
+app.get("/create-quiz-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Quiz Creator</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        :root {
+            --bg: #ffffff;
+            --card: #f4f4f5;
+            --text: #000000;
+            --hint: #707579;
+            --accent: #2AABEE;
+            --accent-dark: #1e96d2;
+            --border: #e7e7e7;
+            --destructive: #e53935;
+            --success: #31b545;
+            --warning: #f5a623;
+            --input-bg: #ffffff;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04);
+            --topbar-bg: rgba(255,255,255,0.92);
+        }
+
+        [data-theme="dark"] {
+            --bg: #0b0c0f;
+            --card: #1c1c1e;
+            --text: #f5f5f7;
+            --hint: #98989d;
+            --accent: #64d2ff;
+            --accent-dark: #2AABEE;
+            --border: rgba(255,255,255,0.12);
+            --destructive: #ff453a;
+            --success: #30d158;
+            --warning: #ffd60a;
+            --input-bg: #1c1c1e;
+            --shadow: 0 4px 16px rgba(0,0,0,0.35);
+            --topbar-bg: rgba(28,28,30,0.92);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+            background: var(--bg);
+            margin: 0; padding: 0 0 110px 0;
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.01em;
+            transition: background 0.25s ease, color 0.25s ease;
+        }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed; top: 14px; right: 14px; z-index: 200;
+            width: 42px; height: 42px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: var(--shadow);
+            transition: transform 0.2s ease, background 0.2s;
+        }
+        .theme-toggle:active { transform: scale(0.92); }
+        .theme-toggle svg { width: 20px; height: 20px; }
+        .theme-toggle .icon-sun { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+
+        .container { width: 100%; max-width: 500px; margin: 0 auto; padding: 20px 16px; animation: fadeUp 0.35s ease; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+        .header-icon { width: 48px; height: 48px; margin: 0 auto 8px; display: block; fill: var(--accent); }
+        .title { font-weight: 800; font-size: 24px; text-align: center; margin: 4px 0; }
+        .subtitle { font-size: 14px; color: var(--hint); text-align: center; margin-bottom: 28px; }
+
+        .form-group { margin-bottom: 14px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .form-control {
+            width: 100%; padding: 14px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); font-size: 15px; outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-control:focus { border-color: var(--accent); background: var(--input-bg); box-shadow: 0 0 0 3px rgba(42,171,238,0.15); }
+        textarea.form-control { resize: none; font-family: inherit; }
+
+        .q-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 16px;
+            margin-bottom: 16px;
+            position: relative;
+            box-shadow: var(--shadow);
+        }
+        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
+
+        .btn-remove { background: rgba(229,57,53,0.08); color: var(--destructive); border: none; padding: 6px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .btn-remove:active { transform: scale(0.95); }
+
+        .btn-add { background: rgba(42,171,238,0.08); color: var(--accent); border: 1px dashed rgba(42,171,238,0.35); width: 100%; padding: 16px; border-radius: 14px; font-weight: 700; font-size: 14px; margin-bottom: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-add:active { transform: scale(0.98); }
+        .btn-add svg { width: 20px; height: 20px; fill: var(--accent); }
+
+        .options-group {
+            display: flex; flex-direction: column; margin: 14px 0;
+            border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+        }
+        .option-card {
+            display: flex; align-items: center; gap: 12px; padding: 0 12px;
+            background: var(--input-bg); cursor: pointer; transition: background 0.15s;
+        }
+        .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
+        .option-card input[type="radio"] { display: none; }
+
+        .radio-custom {
+            width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--hint);
+            display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease;
+        }
+        .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
+        .option-card.selected .radio-custom::after {
+            content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px;
+            border-right: 2px solid #fff; border-bottom: 2px solid #fff;
+            transform: translate(-50%, -55%) rotate(45deg);
+        }
+
+        .opt-body { flex: 1; min-width: 0; }
+        .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
+        .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
+        .option-card .opt-val::placeholder { color: var(--hint); }
+
+        .opt-attach-btn {
+            background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; color: var(--hint); cursor: pointer;
+        }
+        .opt-attach-btn svg { width: 20px; height: 20px; }
+        .opt-attach-btn.has-media { color: var(--accent); }
+
+        .option-card .opt-media-val {
+            display: none; width: 100%; background: transparent; border: none;
+            border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none;
+            padding: 8px 0 10px; cursor: text;
+        }
+        .option-card .opt-media-val.show { display: block; }
+        .option-card .opt-media-val::placeholder { color: var(--hint); }
+
+        .q-exp { border: none; background: var(--card); border-radius: 12px; padding: 12px; }
+
+        .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: var(--border); border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch:checked { background: var(--accent); box-shadow: 0 0 8px rgba(42,171,238,0.35); }
+        .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle-switch:checked::after { transform: translateX(20px); }
+
+        .sticky-action-bar {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: var(--topbar-bg);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid var(--border);
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            display: flex; gap: 10px; z-index: 100;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+            transform: translateY(100%); transition: transform 0.3s ease;
+        }
+        .sticky-action-bar.visible { transform: translateY(0); }
+
+        .sticky-action-bar .btn-publish { flex: 2; background: var(--accent); border: none; padding: 14px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(42,171,238,0.3); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .sticky-action-bar .btn-publish:active { background: var(--accent-dark); }
+        .sticky-action-bar .btn-clear { flex: 1; background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); border-radius: 12px; color: var(--destructive); font-weight: 700; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+        .top-bar-save { position: fixed; top: 10px; right: 60px; background: var(--card); padding: 4px 12px; border-radius: 16px; font-size: 10px; color: var(--success); font-weight: 700; z-index: 100; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(49,181,69,0.3); box-shadow: var(--shadow); display: flex; align-items: center; gap: 4px; }
+        .top-bar-save.show { opacity: 1; }
+        .top-bar-save svg { width: 14px; height: 14px; fill: var(--success); }
+
+        /* AI Generate panel */
+        .ai-panel {
+            background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+            padding: 16px; margin-bottom: 20px; box-shadow: var(--shadow);
+        }
+        .ai-panel-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--accent); }
+        .ai-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .ai-row .form-control { flex: 1; min-width: 120px; }
+        .btn-ai {
+            width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
+            background: linear-gradient(135deg, #7c3aed, #2AABEE); color: #fff; font-weight: 700; font-size: 14px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 4px 14px rgba(124,58,237,0.3); transition: transform 0.15s, opacity 0.2s;
+        }
+        .btn-ai:active { transform: scale(0.97); }
+        .btn-ai:disabled { opacity: 0.6; cursor: wait; }
+        .ai-status { font-size: 12px; color: var(--hint); text-align: center; margin-top: 8px; min-height: 18px; }
+        .ai-status.err { color: var(--destructive); }
+        .ai-status.ok { color: var(--success); }
+
+        .loader { border: 3px solid #e8e8e8; border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .media-preview { margin: 8px 0 4px; border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 60px; position: relative; }
+        .media-preview img, .media-preview video { max-width: 100%; max-height: 180px; border-radius: 10px; display: block; }
+        .media-preview .file-id-label { font-size: 11px; color: var(--hint); padding: 6px 10px; background: rgba(255,255,255,0.9); border-radius: 8px; position: absolute; bottom: 6px; right: 6px; pointer-events: none; }
+
+        .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
+        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
+        .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
+        .media-input-row select.q-media-type:focus { border-color: var(--accent); }
+        .media-input-row .clear-media { background: rgba(229,57,53,0.08); border: 1px solid rgba(229,57,53,0.2); color: var(--destructive); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; }
+
+        .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+        .time-per-q input { flex: 1; }
+        .time-per-q .hint { font-size: 11px; color: var(--hint); }
+
+        .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+    <div class="top-bar-save" id="save-indicator">
+        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        Saved
+    </div>
+
+    <div class="container" id="main-content">
+        <div style="text-align: center;">
+            <img src="https://i.ibb.co/hxH7P7Jk/photo-2026-09-02-12-17-37-7680911038748819472.jpg" 
+                 alt="Quiz Creator Banner" 
+                 style="width: 48px; height: 48px; display: block; margin: 0 auto 8px; border-radius: 12px; object-fit: cover;" />
+            <div class="title">Create New Quiz</div>
+            <div class="subtitle">Progress autosaves securely.</div>
+        </div>
+
+        <div id="quiz-form">
+            <div class="ai-panel">
+                <div class="ai-panel-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z"/><circle cx="12" cy="12" r="2"/></svg>
+                    Generate with AI
+                </div>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label>Topic</label>
+                    <input type="text" id="ai-topic" class="form-control" placeholder="e.g. Mahabharata, Solar System, Cricket...">
+                </div>
+                <div class="ai-row">
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Questions</label>
+                        <input type="number" id="ai-count" class="form-control" value="5" min="1" max="20">
+                    </div>
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Difficulty</label>
+                        <select id="ai-diff" class="form-control">
+                            <option value="easy">Easy</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="hard">Hard</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label>Language</label>
+                        <input type="text" id="ai-lang" class="form-control" value="English" placeholder="English / Hindi">
+                    </div>
+                </div>
+                <button type="button" class="btn-ai" id="btnGenerateAI" onclick="generateWithAI()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+                    Generate Quiz
+                </button>
+                <div class="ai-status" id="ai-status"></div>
+            </div>
+
+            <div class="q-card" style="margin-bottom: 24px; border-color: rgba(42,171,238,0.3); background: rgba(42,171,238,0.04);">
+                <div class="form-group">
+                    <label>Quiz Title</label>
+                    <input type="text" id="q-title" class="form-control" placeholder="e.g. Ramayana Epic Quiz" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="q-desc" class="form-control" rows="2" placeholder="Brief description" required></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Time Per Question (Sec)</label>
+                    <input type="number" id="q-time" class="form-control" value="15" required>
+                </div>
+            </div>
+
+            <div id="questions-container"></div>
+
+            <button type="button" class="btn-add" onclick="addQuestion()">
+                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                Add New Question
+            </button>
+        </div>
+
+        <div id="loading" style="display:none; margin-top:30px; text-align:center;">
+            <div class="loader"></div>
+            <p style="color: var(--accent); font-weight: 700; font-size: 14px;">Publishing to Database...</p>
+        </div>
+    </div>
+
+    <!-- Sticky Bottom Action Bar -->
+    <div class="sticky-action-bar visible" id="actionBar">
+        <button class="btn-clear" onclick="clearDrafts()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            Clear
+        </button>
+        <button class="btn-publish" id="publish-btn" onclick="submitQuiz()">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            Publish Quiz
+        </button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // ---- Theme (light / dark) ----
+        (function initTheme() {
+            const stored = localStorage.getItem('mytho_quiz_theme');
+            const preferDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = stored || (preferDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            try {
+                tg.setHeaderColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+            } catch (e) {}
+        })();
+        document.getElementById('themeToggle').addEventListener('click', function () {
+            const cur = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('mytho_quiz_theme', next);
+            try {
+                tg.setHeaderColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
+            } catch (e) {}
+        });
+
+        const userId = \`${userId}\`;
+        const storageKey = \`mytho_quiz_draft_\${userId}\`;
+        let questionCount = 0;
+        let saveTimeout;
+
+        // ---- AI Generate ----
+        async function generateWithAI() {
+            const topic = (document.getElementById('ai-topic').value || '').trim();
+            const count = parseInt(document.getElementById('ai-count').value, 10) || 5;
+            const difficulty = document.getElementById('ai-diff').value || 'medium';
+            const language = (document.getElementById('ai-lang').value || 'English').trim();
+            const timePer = parseInt(document.getElementById('q-time').value, 10) || 15;
+            const status = document.getElementById('ai-status');
+            const btn = document.getElementById('btnGenerateAI');
+            if (!topic || topic.length < 2) {
+                status.className = 'ai-status err';
+                status.textContent = 'Please enter a topic.';
+                return;
+            }
+            btn.disabled = true;
+            status.className = 'ai-status';
+            status.textContent = 'Generating with AI… this may take a few seconds.';
+            try {
+                const res = await fetch('/api/quiz/generate-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, count, difficulty, language, time_per_question: timePer })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Generation failed');
+                document.getElementById('q-title').value = data.title || '';
+                document.getElementById('q-desc').value = data.description || '';
+                if (data.time_per_question) document.getElementById('q-time').value = data.time_per_question;
+                document.getElementById('questions-container').innerHTML = '';
+                questionCount = 0;
+                (data.questions || []).forEach(function (q) {
+                    addQuestion();
+                    const card = document.getElementById('questions-container').lastElementChild;
+                    if (!card) return;
+                    card.querySelector('.q-text').value = q.question || '';
+                    const opts = card.querySelectorAll('.opt-val');
+                    (q.options || []).forEach(function (opt, i) {
+                        if (opts[i]) opts[i].value = opt;
+                    });
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    const ans = Number(q.answer);
+                    if (radios[ans]) {
+                        radios[ans].checked = true;
+                        updateOptionStyles(card.id);
+                    }
+                    const exp = card.querySelector('.q-exp');
+                    if (exp) exp.value = q.explanation || '';
+                    const tLim = card.querySelector('.q-time-limit');
+                    if (tLim && q.time_limit) tLim.value = q.time_limit;
+                });
+                status.className = 'ai-status ok';
+                status.textContent = 'Generated ' + (data.questions || []).length + ' questions. Review & edit if needed.';
+                triggerAutoSave();
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
+            } catch (err) {
+                status.className = 'ai-status err';
+                status.textContent = err.message || 'AI generation failed. Try again.';
+                try { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
+
+        function toggleOptMedia(e, btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const body = btn.closest('.opt-body');
+            const mediaInput = body.querySelector('.opt-media-val');
+            const showing = mediaInput.classList.toggle('show');
+            btn.classList.toggle('has-media', showing || mediaInput.value.trim().length > 0);
+            if (showing) mediaInput.focus();
+            triggerAutoSave();
+        }
+
+        function triggerConfetti() {
+            const end = Date.now() + 1500;
+            (function frame() {
+                confetti({ particleCount: 4, angle: 60, spread: 50, origin: { x: 0 }, colors: ['#2AABEE', '#31b545', '#f5a623'] });
+                confetti({ particleCount: 4, angle: 120, spread: 50, origin: { x: 1 }, colors: ['#2AABEE', '#31b545', '#f5a623'] });
+                if (Date.now() < end) requestAnimationFrame(frame);
+            }());
+        }
+
+        function updateOptionStyles(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.querySelectorAll('.option-card').forEach(oc => {
+                const radio = oc.querySelector('input[type="radio"]');
+                if (radio && radio.checked) oc.classList.add('selected');
+                else oc.classList.remove('selected');
+            });
+        }
+
+        function addQuestion() {
+            questionCount++;
+            const id = questionCount;
+            const container = document.getElementById('questions-container');
+            const qDiv = document.createElement('div');
+            qDiv.className = 'q-card';
+            qDiv.id = \`q-card-\${id}\`;
+
+            qDiv.innerHTML = \`
+                <div class="q-header">
+                    <span>Question \${id}</span>
+                    <button class="btn-remove" onclick="removeQuestion(\${id})">✕ Remove</button>
+                </div>
+
+                <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+
+                <div class="media-input-row">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id (photo/video/audio)" style="padding: 10px;">
+                    <select class="q-media-type" title="Media type (used when pasting a file_id)">
+                        <option value="photo">Photo</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
+                    <button class="clear-media" onclick="clearMedia(this)">✕</button>
+                </div>
+                <div class="media-preview" id="preview-\${id}" style="display:none;"></div>
+
+                <div class="time-per-q">
+                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)" style="flex:1; padding: 10px;">
+                    <span class="hint">Optional</span>
+                </div>
+
+                <div class="options-group">
+                    <label class="option-card selected">
+                        <input type="radio" name="q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 1" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 2" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 3" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 4" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                </div>
+
+                <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+
+                <div class="setting-item">
+                    <span style="font-size:12px; font-weight:800; color:var(--warning);">Rapid Fire (7s)</span>
+                    <input type="checkbox" class="toggle-switch q-rapid">
+                </div>
+            \`;
+
+            container.appendChild(qDiv);
+
+            const mediaInput = qDiv.querySelector('.q-media-input');
+            mediaInput.addEventListener('input', function() {
+                updateMediaPreview(id, this.value.trim());
+                triggerAutoSave();
+            });
+
+            const mediaTypeSelect = qDiv.querySelector('.q-media-type');
+            mediaTypeSelect.addEventListener('change', function() {
+                updateMediaPreview(id, mediaInput.value.trim());
+                triggerAutoSave();
+            });
+
+            qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
+                tg.HapticFeedback.impactOccurred('light');
+                updateOptionStyles(\`q-card-\${id}\`);
+                triggerAutoSave();
+            }));
+
+            qDiv.querySelectorAll('.q-time-limit, .q-text, .opt-val, .opt-media-val, .q-exp, .q-rapid').forEach(el => {
+                el.addEventListener('input', triggerAutoSave);
+                el.addEventListener('change', triggerAutoSave);
+            });
+
+            qDiv.querySelectorAll('.opt-media-val').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    const btn = inp.closest('.opt-body').querySelector('.opt-attach-btn');
+                    if (btn) btn.classList.toggle('has-media', inp.value.trim().length > 0);
+                });
+            });
+
+            tg.HapticFeedback.selectionChanged();
+            triggerAutoSave();
+            return id;
+        }
+
+        function updateMediaPreview(qId, mediaValue) {
+            const previewContainer = document.getElementById(\`preview-\${qId}\`);
+            if (!previewContainer) return;
+            const card = document.getElementById(\`q-card-\${qId}\`);
+            const typeSelect = card ? card.querySelector('.q-media-type') : null;
+            if (!mediaValue) {
+                previewContainer.style.display = 'none';
+                previewContainer.innerHTML = '';
+                return;
+            }
+            const isUrl = mediaValue.match(/^https?:\\/\\//);
+            const isFileId = !isUrl && mediaValue.length > 10;
+            let html = '';
+            if (isUrl) {
+                const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'photo';
+                    html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'video';
+                    html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else if (['mp3','ogg','wav','m4a','flac','aac'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'audio';
+                    html = \`<audio controls style="width:100%;"><source src="\${mediaValue}"></audio>\`;
+                } else {
+                    html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
+                }
+            } else if (isFileId) {
+                const mType = typeSelect ? typeSelect.value : 'photo';
+                const icon = mType === 'audio' ? '🎵' : (mType === 'video' ? '🎬' : '🖼️');
+                html = \`
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px; background:rgba(42,171,238,0.1); border-radius:12px;">
+                        <span style="font-size:24px;">\${icon}</span>
+                        <span style="font-size:12px; color:var(--accent); word-break:break-all;">\${mediaValue}</span>
+                        <span class="file-id-label">\${mType} file_id</span>
+                    </div>
+                \`;
+            }
+            previewContainer.innerHTML = html;
+            previewContainer.style.display = 'block';
+        }
+
+        function clearMedia(btn) {
+            const card = btn.closest('.q-card');
+            if (!card) return;
+            const input = card.querySelector('.q-media-input');
+            if (input) {
+                input.value = '';
+                const qId = card.id.replace('q-card-', '');
+                updateMediaPreview(qId, '');
+                triggerAutoSave();
+            }
+        }
+
+        function removeQuestion(id) {
+            const el = document.getElementById(\`q-card-\${id}\`);
+            if (el) {
+                el.style.transform = 'scale(0.9)';
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.remove();
+                    triggerAutoSave();
+                }, 200);
+            }
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function saveState() {
+            const data = {
+                title: document.getElementById('q-title').value,
+                desc: document.getElementById('q-desc').value,
+                time: document.getElementById('q-time').value,
+                questions: []
+            };
+            document.querySelectorAll('.q-card').forEach(card => {
+                const textNode = card.querySelector('.q-text');
+                if (!textNode) return;
+                const opts = card.querySelectorAll('.opt-val');
+                const optMedia = card.querySelectorAll('.opt-media-val');
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
+                let mediaValue = mediaInput ? mediaInput.value.trim() || null : null;
+                let mediaUrl = null, mediaFileId = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
+                }
+                data.questions.push({
+                    text: textNode.value,
+                    opt1: opts[0] ? opts[0].value : '',
+                    opt2: opts[1] ? opts[1].value : '',
+                    opt3: opts[2] ? opts[2].value : '',
+                    opt4: opts[3] ? opts[3].value : '',
+                    opt1Media: optMedia[0] ? optMedia[0].value : '',
+                    opt2Media: optMedia[1] ? optMedia[1].value : '',
+                    opt3Media: optMedia[2] ? optMedia[2].value : '',
+                    opt4Media: optMedia[3] ? optMedia[3].value : '',
+                    ansIndex: ansIndex,
+                    exp: card.querySelector('.q-exp').value,
+                    isRapid: card.querySelector('.q-rapid').checked,
+                    timeLimit: timeLimit,
+                    mediaUrl: mediaUrl,
+                    mediaFileId: mediaFileId,
+                    mediaType: mediaTypeSelect ? mediaTypeSelect.value : 'photo'
+                });
+            });
+            localStorage.setItem(storageKey, JSON.stringify(data));
+            const indicator = document.getElementById('save-indicator');
+            indicator.classList.add('show');
+            setTimeout(() => indicator.classList.remove('show'), 1500);
+        }
+
+        function triggerAutoSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveState, 400);
+        }
+
+        function loadState() {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    document.getElementById('q-title').value = data.title || '';
+                    document.getElementById('q-desc').value = data.desc || '';
+                    document.getElementById('q-time').value = data.time || '15';
+                    document.getElementById('questions-container').innerHTML = '';
+                    questionCount = 0;
+                    if (data.questions && data.questions.length > 0) {
+                        data.questions.forEach(q => {
+                            const id = addQuestion();
+                            const card = document.getElementById(\`q-card-\${id}\`);
+                            card.querySelector('.q-text').value = q.text || '';
+                            const opts = card.querySelectorAll('.opt-val');
+                            opts[0].value = q.opt1 || '';
+                            opts[1].value = q.opt2 || '';
+                            opts[2].value = q.opt3 || '';
+                            opts[3].value = q.opt4 || '';
+                            const optMedia = card.querySelectorAll('.opt-media-val');
+                            optMedia[0].value = q.opt1Media || '';
+                            optMedia[1].value = q.opt2Media || '';
+                            optMedia[2].value = q.opt3Media || '';
+                            optMedia[3].value = q.opt4Media || '';
+                            optMedia.forEach(inp => {
+                                const has = inp.value.trim().length > 0;
+                                inp.classList.toggle('show', has);
+                                const btn = inp.closest('.opt-body') ? inp.closest('.opt-body').querySelector('.opt-attach-btn') : null;
+                                if (btn) btn.classList.toggle('has-media', has);
+                            });
+                            const radios = card.querySelectorAll('input[type="radio"]');
+                            if (q.ansIndex >= 0 && q.ansIndex < 4) radios[q.ansIndex].checked = true;
+                            card.querySelector('.q-exp').value = q.exp || '';
+                            card.querySelector('.q-rapid').checked = q.isRapid || false;
+                            const timeInput = card.querySelector('.q-time-limit');
+                            if (timeInput && q.timeLimit) timeInput.value = q.timeLimit;
+                            const mediaInput = card.querySelector('.q-media-input');
+                            const mediaTypeSelect = card.querySelector('.q-media-type');
+                            if (mediaTypeSelect) mediaTypeSelect.value = q.mediaType || 'photo';
+                            if (mediaInput) {
+                                if (q.mediaUrl) mediaInput.value = q.mediaUrl;
+                                else if (q.mediaFileId) mediaInput.value = q.mediaFileId;
+                                updateMediaPreview(id, mediaInput.value.trim());
+                            }
+                            updateOptionStyles(\`q-card-\${id}\`);
+                        });
+                    } else {
+                        addQuestion();
+                    }
+                } catch(e) {
+                    addQuestion();
+                }
+            } else {
+                addQuestion();
+            }
+        }
+
+        function clearDrafts() {
+            if(confirm("Delete all drafted questions?")) {
+                tg.HapticFeedback.impactOccurred('heavy');
+                localStorage.removeItem(storageKey);
+                location.reload();
+            }
+        }
+
+        document.getElementById('quiz-form').addEventListener('input', triggerAutoSave);
+        document.getElementById('quiz-form').addEventListener('change', triggerAutoSave);
+
+        async function submitQuiz() {
+            const title = document.getElementById('q-title').value.trim();
+            const desc = document.getElementById('q-desc').value.trim();
+            const time = document.getElementById('q-time').value.trim();
+
+            if (!title || !desc || !time) {
+                alert('Please fill out the Quiz Title and Description!');
+                return tg.HapticFeedback.notificationOccurred('error');
+            }
+
+            const cards = document.getElementById('questions-container').querySelectorAll('.q-card');
+            if (cards.length === 0) {
+                alert('Add at least one question!');
+                return tg.HapticFeedback.notificationOccurred('error');
+            }
+
+            const questions = [];
+            let hasError = false;
+
+            cards.forEach(card => {
+                const text = card.querySelector('.q-text').value.trim();
+                const optInputs = card.querySelectorAll('.opt-val');
+                const optMediaInputs = card.querySelectorAll('.opt-media-val');
+                const optTexts = [
+                    optInputs[0].value.trim(),
+                    optInputs[1].value.trim(),
+                    optInputs[2].value.trim(),
+                    optInputs[3].value.trim()
+                ];
+
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+
+                if (!text || optTexts.some(t => !t)) hasError = true;
+
+                const options = optTexts.map((optText, i) => {
+                    const mediaVal = optMediaInputs[i] ? optMediaInputs[i].value.trim() : '';
+                    if (!mediaVal) return optText;
+                    const optObj = { text: optText, media_type: 'photo' };
+                    if (mediaVal.match(/^https?:\\/\\//)) {
+                        optObj.media_url = mediaVal;
+                        if (mediaVal.match(/\\.(mp4|webm|mov)/i)) optObj.media_type = 'video';
+                        else if (mediaVal.match(/\\.(mp3|ogg|wav|m4a|flac|aac)/i)) optObj.media_type = 'audio';
+                    } else {
+                        optObj.media_id = mediaVal;
+                    }
+                    return optObj;
+                });
+
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
+                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                let mediaUrl = null, mediaFileId = null, mediaType = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
+                    mediaType = (mediaTypeSelect && mediaTypeSelect.value) || 'photo';
+                }
+
+                questions.push({
+                    question: text,
+                    options: options,
+                    answer: optTexts[ansIndex],
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Good job! ✨',
+                    media_url: mediaUrl || null,
+                    media_file_id: mediaFileId || null,
+                    media_type: mediaType,
+                    time_limit: timeLimit || null,
+                    is_rapid_fire: card.querySelector('.q-rapid').checked
+                });
+            });
+
+            if (hasError) {
+                alert('Please ensure all question boxes and 4 options are completely filled!');
+                return tg.HapticFeedback.notificationOccurred('error');
+            }
+
+            const payload = {
+                userId,
+                title,
+                description: desc,
+                time_per_question: parseInt(time),
+                questions
+            };
+
+            document.getElementById('quiz-form').style.display = 'none';
+            document.getElementById('actionBar').classList.remove('visible');
+            document.getElementById('loading').style.display = 'block';
+            tg.HapticFeedback.impactOccurred('heavy');
+
+            try {
+                const res = await fetch('/api/quiz/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    triggerConfetti();
+                    localStorage.removeItem(storageKey);
+
+                    document.getElementById('loading').innerHTML = \`
+                        <div style="text-align:center;">
+                            <svg viewBox="0 0 24 24" width="56" height="56" fill="#31b545"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                            <h3 style="color:var(--success); font-size:24px; margin:12px 0 4px; font-weight:800;">Quiz is Ready!</h3>
+                            <p style="color:var(--hint); font-size:13px; margin-bottom:20px;">Your quiz has been successfully deployed.</p>
+
+                            <div style="background:var(--card); padding:18px; border-radius:14px; text-align:left; margin-bottom:24px; border:1px solid var(--border);">
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?startgroup=quiz_\${data.quiz_id}');" 
+                                     style="background: linear-gradient(135deg, #31b545, #248a3d); border: none; padding:12px; border-radius:10px; color:#fff; font-size:14px; font-weight:700; cursor:pointer; width:100%; box-shadow:0 4px 15px rgba(49,181,69,0.3); transition: transform 0.2s; display:flex; align-items:center; justify-content:center; gap:8px;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2z"/></svg>
+                                    Start in Group
+                                </button>
+
+                                <button onclick="tg.openTelegramLink('https://t.me/MythoSerialBot?start=quiz_\${data.quiz_id}');" 
+                                     style="background: var(--accent); border: none; padding:12px; border-radius:10px; color:#fff; font-size:14px; font-weight:700; cursor:pointer; margin-top:8px; width:100%; box-shadow:0 4px 12px rgba(42,171,238,0.3); transition: transform 0.2s; display:flex; align-items:center; justify-content:center; gap:8px;"
+                                     onmousedown="this.style.transform='scale(0.95)'" 
+                                     onmouseup="this.style.transform='scale(1)'" 
+                                     onmouseleave="this.style.transform='scale(1)'">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6h2zm0 8h-2v2h2z"/></svg>
+                                    PM Test
+                                </button>
+                            </div>
+
+                            <button class="btn-publish" style="width:100%; background:var(--bg); color:var(--text); padding:16px; border-radius:16px; font-weight:900; font-size:15px; border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="tg.close()">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                                Close App
+                            </button>
+                        </div>
+                    \`;
+
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (e) {
+                alert('Error creating quiz: ' + e.message);
+                document.getElementById('quiz-form').style.display = 'block';
+                document.getElementById('actionBar').classList.add('visible');
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        loadState();
+    </script>
+</body>
+</html>
+    `);
+});
+
+// ==========================================
+// QUIZ MANAGER MINI APP – Premium Telegram Style (No Emojis)
+// ==========================================
+app.get("/manage-quiz-app/:userId", (req, res) => {
+    const userId = req.params.userId;
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Manage Quizzes</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        :root {
+            --bg: #ffffff;
+            --surface: #ffffff;
+            --card: #f6f7f9;
+            --text: #0b0c0e;
+            --hint: #6b7280;
+            --accent: #2AABEE;
+            --accent-dark: #1e96d2;
+            --accent-soft: rgba(42,171,238,0.10);
+            --border: #ececef;
+            --destructive: #e11d48;
+            --destructive-soft: rgba(225,29,72,0.08);
+            --success: #16a34a;
+            --success-soft: rgba(22,163,74,0.10);
+            --warning: #d97706;
+            --warning-soft: rgba(217,119,6,0.10);
+            --radius-lg: 22px;
+            --radius-md: 14px;
+            --radius-sm: 10px;
+            --shadow-sm: 0 1px 2px rgba(15,15,20,0.04), 0 1px 3px rgba(15,15,20,0.05);
+            --shadow-md: 0 6px 16px rgba(15,15,20,0.06), 0 2px 4px rgba(15,15,20,0.04);
+            --shadow-lift: 0 16px 32px rgba(15,15,20,0.10), 0 4px 10px rgba(15,15,20,0.06);
+            --input-bg: #ffffff;
+        }
+
+        [data-theme="dark"] {
+            --bg: #0b0c0f;
+            --surface: #1c1c1e;
+            --card: #1c1c1e;
+            --text: #f5f5f7;
+            --hint: #98989d;
+            --accent: #64d2ff;
+            --accent-dark: #2AABEE;
+            --accent-soft: rgba(100,210,255,0.12);
+            --border: rgba(255,255,255,0.12);
+            --destructive: #ff453a;
+            --destructive-soft: rgba(255,69,58,0.12);
+            --success: #30d158;
+            --success-soft: rgba(48,209,88,0.12);
+            --warning: #ffd60a;
+            --warning-soft: rgba(255,214,10,0.12);
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.35);
+            --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
+            --shadow-lift: 0 16px 40px rgba(0,0,0,0.5);
+            --input-bg: #2c2c2e;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', Roboto, sans-serif;
+            background: var(--bg);
+            margin: 0; padding: 0 0 100px 0;
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.01em;
+            transition: background 0.25s ease, color 0.25s ease;
+        }
+
+        .theme-toggle {
+            position: fixed; top: 14px; right: 14px; z-index: 200;
+            width: 42px; height: 42px; border-radius: 12px;
+            background: var(--card); border: 1px solid var(--border);
+            color: var(--text); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: var(--shadow-sm);
+            transition: transform 0.2s ease, background 0.2s;
+        }
+        .theme-toggle:active { transform: scale(0.92); }
+        .theme-toggle svg { width: 20px; height: 20px; }
+        .theme-toggle .icon-sun { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+        [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+
+        .container { padding: 24px 16px; max-width: 500px; margin: 0 auto; }
+
+        /* ---------- Profile header ---------- */
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 22px;
+        }
+        .profile-avatar { flex-shrink: 0; }
+        .profile-avatar-img {
+            width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+            box-shadow: var(--shadow-sm); border: 2px solid #fff; display: block;
+        }
+        .profile-avatar-fallback {
+            width: 52px; height: 52px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: 700; font-size: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .profile-info { min-width: 0; }
+        .profile-name { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .profile-sub { font-size: 13px; color: var(--hint); margin-top: 3px; font-weight: 500; }
+
+        .header-title { font-weight: 800; font-size: 24px; text-align: left; margin: 4px 4px 18px; color: var(--text); letter-spacing: -0.4px; }
+
+        #list-view, #edit-view { animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        /* ---------- Quiz card ---------- */
+        .quiz-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: var(--radius-lg);
+            margin-bottom: 16px;
+            display: flex; flex-direction: column;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, border-color 0.28s ease;
+        }
+        .quiz-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lift);
+            border-color: rgba(42,171,238,0.25);
+        }
+
+        .quiz-card-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; letter-spacing: -0.2px; }
+        .quiz-card-desc { font-size: 13.5px; color: var(--hint); margin-bottom: 14px; line-height: 1.5; }
+
+        .quiz-date { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--hint); margin-bottom: 16px; font-weight: 600; letter-spacing: 0.2px; }
+        .quiz-date svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+        .quiz-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+        .tag-glass {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 6px 11px;
+            border-radius: 20px;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text);
+            display: flex; align-items: center; gap: 5px;
+        }
+        .tag-glass svg { width: 13px; height: 13px; opacity: 0.7; flex-shrink: 0; }
+
+        .btn-group-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; margin-bottom: 10px; }
+        .btn-group-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 0; }
+
+        .btn {
+            padding: 13px 8px; border-radius: var(--radius-md); border: none; font-weight: 700; font-size: 13px;
+            cursor: pointer; transition: transform 0.15s ease, opacity 0.15s ease, background 0.2s ease; text-align: center;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .btn:hover { opacity: 0.88; }
+        .btn:active { transform: scale(0.96); opacity: 0.85; }
+
+        .btn-secondary { padding: 11px 6px; font-size: 12px; }
+
+        .btn-start-grp { background: var(--success-soft); color: var(--success); }
+        .btn-start-pm  { background: var(--accent-soft); color: var(--accent); }
+        .btn-edit      { background: var(--warning-soft); color: var(--warning); }
+        .btn-clone     { background: var(--accent-soft); color: var(--accent); }
+        .btn-delete    { background: var(--destructive-soft); color: var(--destructive); }
+
+        .btn-close-app {
+            width: 100%; padding: 15px; margin-top: 10px; border-radius: var(--radius-md);
+            background: var(--card); border: 1px solid var(--border); color: var(--text);
+            font-weight: 700; font-size: 15px; cursor: pointer;
+            transition: background 0.2s ease, transform 0.15s ease;
+        }
+        .btn-close-app:hover { background: var(--card); }
+        .btn-close-app:active { transform: scale(0.98); }
+
+        /* ---------- Empty state ---------- */
+        .empty-state { text-align: center; padding: 60px 20px 40px; }
+        .empty-state svg { width: 52px; height: 52px; color: #c7c9ce; margin-bottom: 14px; }
+        .empty-state p { color: var(--hint); font-size: 14.5px; margin: 0; }
+
+        .form-group { margin-bottom: 14px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-control { width: 100%; padding: 14px; border-radius: var(--radius-md); background: var(--input-bg); border: 1px solid var(--border); color: var(--text); font-size: 15px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .form-control:focus { border-color: var(--accent); background: var(--input-bg); box-shadow: 0 0 0 3px var(--accent-soft); }
+        textarea.form-control { resize: none; font-family: inherit; }
+
+        .q-card { background: var(--surface); border: 1px solid var(--border); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px; box-shadow: var(--shadow-sm); }
+        .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 700; color: var(--accent); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .options-group { display: flex; flex-direction: column; margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+        .option-card { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--surface); cursor: pointer; transition: background 0.15s; }
+        .option-card:not(:last-child) { border-bottom: 1px solid var(--border); }
+        .option-card input[type="radio"] { display: none; }
+        .radio-custom { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #d1d3d8; display: inline-block; position: relative; flex-shrink: 0; transition: all 0.18s ease; }
+        .option-card.selected .radio-custom { border-radius: 6px; border-color: var(--success); background: var(--success); }
+        .option-card.selected .radio-custom::after { content: ''; position: absolute; top: 46%; left: 50%; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -55%) rotate(45deg); }
+        .opt-body { flex: 1; min-width: 0; }
+        .opt-main-row { display: flex; align-items: center; padding: 12px 0; }
+        .option-card .opt-val { flex: 1; min-width: 0; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; padding: 0; }
+        .option-card .opt-val::placeholder { color: var(--hint); }
+        .opt-attach-btn { background: none; border: none; padding: 4px; margin-left: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--hint); cursor: pointer; transition: color 0.2s; }
+        .opt-attach-btn svg { width: 19px; height: 19px; }
+        .opt-attach-btn.has-media { color: var(--accent); }
+        .option-card .opt-media-val { display: none; width: 100%; background: transparent; border: none; border-top: 1px dashed var(--border); color: var(--hint); font-size: 12px; outline: none; padding: 8px 0 10px; cursor: text; }
+        .option-card .opt-media-val.show { display: block; }
+        .option-card .opt-media-val::placeholder { color: #b0b2b8; }
+        .q-exp { border: none; background: var(--card); border-radius: var(--radius-md); padding: 12px; }
+
+        .setting-item { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .toggle-switch { position: relative; width: 46px; height: 26px; appearance: none; background: #e2e4e8; border-radius: 26px; outline: none; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+        .toggle-switch:checked { background: var(--accent); }
+        .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; background: #fff; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle-switch:checked::after { transform: translateX(20px); }
+        .btn-remove { background: var(--destructive-soft); color: var(--destructive); border: none; padding: 7px 12px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.15s; }
+        .btn-remove:hover { opacity: 0.8; }
+        .btn-remove svg { width: 13px; height: 13px; }
+
+        .loader { border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 0.8s linear infinite; margin: 30px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .clone-modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(10,10,12,0.4); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            z-index: 200; flex-direction: column; padding: 24px; padding-top: max(24px, env(safe-area-inset-top));
+            animation: fadeIn 0.25s ease;
+        }
+        .clone-modal.open { display: flex; }
+
+        .search-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .search-header h3 { margin: 0; color: var(--text); font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+        .close-icon-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); width: 34px; height: 34px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; transition: background 0.2s, transform 0.15s; }
+        .close-icon-btn:hover { background: var(--card); }
+        .close-icon-btn:active { transform: scale(0.92); }
+        .close-icon-btn svg { width: 16px; height: 16px; }
+
+        .search-input-box { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; transition: border 0.2s; }
+        .search-input-box:focus-within { border-color: var(--accent); background: var(--input-bg); }
+        .search-input-box svg { width: 18px; height: 18px; color: var(--hint); flex-shrink: 0; }
+        .search-input-box input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 16px; outline: none; }
+        .search-input-box input::placeholder { color: var(--hint); }
+
+        .search-results { flex: 1; overflow-y: auto; margin-top: 16px; }
+        .search-hint { text-align: center; color: var(--hint); margin-top: 40px; font-size: 14px; }
+        .user-result { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; }
+        .user-result:active { transform: scale(0.98); }
+        .user-result.selected { background: var(--accent-soft); border: 1px solid rgba(42,171,238,0.35); }
+        .user-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; object-fit: cover; flex-shrink: 0; }
+
+        .clone-footer { margin-top: 16px; padding-bottom: env(safe-area-inset-bottom); }
+        .btn-confirm-clone { width: 100%; background: var(--accent); border: none; padding: 16px; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; opacity: 0.4; transition: all 0.2s; pointer-events: none; }
+        .btn-confirm-clone.active { opacity: 1; pointer-events: all; box-shadow: 0 6px 16px rgba(42,171,238,0.35); }
+        .btn-confirm-clone.active:active { transform: scale(0.98); background: var(--accent-dark); }
+
+        .media-preview { margin: 6px 0 8px; border-radius: var(--radius-sm); overflow: hidden; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; min-height: 50px; position: relative; }
+        .media-preview img, .media-preview video { max-width: 100%; max-height: 160px; border-radius: 8px; display: block; }
+        .media-preview .file-id-label { font-size: 10px; color: var(--hint); padding: 4px 8px; background: rgba(255,255,255,0.9); border-radius: 6px; position: absolute; bottom: 4px; right: 4px; pointer-events: none; }
+        .media-badge { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--accent-soft); border-radius: var(--radius-sm); width: 100%; }
+        .media-badge svg { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
+        .media-badge .file-name { font-size: 12px; color: var(--accent); word-break: break-all; }
+
+        .media-input-row { display: flex; gap: 8px; margin-top: 6px; }
+        .media-input-row input { flex: 1; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 13px; outline: none; }
+        .media-input-row input:focus { border-color: var(--accent); }
+        .media-input-row select.q-media-type { flex: 0 0 90px; padding: 8px 4px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 12px; outline: none; }
+        .media-input-row select.q-media-type:focus { border-color: var(--accent); }
+        .media-input-row .clear-media { background: var(--destructive-soft); border: 1px solid rgba(225,29,72,0.2); color: var(--destructive); border-radius: var(--radius-sm); padding: 6px 12px; font-weight: 700; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: opacity 0.15s; }
+        .media-input-row .clear-media:hover { opacity: 0.8; }
+        .media-input-row .clear-media svg { width: 14px; height: 14px; }
+
+        .time-per-q { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+        .time-per-q input { flex: 1; padding: 10px; }
+        .time-per-q .hint { font-size: 11px; color: var(--hint); }
+
+        .btn-icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+
+        .btn-add-question {
+            width: 100%; background: var(--success-soft); color: var(--success); border: none;
+            padding: 15px; border-radius: var(--radius-md); font-weight: 700; font-size: 14.5px;
+            cursor: pointer; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: opacity 0.15s, transform 0.15s;
+        }
+        .btn-add-question:hover { opacity: 0.88; }
+        .btn-add-question:active { transform: scale(0.98); }
+
+        .edit-actions { display: flex; gap: 10px; margin-bottom: 30px; }
+        .btn-save-changes {
+            flex: 2; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); border: none;
+            padding: 16px; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 15px;
+            cursor: pointer; box-shadow: 0 8px 20px rgba(42,171,238,0.28);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: transform 0.15s, box-shadow 0.2s;
+        }
+        .btn-save-changes:hover { box-shadow: 0 10px 24px rgba(42,171,238,0.38); }
+        .btn-save-changes:active { transform: scale(0.98); }
+        .btn-cancel-edit {
+            flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+            color: var(--text); font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.15s;
+        }
+        .btn-cancel-edit:hover { background: var(--card); }
+        .btn-cancel-edit:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+
+    <div class="container" id="main-content">
+        <!-- Quiz List View -->
+        <div id="list-view">
+            <div class="profile-header">
+                <div class="profile-avatar" id="profile-avatar">
+                    <div class="profile-avatar-fallback">Q</div>
+                </div>
+                <div class="profile-info">
+                    <div class="profile-name" id="profile-name">Quiz Creator</div>
+                    <div class="profile-sub" id="profile-sub">Loading your quizzes&hellip;</div>
+                </div>
+            </div>
+
+            <h2 class="header-title">My Quizzes</h2>
+            <div id="quiz-list-container">
+                <div class="loader"></div>
+            </div>
+            <button class="btn-close-app" onclick="tg.close()">
+                Close Mini App
+            </button>
+        </div>
+
+        <!-- Quiz Edit View -->
+        <div id="edit-view" style="display: none;">
+            <div class="search-header">
+                <h3>Edit Quiz</h3>
+                <button class="close-icon-btn" onclick="closeEditView()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="quiz-card" style="margin-bottom: 24px;">
+                <div class="form-group">
+                    <label>Quiz Title</label>
+                    <input type="text" id="edit-q-title" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="edit-q-desc" class="form-control" rows="2" required></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Time Per Question (Sec)</label>
+                    <input type="number" id="edit-q-time" class="form-control" required>
+                </div>
+            </div>
+
+            <div id="edit-questions-container"></div>
+
+            <button class="btn-add-question" onclick="addEditQuestion()">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                Add New Question
+            </button>
+
+            <div class="edit-actions">
+                <button class="btn-save-changes" onclick="submitEditQuiz()">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    Save Changes
+                </button>
+                <button class="btn-cancel-edit" onclick="closeEditView()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clone Quiz Search Modal -->
+    <div class="clone-modal" id="cloneModal">
+        <div class="search-header">
+            <h3>Find User</h3>
+            <button class="close-icon-btn" onclick="closeCloneModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+
+        <div class="search-input-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="cloneSearchInput" placeholder="Search by name or ID..." autocomplete="off">
+        </div>
+
+        <div class="search-results" id="cloneSearchResults">
+            <p class="search-hint">Type a username or ID to search</p>
+        </div>
+
+        <div class="clone-footer">
+            <button class="btn-confirm-clone" id="btnConfirmClone" onclick="executeClone()">Clone to User</button>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // ---- Theme (light / dark) ----
+        (function initTheme() {
+            const stored = localStorage.getItem('mytho_quiz_theme');
+            const preferDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = stored || (preferDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            try {
+                tg.setHeaderColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(theme === 'dark' ? '#0b0c0f' : '#ffffff');
+            } catch (e) {}
+        })();
+        document.getElementById('themeToggle').addEventListener('click', function () {
+            const cur = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('mytho_quiz_theme', next);
+            try {
+                tg.setHeaderColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.setBackgroundColor(next === 'dark' ? '#0b0c0f' : '#ffffff');
+                tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light');
+            } catch (e) {}
+        });
+
+        const userId = ${userId};
+        let quizzes = [];
+
+        let targetQuizId = null;
+        let targetUserId = null;
+        let currentEditQuizId = null;
+        let editQuestionCount = 0;
+
+        const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.19 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"/></svg>';
+
+        const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+        const ICON_QUESTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.7 2.7 0 0 1 5.2.9c0 1.8-2.5 2.1-2.5 3.9"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></svg>';
+        const ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
+        const ICON_GAUGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-4"/><path d="M12 18V9"/><path d="M20 18V6"/></svg>';
+        const ICON_USERS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+        const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.3l6 3.7-6 3.7V8.3z" fill="currentColor" stroke="none"/></svg>';
+        const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+        const ICON_CLONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        const ICON_CALENDAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 10h18"/></svg>';
+        const ICON_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
+        const ICON_CLOSE_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        const ICON_IMAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+        const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
+        const ICON_MUSIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+
+        function initProfile() {
+            const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
+            const nameEl = document.getElementById('profile-name');
+            const avatarWrap = document.getElementById('profile-avatar');
+            let displayName = 'Quiz Creator';
+            if (u) {
+                const full = [u.first_name, u.last_name].filter(Boolean).join(' ');
+                displayName = full || (u.username ? '@' + u.username : displayName);
+            }
+            nameEl.textContent = displayName;
+            if (u && u.photo_url) {
+                avatarWrap.innerHTML = \`<img src="\${u.photo_url}" class="profile-avatar-img" alt="\${displayName}">\`;
+            } else {
+                const initial = displayName.trim().charAt(0).toUpperCase() || 'Q';
+                avatarWrap.innerHTML = \`<div class="profile-avatar-fallback">\${initial}</div>\`;
+            }
+        }
+
+        function toggleOptMedia(e, btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const body = btn.closest('.opt-body');
+            const mediaInput = body.querySelector('.opt-media-val');
+            const showing = mediaInput.classList.toggle('show');
+            btn.classList.toggle('has-media', showing || mediaInput.value.trim().length > 0);
+            if (showing) mediaInput.focus();
+        }
+
+        async function loadQuizzes() {
+            const container = document.getElementById('quiz-list-container');
+            const subEl = document.getElementById('profile-sub');
+            try {
+                const res = await fetch('/api/quiz/manage/list/' + userId);
+                const data = await res.json();
+
+                if (data.success && data.quizzes.length > 0) {
+                    quizzes = data.quizzes;
+                    subEl.textContent = quizzes.length + (quizzes.length === 1 ? ' quiz created' : ' quizzes created');
+                    let html = '';
+                    quizzes.forEach(q => {
+                        const dateObj = q.created_at ? new Date(q.created_at) : new Date();
+                        const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                        const desc = q.description ? q.description : 'No description provided for this quiz.';
+                        const difficulty = q.difficulty ? (q.difficulty.charAt(0).toUpperCase() + q.difficulty.slice(1)) : 'Medium';
+
+                        html += \`
+                            <div class="quiz-card" id="card-\${q._id}">
+                                <div class="quiz-card-title">\${q.title}</div>
+                                <div class="quiz-card-desc">\${desc}</div>
+
+                                <div class="quiz-tags">
+                                    <div class="tag-glass">\${ICON_FOLDER} \${q.category}</div>
+                                    <div class="tag-glass">\${ICON_QUESTION} \${q.total_questions} Qs</div>
+                                    <div class="tag-glass">\${ICON_CLOCK} \${q.time_per_question}s</div>
+                                    <div class="tag-glass">\${ICON_GAUGE} \${difficulty}</div>
+                                </div>
+
+                                <div class="quiz-date">\${ICON_CALENDAR} Created \${dateStr}</div>
+
+                                <div class="btn-group-2">
+                                    <button class="btn btn-start-grp" onclick="tg.openTelegramLink('https://t.me/IQuizBot?startgroup=quiz_\${q._id}'); tg.close();">\${ICON_USERS} Start Group</button>
+                                    <button class="btn btn-start-pm" onclick="tg.openTelegramLink('https://t.me/IQuizBot?start=quiz_\${q._id}'); tg.close();">\${ICON_PLAY} PM Test</button>
+                                </div>
+
+                                <div class="btn-group-3">
+                                    <button class="btn btn-secondary btn-edit" onclick="editQuiz('\${q._id}')">\${ICON_EDIT} Edit</button>
+                                    <button class="btn btn-secondary btn-clone" onclick="openCloneModal('\${q._id}')">\${ICON_CLONE} Clone</button>
+                                    <button class="btn btn-secondary btn-delete" onclick="deleteQuiz('\${q._id}')">\${ICON_TRASH} Delete</button>
+                                </div>
+                            </div>
+                        \`;
+                    });
+                    container.innerHTML = html;
+                } else {
+                    quizzes = [];
+                    subEl.textContent = 'No quizzes yet';
+                    container.innerHTML = \`
+                        <div class="empty-state">
+                            \${ICON_INBOX}
+                            <p>You haven't created any quizzes yet.</p>
+                        </div>
+                    \`;
+                }
+            } catch (e) {
+                subEl.textContent = 'Unable to load quizzes';
+                container.innerHTML = '<p style="color:var(--destructive); text-align:center; margin-top:40px;">Failed to load quizzes.</p>';
+            }
+        }
+
+        async function editQuiz(quizId) {
+            tg.HapticFeedback.impactOccurred('light');
+            document.getElementById('list-view').style.display = 'none';
+            document.getElementById('edit-view').style.display = 'block';
+            document.getElementById('edit-questions-container').innerHTML = '<div class="loader"></div>';
+
+            try {
+                const res = await fetch('/api/quiz/manage/detail/' + userId + '/' + quizId);
+                const data = await res.json();
+
+                if (data.success) {
+                    currentEditQuizId = quizId;
+                    document.getElementById('edit-q-title').value = data.metadata.title;
+                    document.getElementById('edit-q-desc').value = data.metadata.description;
+                    document.getElementById('edit-q-time').value = data.metadata.time_per_question;
+
+                    document.getElementById('edit-questions-container').innerHTML = '';
+                    editQuestionCount = 0;
+
+                    data.questions.forEach(q => {
+                        const id = addEditQuestion();
+                        const card = document.getElementById(\`edit-q-card-\${id}\`);
+                        card.querySelector('.q-text').value = q.question;
+                        const opts = card.querySelectorAll('.opt-val');
+                        const optMedia = card.querySelectorAll('.opt-media-val');
+
+                        for (let i = 0; i < 4; i++) {
+                            const opt = q.options[i];
+                            const isObj = opt && typeof opt === 'object';
+                            opts[i].value = isObj ? (opt.text || '') : (opt || '');
+                            optMedia[i].value = isObj ? (opt.media_id || opt.media_url || opt.media_file_id || '') : '';
+                        }
+                        optMedia.forEach(inp => {
+                            const has = inp.value.trim().length > 0;
+                            inp.classList.toggle('show', has);
+                            const btn = inp.closest('.opt-body') ? inp.closest('.opt-body').querySelector('.opt-attach-btn') : null;
+                            if (btn) btn.classList.toggle('has-media', has);
+                        });
+
+                        const ansIndex = q.options.findIndex(opt => {
+                            const optText = typeof opt === 'object' ? opt.text : opt;
+                            return optText === q.answer;
+                        });
+                        const radios = card.querySelectorAll('input[type="radio"]');
+                        if (ansIndex >= 0 && ansIndex < 4) radios[ansIndex].checked = true;
+
+                        card.querySelector('.q-exp').value = q.explanation || '';
+                        card.querySelector('.q-rapid').checked = q.is_rapid_fire || false;
+
+                        const timeInput = card.querySelector('.q-time-limit');
+                        if (timeInput && q.time_limit) timeInput.value = q.time_limit;
+
+                        const mediaInput = card.querySelector('.q-media-input');
+                        const mediaTypeSelect = card.querySelector('.q-media-type');
+                        if (mediaTypeSelect) mediaTypeSelect.value = q.media_type || 'photo';
+                        if (mediaInput) {
+                            if (q.media_url) mediaInput.value = q.media_url;
+                            else if (q.media_file_id) mediaInput.value = q.media_file_id;
+                            updateMediaPreview(id, mediaInput.value.trim());
+                        }
+
+                        updateOptionStyles(\`edit-q-card-\${id}\`);
+                    });
+                } else {
+                    alert("Failed to load quiz details.");
+                    closeEditView();
+                }
+            } catch(e) {
+                alert("Network Error while loading details.");
+                closeEditView();
+            }
+        }
+
+        function closeEditView() {
+            document.getElementById('edit-view').style.display = 'none';
+            document.getElementById('list-view').style.display = 'block';
+            currentEditQuizId = null;
+        }
+
+        function addEditQuestion() {
+            editQuestionCount++;
+            const id = editQuestionCount;
+            const container = document.getElementById('edit-questions-container');
+            const qDiv = document.createElement('div');
+            qDiv.className = 'q-card';
+            qDiv.id = \`edit-q-card-\${id}\`;
+
+            qDiv.innerHTML = \`
+                <div class="q-header">
+                    <span>Question \${id}</span>
+                    <button class="btn-remove" onclick="removeEditQuestion(\${id})">\${ICON_CLOSE_SM} Remove</button>
+                </div>
+                <textarea class="form-control q-text" rows="2" placeholder="Ask a question..." required></textarea>
+
+                <div class="media-input-row">
+                    <input type="text" class="form-control q-media-input" placeholder="Paste media URL or Telegram file_id (photo/video/audio)" style="padding: 10px;">
+                    <select class="q-media-type" title="Media type (used when pasting a file_id)">
+                        <option value="photo">Photo</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
+                    <button class="clear-media" onclick="clearMedia(this)">\${ICON_CLOSE_SM}</button>
+                </div>
+                <div class="media-preview" id="edit-preview-\${id}" style="display:none;"></div>
+
+                <div class="time-per-q">
+                    <input type="number" class="form-control q-time-limit" placeholder="Custom time (sec)" style="flex:1; padding: 10px;">
+                    <span class="hint">Optional</span>
+                </div>
+
+                <div class="options-group">
+                    <label class="option-card selected">
+                        <input type="radio" name="edit-q-\${id}-ans" value="0" checked>
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 1" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="1">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 2" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="2">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 3" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                    <label class="option-card">
+                        <input type="radio" name="edit-q-\${id}-ans" value="3">
+                        <span class="radio-custom"></span>
+                        <div class="opt-body">
+                            <div class="opt-main-row">
+                                <input type="text" class="opt-val" placeholder="Option 4" required>
+                                <button type="button" class="opt-attach-btn" onclick="toggleOptMedia(event, this)" title="Attach media">\${ATTACH_ICON_SVG}</button>
+                            </div>
+                            <input type="text" class="opt-media-val" placeholder="Optional: image/file_id for this option">
+                        </div>
+                    </label>
+                </div>
+                <input type="text" class="form-control q-exp" placeholder="Explanation (Optional)">
+                <div class="setting-item">
+                    <span style="font-size:12px; font-weight:800; color:var(--warning);">Rapid Fire (7s)</span>
+                    <input type="checkbox" class="toggle-switch q-rapid">
+                </div>
+            \`;
+
+            container.appendChild(qDiv);
+
+            const mediaInput = qDiv.querySelector('.q-media-input');
+            mediaInput.addEventListener('input', function() {
+                updateMediaPreview(id, this.value.trim());
+            });
+
+            const mediaTypeSelect = qDiv.querySelector('.q-media-type');
+            mediaTypeSelect.addEventListener('change', function() {
+                updateMediaPreview(id, mediaInput.value.trim());
+            });
+
+            qDiv.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', () => {
+                tg.HapticFeedback.impactOccurred('light');
+                updateOptionStyles(\`edit-q-card-\${id}\`);
+            }));
+
+            qDiv.querySelectorAll('.opt-media-val').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    const btn = inp.closest('.opt-body').querySelector('.opt-attach-btn');
+                    if (btn) btn.classList.toggle('has-media', inp.value.trim().length > 0);
+                });
+            });
+
+            tg.HapticFeedback.selectionChanged();
+            return id;
+        }
+
+        function updateMediaPreview(qId, mediaValue) {
+            const previewContainer = document.getElementById(\`edit-preview-\${qId}\`);
+            if (!previewContainer) return;
+            const card = document.getElementById(\`edit-q-card-\${qId}\`);
+            const typeSelect = card ? card.querySelector('.q-media-type') : null;
+            if (!mediaValue) {
+                previewContainer.style.display = 'none';
+                previewContainer.innerHTML = '';
+                return;
+            }
+            const isUrl = mediaValue.match(/^https?:\\/\\//);
+            const isFileId = !isUrl && mediaValue.length > 10;
+            let html = '';
+            if (isUrl) {
+                const ext = mediaValue.split('?')[0].split('.').pop().toLowerCase();
+                if (['jpg','jpeg','png','gif','webp'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'photo';
+                    html = \`<img src="\${mediaValue}" alt="Media" onerror="this.style.display='none'" />\`;
+                } else if (['mp4','webm','mov','avi'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'video';
+                    html = \`<video controls><source src="\${mediaValue}" type="video/\${ext}"></video>\`;
+                } else if (['mp3','ogg','wav','m4a','flac','aac'].includes(ext)) {
+                    if (typeSelect) typeSelect.value = 'audio';
+                    html = \`<audio controls style="width:100%;"><source src="\${mediaValue}"></audio>\`;
+                } else {
+                    html = \`<div style="padding:12px; color:var(--hint);">Unsupported media type</div>\`;
+                }
+            } else if (isFileId) {
+                const mType = typeSelect ? typeSelect.value : 'photo';
+                const icon = mType === 'audio' ? ICON_MUSIC : (mType === 'video' ? ICON_VIDEO : ICON_IMAGE);
+                html = \`
+                    <div class="media-badge">
+                        \${icon}
+                        <span class="file-name">\${mediaValue}</span>
+                        <span class="file-id-label">\${mType} file_id</span>
+                    </div>
+                \`;
+            }
+            previewContainer.innerHTML = html;
+            previewContainer.style.display = 'block';
+        }
+
+        function clearMedia(btn) {
+            const card = btn.closest('.q-card');
+            if (!card) return;
+            const input = card.querySelector('.q-media-input');
+            if (input) {
+                input.value = '';
+                const qId = card.id.replace('edit-q-card-', '');
+                updateMediaPreview(qId, '');
+            }
+        }
+
+        function removeEditQuestion(id) {
+            const el = document.getElementById(\`edit-q-card-\${id}\`);
+            if (el) el.remove();
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function updateOptionStyles(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.querySelectorAll('.option-card').forEach(oc => {
+                const radio = oc.querySelector('input[type="radio"]');
+                if (radio && radio.checked) oc.classList.add('selected');
+                else oc.classList.remove('selected');
+            });
+        }
+
+        async function submitEditQuiz() {
+            const title = document.getElementById('edit-q-title').value.trim();
+            const desc = document.getElementById('edit-q-desc').value.trim();
+            const time = document.getElementById('edit-q-time').value.trim();
+
+            if (!title || !desc || !time) return alert('Please fill title and description!');
+
+            const cards = document.getElementById('edit-questions-container').querySelectorAll('.q-card');
+            if (cards.length === 0) return alert('Please add at least one question!');
+
+            const questions = [];
+            let hasError = false;
+
+            cards.forEach(card => {
+                const text = card.querySelector('.q-text').value.trim();
+                const optInputs = card.querySelectorAll('.opt-val');
+                const optMediaInputs = card.querySelectorAll('.opt-media-val');
+                const optTexts = [
+                    optInputs[0].value.trim(),
+                    optInputs[1].value.trim(),
+                    optInputs[2].value.trim(),
+                    optInputs[3].value.trim()
+                ];
+
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let ansIndex = 0;
+                radios.forEach((r, i) => { if(r.checked) ansIndex = i; });
+
+                if (!text || optTexts.some(t => !t)) hasError = true;
+
+                const options = optTexts.map((optText, i) => {
+                    const mediaVal = optMediaInputs[i] ? optMediaInputs[i].value.trim() : '';
+                    if (!mediaVal) return optText;
+                    const optObj = { text: optText, media_type: 'photo' };
+                    if (mediaVal.match(/^https?:\\/\\//)) {
+                        optObj.media_url = mediaVal;
+                        if (mediaVal.match(/\\.(mp4|webm|mov)/i)) optObj.media_type = 'video';
+                        else if (mediaVal.match(/\\.(mp3|ogg|wav|m4a|flac|aac)/i)) optObj.media_type = 'audio';
+                    } else {
+                        optObj.media_id = mediaVal;
+                    }
+                    return optObj;
+                });
+
+                const timeInput = card.querySelector('.q-time-limit');
+                const timeLimit = timeInput ? parseInt(timeInput.value) || null : null;
+                const mediaInput = card.querySelector('.q-media-input');
+                const mediaTypeSelect = card.querySelector('.q-media-type');
+                let mediaValue = mediaInput ? mediaInput.value.trim() : null;
+                let mediaUrl = null, mediaFileId = null, mediaType = null;
+                if (mediaValue) {
+                    if (mediaValue.match(/^https?:\\/\\//)) mediaUrl = mediaValue;
+                    else mediaFileId = mediaValue;
+                    mediaType = (mediaTypeSelect && mediaTypeSelect.value) || 'photo';
+                }
+
+                questions.push({
+                    question: text,
+                    options: options,
+                    answer: optTexts[ansIndex],
+                    explanation: card.querySelector('.q-exp').value.trim() || 'Well done!',
+                    media_url: mediaUrl || null,
+                    media_file_id: mediaFileId || null,
+                    media_type: mediaType,
+                    time_limit: timeLimit || null,
+                    is_rapid_fire: card.querySelector('.q-rapid').checked
+                });
+            });
+
+            if (hasError) return alert('Please ensure all questions and 4 options are completely filled!');
+
+            const payload = {
+                title,
+                description: desc,
+                time_per_question: parseInt(time),
+                questions
+            };
+
+            tg.HapticFeedback.impactOccurred('heavy');
+
+            try {
+                const res = await fetch('/api/quiz/manage/edit/' + userId + '/' + currentEditQuizId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    alert("Quiz updated successfully!");
+                    closeEditView();
+                    loadQuizzes();
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (e) {
+                alert('Update Error: ' + e.message);
+            }
+        }
+
+        async function deleteQuiz(quizId) {
+            if(confirm("Are you sure you want to permanently delete this quiz?")) {
+                tg.HapticFeedback.impactOccurred('heavy');
+                try {
+                    const res = await fetch('/api/quiz/manage/delete/' + userId + '/' + quizId, { method: 'DELETE' });
+                    const data = await res.json();
+                    if(data.success) {
+                        document.getElementById('card-' + quizId).style.display = 'none';
+                        tg.HapticFeedback.notificationOccurred('success');
+                    } else {
+                        alert("Error: " + data.error);
+                    }
+                } catch(e) {
+                    alert("Network Error");
+                }
+            }
+        }
+
+        function openCloneModal(quizId) {
+            targetQuizId = quizId;
+            targetUserId = null;
+            document.getElementById('cloneSearchInput').value = '';
+            document.getElementById('cloneSearchResults').innerHTML = '<p class="search-hint">Type a username or ID to search</p>';
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.remove('active');
+            confirmBtn.innerText = "Select User First";
+            document.getElementById('cloneModal').classList.add('open');
+            setTimeout(() => document.getElementById('cloneSearchInput').focus(), 200);
+        }
+
+        function closeCloneModal() {
+            document.getElementById('cloneModal').classList.remove('open');
+        }
+
+        document.getElementById('cloneSearchInput').addEventListener('input', async function(e) {
+            const query = e.target.value.trim();
+            const resultsDiv = document.getElementById('cloneSearchResults');
+
+            if (query.length < 2) {
+                resultsDiv.innerHTML = '<p class="search-hint">Type a username or ID to search</p>';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/users/search?q=' + encodeURIComponent(query));
+                const data = await res.json();
+
+                if (data.success && data.users.length > 0) {
+                    let html = '';
+                    data.users.forEach(u => {
+                        const avatar = u.photo_url ? \`<img src="\${u.photo_url}" class="user-avatar" />\` : \`<div class="user-avatar">\${u.name.charAt(0).toUpperCase()}</div>\`;
+                        html += \`
+                            <div class="user-result" id="ur-\${u.id}" onclick="selectUserForClone(\${u.id}, '\${u.name}')">
+                                \${avatar}
+                                <div>
+                                    <div style="font-weight:600; font-size:15px; color:var(--text); margin-bottom:2px;">\${u.name}</div>
+                                    <div style="font-size:12px; color:var(--hint);">ID: \${u.id} \${u.username ? '| @'+u.username : ''}</div>
+                                </div>
+                            </div>
+                        \`;
+                    });
+                    resultsDiv.innerHTML = html;
+                } else {
+                    resultsDiv.innerHTML = '<p class="search-hint">No users found.</p>';
+                }
+            } catch(e) {
+                console.error("Search error:", e);
+            }
+        });
+
+        function selectUserForClone(id, name) {
+            targetUserId = id;
+            tg.HapticFeedback.selectionChanged();
+            document.querySelectorAll('.user-result').forEach(el => el.classList.remove('selected'));
+            document.getElementById('ur-' + id).classList.add('selected');
+            const confirmBtn = document.getElementById('btnConfirmClone');
+            confirmBtn.classList.add('active');
+            confirmBtn.innerText = \`Clone to \${name}\`;
+        }
+
+        async function executeClone() {
+            if (!targetQuizId || !targetUserId) return;
+            const btn = document.getElementById('btnConfirmClone');
+            btn.innerText = "Cloning, Please wait...";
+            btn.classList.remove('active');
+
+            try {
+                const res = await fetch('/api/quiz/manage/clone/' + targetQuizId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sourceUserId: userId, targetUserId: targetUserId })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    alert(data.message);
+                    closeCloneModal();
+                } else {
+                    alert("Error: " + data.error);
+                    btn.innerText = "Try Again";
+                    btn.classList.add('active');
+                }
+            } catch (e) {
+                alert("Network Error");
+                btn.innerText = "Try Again";
+                btn.classList.add('active');
+            }
+        }
+
+        initProfile();
+        loadQuizzes();
+    </script>
+</body>
+</html>
+    `);
+});
+
+// ------------------------------------------------------------
+// 1. BACKEND REST APIs FOR MANAGING QUIZZES (UPDATED)
+// ------------------------------------------------------------
+
+// List all quizzes for a user
+app.get("/api/quiz/manage/list/:userId", async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const quizzes = await quizMetadataCollection.find({ created_by: userId }).sort({ created_at: -1 }).toArray();
+        res.json({ success: true, quizzes });
+    } catch (e) {
+        console.error("List Quizzes Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// Get specific quiz details & questions (UPDATED to include media_file_id)
+app.get("/api/quiz/manage/detail/:userId/:quizId", async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const quizId = new ObjectId(req.params.quizId);
+        
+        const metadata = await quizMetadataCollection.findOne({ _id: quizId, created_by: userId });
+        if (!metadata) return res.status(404).json({ success: false, error: "Quiz not found." });
+
+        const questions = await quizCollection.find({ quiz_id: quizId }).toArray();
+        
+        // Format questions for frontend (include media_file_id, media_url, time_limit)
+        const formattedQuestions = questions.map(q => ({
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation || "",
+            media_url: q.media_url || null,
+            media_file_id: q.media_file_id || null,   // NEW: include file_id
+            media_type: q.media_type || null,
+            time_limit: q.time_limit || null,
+            is_rapid_fire: q.is_rapid_fire || false
+        }));
+        
+        res.json({ success: true, metadata, questions: formattedQuestions });
+    } catch (e) {
+        console.error("Quiz Detail Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// Edit & Save Quiz (Metadata + Questions) (UPDATED with per-question time & media_file_id)
+app.put("/api/quiz/manage/edit/:userId/:quizId", async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const quizId = new ObjectId(req.params.quizId);
+        const { title, description, time_per_question, questions } = req.body;
+
+        if (!title || !questions || questions.length === 0) {
+            return res.status(400).json({ success: false, error: "Missing required fields." });
+        }
+
+        const existing = await quizMetadataCollection.findOne({ _id: quizId, created_by: userId });
+        if (!existing) return res.status(404).json({ success: false, error: "Unauthorized." });
+
+        // Keep the exact same category that was originally set for this quiz
+        const category = existing.category;
+
+        // Calculate average time per question if not set globally
+        let avgTime = time_per_question || 15;
+        if (!time_per_question) {
+            const times = questions.map(q => q.time_limit || 15);
+            avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+        }
+
+        // Update Metadata
+        await quizMetadataCollection.updateOne({ _id: quizId }, {
+            $set: {
+                title: title,
+                description: description || "",
+                category: category,
+                time_per_question: avgTime,
+                total_questions: questions.length,
+                updated_at: new Date()
+            }
+        });
+
+        // Replace old questions with new ones
+        await quizCollection.deleteMany({ quiz_id: quizId });
+        
+        const questionDocs = questions.map(q => ({
+            quiz_id: quizId,
+            category: category,
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation || "Good job! ✨",
+            media_url: q.media_url || null,
+            media_file_id: q.media_file_id || null,  // NEW: store file_id
+            media_type: q.media_type || null,
+            time_limit: q.time_limit || null,
+            is_active: true,
+            is_rapid_fire: q.is_rapid_fire === true 
+        }));
+
+        await quizCollection.insertMany(questionDocs);
+
+        res.json({ success: true, message: "Quiz updated successfully!" });
+    } catch (e) {
+        console.error("Edit Quiz Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+
+// Delete a quiz
+app.delete("/api/quiz/manage/delete/:userId/:quizId", async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const quizId = new ObjectId(req.params.quizId);
+
+        const existing = await quizMetadataCollection.findOne({ _id: quizId, created_by: userId });
+        if (!existing) return res.status(404).json({ success: false, error: "Unauthorized." });
+
+        await quizMetadataCollection.deleteOne({ _id: quizId });
+        await quizCollection.deleteMany({ quiz_id: quizId });
+
+        res.json({ success: true, message: "Quiz deleted." });
+    } catch (e) {
+        console.error("Delete Quiz Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// CLONE QUIZ TO ANOTHER USER API (UPDATED)
+// ==========================================
+app.post("/api/quiz/manage/clone/:quizId", async (req, res) => {
+    try {
+        const quizId = new ObjectId(req.params.quizId);
+        const { sourceUserId, targetUserId } = req.body;
+
+        if (!sourceUserId || !targetUserId) {
+            return res.status(400).json({ success: false, error: "Missing user IDs." });
+        }
+
+        // 1. Fetch original Metadata
+        const originalMeta = await quizMetadataCollection.findOne({ _id: quizId, created_by: parseInt(sourceUserId) });
+        if (!originalMeta) return res.status(404).json({ success: false, error: "Quiz not found or unauthorized." });
+
+        // 2. Create New Category and Metadata for the Target User
+        const newCategory = originalMeta.category + "_clone_" + Date.now().toString().slice(-4);
+        const newMetadata = {
+            title: originalMeta.title + " (Shared Copy)",
+            description: originalMeta.description,
+            category: newCategory,
+            difficulty: originalMeta.difficulty || "medium",
+            time_per_question: originalMeta.time_per_question || 15,
+            total_questions: originalMeta.total_questions,
+            created_by: parseInt(targetUserId),
+            created_at: new Date(),
+            is_active: true
+        };
+
+        const metaResult = await quizMetadataCollection.insertOne(newMetadata);
+        const newQuizId = metaResult.insertedId;
+
+        // 3. Duplicate all questions and link to new Quiz ID (preserve time_limit & media fields)
+        const originalQuestions = await quizCollection.find({ quiz_id: quizId }).toArray();
+        if (originalQuestions.length > 0) {
+            const newQuestionDocs = originalQuestions.map(q => ({
+                quiz_id: newQuizId,
+                category: newCategory,
+                question: q.question,
+                options: q.options,
+                answer: q.answer,
+                explanation: q.explanation || "Good job! ✨",
+                media_url: q.media_url || null,
+                media_file_id: q.media_file_id || null,  // preserve file_id
+                media_type: q.media_type || null,
+                time_limit: q.time_limit || null,
+                is_active: true,
+                is_rapid_fire: q.is_rapid_fire || false
+            }));
+            await quizCollection.insertMany(newQuestionDocs);
+        }
+
+        res.json({ success: true, message: "Quiz successfully copied to their account!" });
+    } catch (e) {
+        console.error("Clone Quiz Error:", e);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// JIOSAAVN API (unofficial)  ->  /api/saavn/*
+// ------------------------------------------
+//  GET /api/saavn/search?query=&type=all|songs|albums|artists|playlists&page=0&limit=10
+//  GET /api/saavn/songs/:id                (one song)
+//  GET /api/saavn/songs?ids=a,b,c          (several songs)   |  ?link=<jiosaavn song url>
+//  GET /api/saavn/songs/:id/suggestions?limit=10
+//  GET /api/saavn/albums/:id               |  /albums?link=<url>
+//  GET /api/saavn/playlists/:id            |  /playlists?link=<url>   (&page=0&limit=50)
+//  GET /api/saavn/artists/:id              |  /artists?link=<url>
+//  GET /api/saavn/artists/:id/songs?page=0&sortBy=popularity|latest|alphabetical&sortOrder=asc|desc
+//  GET /api/saavn/artists/:id/albums?page=0&sortBy=popularity|latest|alphabetical&sortOrder=asc|desc
+//  GET /api/saavn/lyrics/:id
+//  GET /api/saavn/top-searches
+//
+// Uses only axios + crypto (already imported at the top of this file).
+// Optional env var: SAAVN_API_BASE (defaults to https://www.jiosaavn.com/api.php)
+// ==========================================
+const SAAVN_API_BASE = process.env.SAAVN_API_BASE || "https://www.jiosaavn.com/api.php";
+const SAAVN_DES_KEY = Buffer.from("38346591");
+const SAAVN_CACHE = new Map();
+const SAAVN_CACHE_MAX = 500;
+
+class SaavnError extends Error {
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
+
+const saavnHttp = axios.create({
+    timeout: 12000,
+    responseType: "text",
+    transformResponse: [(d) => d], // we parse ourselves so a non-JSON reply gives a clean error
+    headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+});
+
+// ---------- small in-memory cache (oldest entry is evicted first) ----------
+function saavnCacheGet(key) {
+    const hit = SAAVN_CACHE.get(key);
+    if (!hit) return null;
+    if (hit.exp < Date.now()) {
+        SAAVN_CACHE.delete(key);
+        return null;
+    }
+    return hit.data;
+}
+function saavnCacheSet(key, data, ttlMs) {
+    if (SAAVN_CACHE.size >= SAAVN_CACHE_MAX) SAAVN_CACHE.delete(SAAVN_CACHE.keys().next().value);
+    SAAVN_CACHE.set(key, { data, exp: Date.now() + ttlMs });
+}
+
+// ---------- upstream call ----------
+async function saavnCall(call, params = {}, ttlMs = 0) {
+    const query = { __call: call, _format: "json", _marker: "0", api_version: "4", ctx: "web6dot0", ...params };
+    const cacheKey = ttlMs ? new URLSearchParams(query).toString() : null;
+    if (cacheKey) {
+        const hit = saavnCacheGet(cacheKey);
+        if (hit) return hit;
+    }
+
+    const resp = await saavnHttp.get(SAAVN_API_BASE, { params: query });
+
+    let data;
+    try {
+        data = JSON.parse(String(resp.data).trim());
+    } catch {
+        throw new SaavnError(502, "JioSaavn returned an unexpected (non-JSON) response.");
+    }
+    if (data && typeof data === "object" && data.status === "failure") {
+        throw new SaavnError(404, data.error || "Not found on JioSaavn.");
+    }
+
+    if (cacheKey) saavnCacheSet(cacheKey, data, ttlMs);
+    return data;
+}
+
+// ---------- route wrapper: uniform { success, data } / { success:false, error } ----------
+function saavnRoute(handler) {
+    return async (req, res) => {
+        try {
+            const data = await handler(req);
+            res.json({ success: true, data });
+        } catch (e) {
+            if (e instanceof SaavnError) {
+                return res.status(e.status).json({ success: false, error: e.message });
+            }
+            if (e.code === "ECONNABORTED" || e.code === "ETIMEDOUT") {
+                return res.status(504).json({ success: false, error: "JioSaavn timed out." });
+            }
+            if (e.response) {
+                console.error("JioSaavn upstream error:", e.response.status);
+                return res.status(502).json({ success: false, error: `JioSaavn upstream error (${e.response.status}).` });
+            }
+            console.error("JioSaavn API Error:", e.message);
+            res.status(502).json({ success: false, error: "Could not reach JioSaavn." });
+        }
+    };
+}
+
+// ---------- input helpers ----------
+function saavnValidId(v) {
+    const id = String(v || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new SaavnError(400, "Invalid id.");
+    return id;
+}
+function saavnPage(v) {
+    return Math.max(0, parseInt(v, 10) || 0);
+}
+function saavnLimit(v, def, max = 50) {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1) return def;
+    return Math.min(n, max);
+}
+function saavnTokenFromLink(link) {
+    let u;
+    try {
+        u = new URL(String(link));
+    } catch {
+        throw new SaavnError(400, "Invalid link.");
+    }
+    if (!/(^|\.)jiosaavn\.com$/i.test(u.hostname)) throw new SaavnError(400, "Link must be a jiosaavn.com URL.");
+    const parts = u.pathname.split("/").filter(Boolean);
+    const token = parts[parts.length - 1];
+    if (!token || !/^[A-Za-z0-9_-]+$/.test(token)) throw new SaavnError(400, "Could not read an id from this link.");
+    return token;
+}
+
+// ---------- output helpers ----------
+function saavnDecode(str) {
+    if (typeof str !== "string") return "";
+    return str
+        .replace(/&quot;/g, '"')
+        .replace(/&#0?39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&");
+}
+function saavnInt(v) {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+}
+function saavnList(x, key) {
+    if (Array.isArray(x)) return x;
+    if (x && Array.isArray(x[key])) return x[key];
+    return [];
+}
+function saavnImages(url) {
+    if (!url || typeof url !== "string") return [];
+    const base = url.replace(/^http:\/\//, "https://");
+    return ["50x50", "150x150", "500x500"].map((q) => ({
+        quality: q,
+        url: base.replace(/\d+x\d+(?=\.[A-Za-z0-9]+(\?.*)?$)/, q)
+    }));
+}
+
+// JioSaavn encrypts the media URL with single DES (ECB, key "38346591").
+// OpenSSL 3 (Node 17+) hides plain DES, so we run 3DES with the same key three times,
+// which is mathematically identical to single DES.
+function saavnDecryptUrl(encrypted) {
+    if (!encrypted || typeof encrypted !== "string") return null;
+    try {
+        const key24 = Buffer.concat([SAAVN_DES_KEY, SAAVN_DES_KEY, SAAVN_DES_KEY]);
+        const decipher = crypto.createDecipheriv("des-ede3-ecb", key24, null);
+        const out = Buffer.concat([decipher.update(Buffer.from(encrypted, "base64")), decipher.final()]);
+        return out.toString("utf8");
+    } catch {
+        return null;
+    }
+}
+function saavnDownloadUrls(encrypted, has320) {
+    const base = saavnDecryptUrl(encrypted);
+    if (!base) return [];
+    const clean = base.replace(/^http:\/\//, "https://").replace("h.saavncdn.com", "aac.saavncdn.com");
+    const bitrates = has320 ? [12, 48, 96, 160, 320] : [12, 48, 96, 160];
+    return bitrates.map((b) => ({ quality: `${b}kbps`, url: clean.replace(/_\d+\.mp4/, `_${b}.mp4`) }));
+}
+
+// ---------- mappers (raw JioSaavn object -> clean object) ----------
+function saavnArtist(a) {
+    if (!a) return null;
+    return {
+        id: String(a.id ?? a.artistId ?? ""),
+        name: saavnDecode(a.name || a.title || ""),
+        role: a.role || "",
+        type: "artist",
+        image: saavnImages(a.image),
+        url: a.perma_url || a.url || ""
+    };
+}
+function saavnArtistMap(m) {
+    const map = (m && m.artistMap) || {};
+    return {
+        primary: (map.primary_artists || []).map(saavnArtist).filter(Boolean),
+        featured: (map.featured_artists || []).map(saavnArtist).filter(Boolean),
+        all: (map.artists || []).map(saavnArtist).filter(Boolean)
+    };
+}
+function saavnSong(s) {
+    if (!s || !s.id) return null;
+    const m = s.more_info || {};
+    const hasLyrics = m.has_lyrics === "true" || m.has_lyrics === true;
+    return {
+        id: s.id,
+        name: saavnDecode(s.title || s.song || ""),
+        type: "song",
+        year: s.year || null,
+        releaseDate: m.release_date || null,
+        duration: saavnInt(m.duration),
+        label: saavnDecode(m.label || ""),
+        explicitContent: s.explicit_content === "1" || s.explicit_content === 1,
+        playCount: saavnInt(s.play_count),
+        language: s.language || "",
+        hasLyrics,
+        lyricsId: hasLyrics ? s.id : null,
+        url: s.perma_url || "",
+        copyright: saavnDecode(m.copyright_text || ""),
+        album: { id: m.album_id || null, name: saavnDecode(m.album || ""), url: m.album_url || null },
+        artists: saavnArtistMap(m),
+        image: saavnImages(s.image),
+        downloadUrl: saavnDownloadUrls(m.encrypted_media_url, m["320kbps"] === "true" || m["320kbps"] === true)
+    };
+}
+function saavnAlbum(a) {
+    if (!a || !a.id) return null;
+    const m = a.more_info || {};
+    return {
+        id: a.id,
+        name: saavnDecode(a.title || a.name || ""),
+        description: saavnDecode(a.header_desc || ""),
+        type: "album",
+        year: a.year || null,
+        playCount: saavnInt(a.play_count),
+        language: a.language || "",
+        explicitContent: a.explicit_content === "1" || a.explicit_content === 1,
+        url: a.perma_url || "",
+        songCount: saavnInt(m.song_count ?? a.list_count),
+        artists: saavnArtistMap(m),
+        image: saavnImages(a.image),
+        songs: Array.isArray(a.list) ? a.list.map(saavnSong).filter(Boolean) : undefined
+    };
+}
+function saavnPlaylist(p) {
+    if (!p || !p.id) return null;
+    const m = p.more_info || {};
+    return {
+        id: p.id,
+        name: saavnDecode(p.title || p.name || ""),
+        description: saavnDecode(p.header_desc || p.subtitle || ""),
+        type: "playlist",
+        year: p.year || null,
+        playCount: saavnInt(p.play_count),
+        language: p.language || m.language || "",
+        explicitContent: p.explicit_content === "1" || p.explicit_content === 1,
+        url: p.perma_url || "",
+        songCount: saavnInt(p.list_count ?? m.song_count),
+        image: saavnImages(p.image),
+        songs: Array.isArray(p.list) ? p.list.map(saavnSong).filter(Boolean) : undefined
+    };
+}
+function saavnArtistPage(a) {
+    let bio = a.bio;
+    if (typeof bio === "string") {
+        try { bio = JSON.parse(bio); } catch { bio = []; }
+    }
+    return {
+        id: String(a.artistId ?? a.id ?? ""),
+        name: saavnDecode(a.name || ""),
+        type: "artist",
+        url: (a.urls && a.urls.overview) || a.perma_url || "",
+        image: saavnImages(a.image),
+        followerCount: saavnInt(a.follower_count),
+        fanCount: a.fan_count || null,
+        isVerified: a.isVerified === true || a.isVerified === "true",
+        dominantLanguage: a.dominantLanguage || null,
+        dominantType: a.dominantType || null,
+        bio: Array.isArray(bio) ? bio.map((b) => ({ title: saavnDecode(b.title || ""), text: saavnDecode(b.text || "") })) : [],
+        dob: a.dob || null,
+        fb: a.fb || null,
+        twitter: a.twitter || null,
+        wiki: a.wiki || null,
+        availableLanguages: a.availableLanguages || [],
+        topSongs: saavnList(a.topSongs, "songs").map(saavnSong).filter(Boolean),
+        topAlbums: saavnList(a.topAlbums, "albums").map(saavnAlbum).filter(Boolean),
+        singles: saavnList(a.singles, "albums").map(saavnAlbum).filter(Boolean),
+        similarArtists: (a.similarArtists || []).map(saavnArtist).filter(Boolean)
+    };
+}
+
+// ==========================================
+// SEARCH
+// ==========================================
+const SAAVN_SEARCH_TYPES = {
+    songs:     { call: "search.getResults",         map: saavnSong },
+    albums:    { call: "search.getAlbumResults",    map: saavnAlbum },
+    artists:   { call: "search.getArtistResults",   map: saavnArtist },
+    playlists: { call: "search.getPlaylistResults", map: saavnPlaylist }
+};
+
+async function saavnSearchType(type, q, page, limit) {
+    const cfg = SAAVN_SEARCH_TYPES[type];
+    const data = await saavnCall(cfg.call, { q, p: page, n: limit }, 60000);
+    const results = Array.isArray(data.results) ? data.results : [];
+    return {
+        total: saavnInt(data.total) ?? results.length,
+        start: saavnInt(data.start) ?? 0,
+        results: results.map(cfg.map).filter(Boolean)
+    };
+}
+
+app.get("/api/saavn/search", saavnRoute(async (req) => {
+    const q = String(req.query.query || req.query.q || "").trim().slice(0, 200);
+    if (!q) throw new SaavnError(400, "Missing query.");
+
+    const type = String(req.query.type || "all").toLowerCase();
+    const page = saavnPage(req.query.page);
+
+    if (type === "all") {
+        const limit = saavnLimit(req.query.limit, 5);
+        const types = Object.keys(SAAVN_SEARCH_TYPES);
+        const settled = await Promise.allSettled(types.map((t) => saavnSearchType(t, q, page, limit)));
+        if (settled.every((r) => r.status === "rejected")) throw settled[0].reason;
+        const out = {};
+        types.forEach((t, i) => {
+            out[t] = settled[i].status === "fulfilled" ? settled[i].value : { total: 0, start: 0, results: [] };
+        });
+        return out;
+    }
+
+    if (!SAAVN_SEARCH_TYPES[type]) throw new SaavnError(400, "type must be one of: all, songs, albums, artists, playlists.");
+    return saavnSearchType(type, q, page, saavnLimit(req.query.limit, 10));
+}));
+
+// ==========================================
+// SONGS
+// ==========================================
+async function saavnSongsByIds(ids) {
+    const data = await saavnCall("song.getDetails", { pids: ids.join(",") }, 600000);
+    return saavnList(data.songs, "songs").map(saavnSong).filter(Boolean);
+}
+
+app.get("/api/saavn/songs/:id/suggestions", saavnRoute(async (req) => {
+    const id = saavnValidId(req.params.id);
+    const limit = saavnLimit(req.query.limit, 10);
+    const data = await saavnCall("reco.getreco", { pid: id }, 600000);
+    return saavnList(data, "data").slice(0, limit).map(saavnSong).filter(Boolean);
+}));
+
+app.get(["/api/saavn/songs/:id", "/api/saavn/songs"], saavnRoute(async (req) => {
+    // /songs/:id  -> one song object
+    if (req.params.id) {
+        const songs = await saavnSongsByIds([saavnValidId(req.params.id)]);
+        if (!songs.length) throw new SaavnError(404, "Song not found.");
+        return songs[0];
+    }
+    // /songs?ids=a,b,c  -> array
+    if (req.query.ids) {
+        const ids = String(req.query.ids).split(",").map((s) => s.trim()).filter(Boolean);
+        if (!ids.length || ids.length > 20) throw new SaavnError(400, "Provide between 1 and 20 ids.");
+        return saavnSongsByIds(ids.map(saavnValidId));
+    }
+    // /songs?link=<url>  -> one song object
+    if (req.query.link) {
+        const token = saavnTokenFromLink(req.query.link);
+        const data = await saavnCall("webapi.get", { token, type: "song", includeMetaTags: "0" }, 600000);
+        const song = saavnList(data.songs, "songs").map(saavnSong).filter(Boolean)[0];
+        if (!song) throw new SaavnError(404, "Song not found.");
+        return song;
+    }
+    throw new SaavnError(400, "Provide an id, ?ids=a,b,c or ?link=<jiosaavn url>.");
+}));
+
+// ==========================================
+// ALBUMS / PLAYLISTS / ARTISTS  (by id or by jiosaavn.com link)
+// ==========================================
+const SAAVN_ENTITIES = {
+    albums:    { type: "album",    call: "content.getAlbumDetails",     idParam: "albumid",  map: saavnAlbum },
+    playlists: { type: "playlist", call: "playlist.getDetails",         idParam: "listid",   map: saavnPlaylist },
+    artists:   { type: "artist",   call: "artist.getArtistPageDetails", idParam: "artistId", map: saavnArtistPage }
+};
+
+for (const kind of Object.keys(SAAVN_ENTITIES)) {
+    const cfg = SAAVN_ENTITIES[kind];
+    app.get([`/api/saavn/${kind}/:id`, `/api/saavn/${kind}`], saavnRoute(async (req) => {
+        const rawId = req.params.id || req.query.id;
+
+        // playlists page their songs; albums/artists return everything in one go
+        const paging = kind === "playlists"
+            ? { p: saavnPage(req.query.page), n: saavnLimit(req.query.limit, 50, 100) }
+            : {};
+
+        let data;
+        if (rawId) {
+            data = await saavnCall(cfg.call, { [cfg.idParam]: saavnValidId(rawId), ...paging }, 600000);
+        } else if (req.query.link) {
+            const token = saavnTokenFromLink(req.query.link);
+            data = await saavnCall("webapi.get", { token, type: cfg.type, includeMetaTags: "0", ...paging }, 600000);
+        } else {
+            throw new SaavnError(400, `Provide an id or ?link=<jiosaavn ${cfg.type} url>.`);
+        }
+
+        if (!data || (!data.id && !data.artistId)) throw new SaavnError(404, `${cfg.type[0].toUpperCase()}${cfg.type.slice(1)} not found.`);
+        return cfg.map(data);
+    }));
+}
+
+// ---------- artist: more songs / more albums ----------
+function saavnArtistSortParams(req) {
+    const sortBy = ["popularity", "latest", "alphabetical"].includes(req.query.sortBy) ? req.query.sortBy : "popularity";
+    const defaultOrder = sortBy === "alphabetical" ? "asc" : "desc";
+    const sortOrder = ["asc", "desc"].includes(req.query.sortOrder) ? req.query.sortOrder : defaultOrder;
+    return { category: sortBy, sort_order: sortOrder };
+}
+
+app.get("/api/saavn/artists/:id/songs", saavnRoute(async (req) => {
+    const artistId = saavnValidId(req.params.id);
+    const data = await saavnCall("artist.getArtistMoreSong", { artistId, page: saavnPage(req.query.page), ...saavnArtistSortParams(req) }, 300000);
+    const songs = saavnList(data.topSongs, "songs").map(saavnSong).filter(Boolean);
+    return { total: saavnInt(data.topSongs && data.topSongs.total) ?? songs.length, songs };
+}));
+
+app.get("/api/saavn/artists/:id/albums", saavnRoute(async (req) => {
+    const artistId = saavnValidId(req.params.id);
+    const data = await saavnCall("artist.getArtistMoreAlbum", { artistId, page: saavnPage(req.query.page), ...saavnArtistSortParams(req) }, 300000);
+    const albums = saavnList(data.topAlbums, "albums").map(saavnAlbum).filter(Boolean);
+    return { total: saavnInt(data.topAlbums && data.topAlbums.total) ?? albums.length, albums };
+}));
+
+// ==========================================
+// LYRICS & TOP SEARCHES
+// ==========================================
+app.get("/api/saavn/lyrics/:id", saavnRoute(async (req) => {
+    const id = saavnValidId(req.params.id);
+    const data = await saavnCall("lyrics.getLyrics", { lyrics_id: id }, 3600000);
+    if (!data || !data.lyrics) throw new SaavnError(404, "Lyrics not found for this song.");
+    return {
+        id,
+        lyrics: saavnDecode(String(data.lyrics).replace(/<br\s*\/?>/gi, "\n")),
+        snippet: saavnDecode(data.snippet || ""),
+        copyright: saavnDecode(data.lyrics_copyright || "")
+    };
+}));
+
+app.get("/api/saavn/top-searches", saavnRoute(async () => {
+    const data = await saavnCall("content.getTopSearches", {}, 600000);
+    return saavnList(data, "data")
+        .map((x) => ({
+            title: saavnDecode(x.title || x.name || x.query || ""),
+            type: x.type || null,
+            url: x.perma_url || x.url || null,
+            image: saavnImages(x.image)
+        }))
+        .filter((x) => x.title);
+}));
+
+// ---------- index of endpoints ----------
+app.get("/api/saavn", (req, res) => {
+    res.json({
+        success: true,
+        endpoints: [
+            "GET /api/saavn/search?query=&type=all|songs|albums|artists|playlists&page=0&limit=10",
+            "GET /api/saavn/songs/:id",
+            "GET /api/saavn/songs?ids=a,b,c",
+            "GET /api/saavn/songs?link=<jiosaavn song url>",
+            "GET /api/saavn/songs/:id/suggestions?limit=10",
+            "GET /api/saavn/albums/:id  |  /albums?link=<url>",
+            "GET /api/saavn/playlists/:id  |  /playlists?link=<url>  (&page=0&limit=50)",
+            "GET /api/saavn/artists/:id  |  /artists?link=<url>",
+            "GET /api/saavn/artists/:id/songs?page=0&sortBy=popularity&sortOrder=desc",
+            "GET /api/saavn/artists/:id/albums?page=0&sortBy=popularity&sortOrder=desc",
+            "GET /api/saavn/lyrics/:id",
+            "GET /api/saavn/top-searches"
+        ]
+    });
+});
+
+// ==========================================
+// /music  ->  search page built on /api/saavn/search (results open on jiosaavn.com)
+// ==========================================
+app.get("/music", (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music | MythoSerial</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #000; color: #fff; -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif;
+    background-image: radial-gradient(circle at 25% 0%, rgba(213,0,249,0.12), transparent 50%), radial-gradient(circle at 85% 100%, rgba(101,31,255,0.10), transparent 50%); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { margin: 0 0 18px; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .search { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 52px; border-radius: 16px;
+    background: rgba(28,28,30,0.72); border: 0.5px solid rgba(255,255,255,0.14); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); }
+  .search:focus-within { border-color: #b74bff; }
+  .search svg { flex: none; color: rgba(235,235,245,0.6); }
+  .search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: #fff; font: inherit; font-size: 16px; }
+  .tabs { display: flex; gap: 8px; margin: 14px 0 18px; overflow-x: auto; }
+  .tabs button { flex: none; padding: 8px 16px; border-radius: 999px; border: 0.5px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05);
+    color: rgba(235,235,245,0.75); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .tabs button.on { background: linear-gradient(180deg, #b74bff, #9526e8); border-color: transparent; color: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips .label { width: 100%; font-size: 13px; color: rgba(235,235,245,0.5); }
+  .chip { padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 0.5px solid rgba(255,255,255,0.12);
+    color: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+  .status { min-height: 22px; margin: 4px 0 10px; color: rgba(235,235,245,0.6); font-size: 15px; }
+  .card { display: flex; align-items: center; gap: 14px; padding: 10px; margin-bottom: 10px; border-radius: 18px;
+    background: rgba(28,28,30,0.72); border: 0.5px solid rgba(255,255,255,0.10); }
+  .cover { flex: none; width: 56px; height: 56px; border-radius: 12px; object-fit: cover; background: rgba(255,255,255,0.08); }
+  .cover.round { border-radius: 50%; }
+  .meta { flex: 1; min-width: 0; }
+  .title, .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title { font-size: 16px; font-weight: 600; }
+  .sub { margin-top: 3px; font-size: 13px; color: rgba(235,235,245,0.55); }
+  .play { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0.5px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .play:hover { background: rgba(255,255,255,0.16); }
+  .play.playing { background: linear-gradient(180deg, #b74bff, #9526e8); border-color: transparent; }
+  .note { margin-top: 26px; text-align: center; font-size: 12px; color: rgba(235,235,245,0.4); }
+  .playerbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: none; align-items: center; gap: 12px;
+    padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: rgba(20,20,22,0.92); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+    border-top: 0.5px solid rgba(255,255,255,0.14); }
+  .playerbar.show { display: flex; }
+  .playerbar img { flex: none; width: 44px; height: 44px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,0.08); }
+  .playerbar .pmeta { flex: 1; min-width: 0; }
+  .playerbar .ptitle, .playerbar .psub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .playerbar .ptitle { font-size: 14px; font-weight: 600; }
+  .playerbar .psub { margin-top: 2px; font-size: 12px; color: rgba(235,235,245,0.55); }
+  .playerbar button.ptoggle { flex: none; width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+    background: linear-gradient(180deg, #b74bff, #9526e8); color: #fff; display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Music</h1>
+  <label class="search">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Search songs, albums, artists" autocomplete="off" autofocus>
+  </label>
+  <div class="tabs" id="tabs">
+    <button class="on" data-type="songs">Songs</button>
+    <button data-type="albums">Albums</button>
+    <button data-type="artists">Artists</button>
+    <button data-type="playlists">Playlists</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="status" id="status"></div>
+  <div id="results"></div>
+  <div class="note">Tap play to listen.</div>
+</div>
+<div class="playerbar" id="bar">
+  <img id="barCover" alt="">
+  <div class="pmeta">
+    <div class="ptitle" id="barTitle"></div>
+    <div class="psub" id="barSub"></div>
+  </div>
+  <button class="ptoggle" id="barToggle" type="button" aria-label="Play/Pause"></button>
+</div>
+<audio id="player" preload="none"></audio>
+<script>
+(function () {
+  var type = "songs", timer = null, seq = 0;
+  var input = document.getElementById("q"), results = document.getElementById("results");
+  var status = document.getElementById("status"), chips = document.getElementById("chips");
+  var ICON_PLAY = "<svg width='18' height='18' viewBox='0 0 24 24' fill='currentColor'><polygon points='6,3 21,12 6,21'/></svg>";
+  var ICON_PAUSE = "<svg width='18' height='18' viewBox='0 0 24 24' fill='currentColor'><rect x='5' y='3' width='5' height='18' rx='1'/><rect x='14' y='3' width='5' height='18' rx='1'/></svg>";
+
+  var player = document.getElementById("player");
+  var bar = document.getElementById("bar");
+  var barCover = document.getElementById("barCover");
+  var barTitle = document.getElementById("barTitle");
+  var barSub = document.getElementById("barSub");
+  var barToggle = document.getElementById("barToggle");
+  barToggle.innerHTML = ICON_PLAY;
+  var activeBtn = null, activeUrl = null;
+
+  function bestAudioUrl(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    return list[list.length - 1].url || null; // highest bitrate is last
+  }
+  function setBtnPlaying(btn, playing) {
+    if (!btn) return;
+    btn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+    btn.classList.toggle("playing", playing);
+  }
+  function playSong(x, btn) {
+    var url = bestAudioUrl(x.downloadUrl);
+    if (!url) return;
+    if (activeUrl === url) {
+      if (player.paused) player.play().catch(function () {}); else player.pause();
+      return;
+    }
+    if (activeBtn) setBtnPlaying(activeBtn, false);
+    activeBtn = btn; activeUrl = url;
+    player.src = url;
+    player.play().catch(function () { status.textContent = "Could not play this track."; });
+    bar.classList.add("show");
+    barTitle.textContent = x.name;
+    barSub.textContent = subtitle(x);
+    var im = x.image && (x.image[1] || x.image[0]);
+    barCover.src = (im && im.url) || "";
+  }
+  player.addEventListener("play", function () { setBtnPlaying(activeBtn, true); barToggle.innerHTML = ICON_PAUSE; });
+  player.addEventListener("pause", function () { setBtnPlaying(activeBtn, false); barToggle.innerHTML = ICON_PLAY; });
+  player.addEventListener("ended", function () { setBtnPlaying(activeBtn, false); barToggle.innerHTML = ICON_PLAY; });
+  barToggle.addEventListener("click", function () {
+    if (!player.src) return;
+    if (player.paused) player.play().catch(function () {}); else player.pause();
+  });
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function fmt(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+  function subtitle(x) {
+    var p = [];
+    var names = x.artists && x.artists.primary ? x.artists.primary.map(function (a) { return a.name; }).join(", ") : "";
+    if (names) p.push(names);
+    if (x.type === "song" && x.album && x.album.name) p.push(x.album.name);
+    if (x.type === "artist" && x.role) p.push(x.role);
+    if (x.year) p.push(x.year);
+    if (x.type === "song" && x.duration) p.push(fmt(x.duration));
+    if ((x.type === "album" || x.type === "playlist") && x.songCount) p.push(x.songCount + " songs");
+    return p.join(" \u00b7 ");
+  }
+  function card(x) {
+    var c = el("article", "card"), img = el("img", "cover" + (x.type === "artist" ? " round" : ""));
+    var im = x.image && (x.image[1] || x.image[0]);
+    if (im && im.url.indexOf("https://") === 0) { img.src = im.url; img.loading = "lazy"; }
+    img.alt = "";
+    var meta = el("div", "meta");
+    meta.appendChild(el("div", "title", x.name));
+    meta.appendChild(el("div", "sub", subtitle(x)));
+    c.appendChild(img); c.appendChild(meta);
+    if (x.type === "song" && bestAudioUrl(x.downloadUrl)) {
+      var playBtn = el("button", "play");
+      playBtn.type = "button";
+      playBtn.setAttribute("aria-label", "Play");
+      playBtn.innerHTML = (activeUrl && activeUrl === bestAudioUrl(x.downloadUrl) && !player.paused) ? ICON_PAUSE : ICON_PLAY;
+      playBtn.addEventListener("click", function () { playSong(x, playBtn); });
+      c.appendChild(playBtn);
+    }
+    return c;
+  }
+  function search() {
+    var q = input.value.trim(), my = ++seq;
+    if (!q) { results.innerHTML = ""; status.textContent = ""; chips.style.display = ""; return; }
+    chips.style.display = "none";
+    status.textContent = "Searching...";
+    fetch("/api/saavn/search?type=" + type + "&limit=20&query=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (my !== seq) return;
+        results.innerHTML = "";
+        if (!j.success) { status.textContent = j.error || "Something went wrong."; return; }
+        var list = j.data.results || [];
+        status.textContent = list.length ? "" : 'No results for "' + q + '"';
+        list.forEach(function (x) { results.appendChild(card(x)); });
+      })
+      .catch(function () { if (my === seq) status.textContent = "Could not reach the server."; });
+  }
+  input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(search, 350); });
+  document.getElementById("tabs").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    type = b.getAttribute("data-type");
+    Array.prototype.forEach.call(this.children, function (t) { t.classList.toggle("on", t === b); });
+    search();
+  });
+  fetch("/api/saavn/top-searches").then(function (r) { return r.json(); }).then(function (j) {
+    if (!j.success || !j.data.length) return;
+    chips.appendChild(el("div", "label", "Trending searches"));
+    j.data.slice(0, 10).forEach(function (t) {
+      var b = el("button", "chip", t.title);
+      b.addEventListener("click", function () { input.value = t.title; search(); });
+      chips.appendChild(b);
+    });
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>`);
+});
+
+// ============================================================
+// ✂️ QUIZ 50:50 LIFELINE (mini-app + API + fair-play IP detection)
+//   GET  /quiz-lifeline            -> mini-app page
+//   POST /api/quiz-lifeline/open   -> logs IP, returns question/options/uses left
+//   POST /api/quiz-lifeline/use    -> consumes 1 use, returns the 2 options to remove
+// ENV: QUIZ_BOT_TOKEN = quiz bot token (verifies Telegram initData). Used by cquiz.py.
+// ============================================================
+const DB_NAME = "Mytho";                 // same DB as the rest of index.js
+const MAX_USES = 3;                      // lifelines per player per quiz
+const DUP_WINDOW_MS = 6 * 60 * 60 * 1000; // "recently" = last 6 hours
+const MAX_SHARED_MATCHES = 3;            // >3 other IDs on one IP => public wifi / CGNAT, don't accuse
+const INITDATA_MAX_AGE_S = 3600;
+const LL_BOT_TOKEN = process.env.QUIZ_BOT_TOKEN || "";
+
+// ---------- pure helpers (exported for testing) ----------
+function getClientIp(req) {
+  let ip = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  if (ip.includes(",")) ip = ip.split(",")[0].trim();
+  ip = ip.trim();
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  return ip.split("%")[0];
+}
+
+// IPv4 -> exact address. IPv6 -> /64 prefix (privacy-extension addresses rotate inside a /64).
+function ipKey(ip) {
+  if (!ip) return "unknown";
+  if (!ip.includes(":")) return ip;
+  const [head, tail] = ip.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail !== undefined ? (tail ? tail.split(":") : []) : [];
+  const full = tail !== undefined
+    ? [...h, ...Array(Math.max(8 - h.length - t.length, 0)).fill("0"), ...t]
+    : h;
+  return "v6:" + full.slice(0, 4).map((x) => x.padStart(4, "0")).join(":");
+}
+
+// Loopback / private ranges mean the proxy header is missing -> every user would "match".
+function isPublicIp(ip) {
+  if (!ip) return false;
+  if (ip.includes(":")) {
+    const l = ip.toLowerCase();
+    return !(l === "::1" || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("fe80"));
+  }
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return false;
+  if (p[0] === 10 || p[0] === 127 || p[0] === 0) return false;
+  if (p[0] === 192 && p[1] === 168) return false;
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return false;
+  if (p[0] === 169 && p[1] === 254) return false;
+  return true;
+}
+
+let warnedNoToken = false;
+function verifyInitData(initData, botToken = LL_BOT_TOKEN) {
+  if (!initData || typeof initData !== "string" || initData.length > 4096) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+
+  if (botToken) {
+    const dcs = [...params.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n");
+    const secret = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
+    const calc = crypto.createHmac("sha256", secret).update(dcs).digest("hex");
+    const a = Buffer.from(calc);
+    const b = Buffer.from(hash);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const authDate = Number(params.get("auth_date") || 0);
+    if (!authDate || Date.now() / 1000 - authDate > INITDATA_MAX_AGE_S) return null;
+  } else if (!warnedNoToken) {
+    warnedNoToken = true;
+    console.warn("[quiz-lifeline] QUIZ_BOT_TOKEN not set – Telegram initData is NOT verified (user ids can be spoofed).");
+  }
+
+  try {
+    const user = JSON.parse(params.get("user") || "null");
+    if (!user || !Number.isFinite(Number(user.id))) return null;
+    return { user: { id: Number(user.id), first_name: user.first_name || "" }, verified: !!botToken };
+  } catch {
+    return null;
+  }
+}
+
+const cleanToken = (t) => {
+  const s = String(t || "").replace(/^lf_/, "");
+  return /^[a-f0-9]{6,32}$/.test(s) ? s : null;
+};
+
+// ---------- route registration ----------
+function registerQuizLifeline(app, mongoClient) {
+  const db = () => mongoClient.db(DB_NAME);
+  const col = {
+    questions: () => db().collection("quiz_lifeline_questions"), // written by cquiz.py
+    usage: () => db().collection("quiz_lifeline_usage"),
+    ips: () => db().collection("quiz_lifeline_ips"),
+    pairs: () => db().collection("quiz_fairplay_pairs"),
+    alerts: () => db().collection("quiz_fairplay_alerts"),     // read by cquiz.py
+  };
+
+  let indexesReady = false;
+  async function ensureIndexes() {
+    if (indexesReady) return;
+    indexesReady = true;
+    try {
+      await col.ips().createIndex({ chat_id: 1, user_id: 1, ip_key: 1 }, { unique: true });
+      await col.ips().createIndex({ chat_id: 1, ip_key: 1, last_seen: -1 });
+      await col.ips().createIndex({ last_seen: 1 }, { expireAfterSeconds: 7 * 86400 }); // keep IPs 7 days max
+      await col.usage().createIndex({ created_at: 1 }, { expireAfterSeconds: 3 * 86400 });
+      await col.pairs().createIndex({ created_at: 1 }, { expireAfterSeconds: 3 * 86400 });
+      await col.alerts().createIndex({ created_at: 1 }, { expireAfterSeconds: 86400 });
+    } catch (e) {
+      indexesReady = false;
+      console.error("[quiz-lifeline] index error:", e.message);
+    }
+  }
+
+  // ---- log IP + queue a Fair-Play alert if another ID in the same group used this network recently ----
+  async function trackNetwork(req, userId, q, firstName) {
+    try {
+      const ip = getClientIp(req);
+      if (!isPublicIp(ip)) return;
+      const key = ipKey(ip);
+      const now = new Date();
+
+      await col.ips().updateOne(
+        { chat_id: q.chat_id, user_id: userId, ip_key: key },
+        { $set: { ip, last_seen: now, session_id: q.session_id, name: firstName }, $setOnInsert: { first_seen: now } },
+        { upsert: true }
+      );
+
+      if (q.chat_id >= 0) return; // PM tests: nothing to announce
+
+      const others = await col.ips().find({
+        chat_id: q.chat_id,
+        ip_key: key,
+        user_id: { $ne: userId },
+        last_seen: { $gte: new Date(Date.now() - DUP_WINDOW_MS) },
+      }).toArray();
+
+      if (!others.length || others.length > MAX_SHARED_MATCHES) return;
+
+      // one alert per pair per quiz session
+      const fresh = [];
+      for (const o of others) {
+        const lo = Math.min(userId, o.user_id), hi = Math.max(userId, o.user_id);
+        try {
+          await col.pairs().insertOne({ _id: `${q.session_id}:${lo}:${hi}`, created_at: now });
+          fresh.push(o.user_id);
+        } catch (e) {
+          if (e.code !== 11000) throw e;
+        }
+      }
+      if (!fresh.length) return;
+
+      await col.alerts().insertOne({
+        chat_id: q.chat_id,
+        session_id: q.session_id,
+        user_id: userId,
+        other_ids: fresh,
+        sent: false,
+        attempts: 0,
+        created_at: now,
+      });
+      console.log(`[quiz-lifeline] fair-play alert queued chat=${q.chat_id} user=${userId} others=${fresh.join(",")}`);
+    } catch (e) {
+      console.error("[quiz-lifeline] trackNetwork error:", e.message);
+    }
+  }
+
+  // ---- shared state evaluation ----
+  async function loadState(userId, token) {
+    const q = await col.questions().findOne({ token });
+    if (!q) return { err: "not_found" };
+    const usage = await col.usage().findOne({ _id: `${q.session_id}:${userId}` });
+    const uses = usage?.uses || 0;
+    const prev = usage?.used?.[token] || null; // {remove, keep}
+    const secondsLeft = Math.max(0, Math.ceil((new Date(q.expires_at).getTime() - Date.now()) / 1000));
+    const answered = (q.voted || []).some((v) => Number(v) === userId);
+    const options = q.options || [];
+    let reason = null;
+    if (!prev) {
+      if (options.length < 3) reason = "too_few";
+      else if (answered) reason = "answered";
+      else if (secondsLeft <= 0) reason = "expired";
+      else if (uses >= MAX_USES) reason = "no_uses";
+    }
+    return { q, uses, prev, secondsLeft, answered, options, reason };
+  }
+
+  function pickRemoval(n, correct) {
+    // keep the CORRECT option + 1 random WRONG option => exactly two options left
+    // correct_index must be 0-based. Clamp invalid values so we never invert keep/remove.
+    let c = Number(correct);
+    if (!Number.isFinite(c)) c = 0;
+    c = Math.trunc(c);
+    if (c < 0 || c >= n) c = 0;
+
+    const wrong = [];
+    for (let i = 0; i < n; i++) if (i !== c) wrong.push(i);
+    if (wrong.length === 0) {
+      return { remove: [], keep: [c] };
+    }
+    const keepWrong = wrong[crypto.randomInt(0, wrong.length)];
+    const remove = wrong.filter((i) => i !== keepWrong);
+    const keep = [c, keepWrong].sort((a, b) => a - b);
+    return { remove, keep };
+  }
+
+  const authFail = (res) =>
+    res.status(401).json({ ok: false, code: "auth", message: "Open this from the quiz message inside Telegram." });
+
+  // ---------------- GET page ----------------
+  app.get("/quiz-lifeline", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.type("html").send(LIFELINE_HTML);
+  });
+
+  // ---------------- POST open ----------------
+  app.post("/api/quiz-lifeline/open", async (req, res) => {
+    try {
+      await ensureIndexes();
+      const auth = verifyInitData(req.body?.initData);
+      if (!auth) return authFail(res);
+      const token = cleanToken(req.body?.token);
+      if (!token) return res.json({ ok: false, code: "not_found" });
+
+      const st = await loadState(auth.user.id, token);
+      if (st.err) return res.json({ ok: false, code: st.err });
+
+      await trackNetwork(req, auth.user.id, st.q, auth.user.first_name);
+
+      // If blocked (e.g. no lifelines left) and no prior result for this token,
+      // do not leak the question/options to the client.
+      const blocked = !!st.reason && !st.prev;
+      res.json({
+        ok: true,
+        question: blocked ? "" : st.q.question,
+        options: blocked ? [] : st.options,
+        secondsLeft: blocked ? 0 : st.secondsLeft,
+        maxUses: MAX_USES,
+        usesLeft: Math.max(0, MAX_USES - st.uses),
+        reason: st.reason,                 // null => can use
+        result: st.prev,                   // already used on this question => replay, no extra use
+      });
+    } catch (e) {
+      console.error("[quiz-lifeline] open error:", e);
+      res.status(500).json({ ok: false, code: "server" });
+    }
+  });
+
+  // ---------------- POST use ----------------
+  app.post("/api/quiz-lifeline/use", async (req, res) => {
+    try {
+      await ensureIndexes();
+      const auth = verifyInitData(req.body?.initData);
+      if (!auth) return authFail(res);
+      const userId = auth.user.id;
+      const token = cleanToken(req.body?.token);
+      if (!token) return res.json({ ok: false, code: "not_found" });
+
+      const st = await loadState(userId, token);
+      if (st.err) return res.json({ ok: false, code: st.err });
+
+      // already used on this question -> same answer, no extra use
+      if (st.prev) {
+        return res.json({ ok: true, ...st.prev, usesLeft: Math.max(0, MAX_USES - st.uses), replay: true });
+      }
+      if (st.reason) return res.json({ ok: false, code: st.reason, usesLeft: Math.max(0, MAX_USES - st.uses) });
+
+      const pick = pickRemoval(st.options.length, st.q.correct_index);
+      const _id = `${st.q.session_id}:${userId}`;
+      let consumed = false;
+      try {
+        // atomic: only succeeds while uses < MAX and this question not used yet
+        await col.usage().updateOne(
+          { _id, uses: { $lt: MAX_USES }, [`used.${token}`]: { $exists: false } },
+          {
+            $inc: { uses: 1 },
+            $set: { [`used.${token}`]: pick, user_id: userId, session_id: st.q.session_id },
+            $setOnInsert: { created_at: new Date() },
+          },
+          { upsert: true }
+        );
+        consumed = true;
+      } catch (e) {
+        if (e.code !== 11000) throw e; // 11000 => cap reached or lost a double-tap race
+      }
+
+      const after = await col.usage().findOne({ _id });
+      const usesLeft = Math.max(0, MAX_USES - (after?.uses || 0));
+      const stored = after?.used?.[token];
+      if (stored) {
+        return res.json({ ok: true, ...stored, usesLeft, replay: !consumed });
+      }
+      return res.json({ ok: false, code: "no_uses", usesLeft });
+    } catch (e) {
+      console.error("[quiz-lifeline] use error:", e);
+      res.status(500).json({ ok: false, code: "server" });
+    }
+  });
+
+  console.log("✅ Quiz 50:50 lifeline routes registered");
+}
+
+// ============================================================
+// MINI-APP PAGE (no backticks / template placeholders inside the client JS on purpose)
+// ============================================================
+const LIFELINE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>50:50 Lifeline</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  :root {
+    --bg: #05040c;
+    --card: rgba(28, 22, 48, 0.72);
+    --card-solid: #16102e;
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(183, 75, 255, 0.35);
+    --txt: #f5f2ff;
+    --mut: #9b93c4;
+    --ok: #30d158;
+    --bad: #ff453a;
+    --acc: #b74bff;
+    --acc2: #9526e8;
+    --gold: #ffd60a;
+    --glass: blur(40px) saturate(180%);
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--txt);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(183, 75, 255, 0.28), transparent 55%),
+      radial-gradient(ellipse 70% 40% at 90% 110%, rgba(48, 209, 88, 0.10), transparent 50%),
+      radial-gradient(circle at 50% 40%, rgba(149, 38, 232, 0.06), transparent 60%);
+  }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 48; pointer-events: none; }
+  #flash.on { animation: flash .35s ease-out; }
+  @keyframes flash { 0% { opacity: .5; } 100% { opacity: 0; } }
+
+  #app {
+    position: relative; z-index: 2;
+    max-width: 440px; margin: 0 auto;
+    padding: calc(16px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));
+    min-height: 100%;
+    display: flex; flex-direction: column;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-icon {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(145deg, #b74bff, #6b1fff);
+    box-shadow: 0 8px 22px rgba(183, 75, 255, 0.4), inset 0 1px 0 rgba(255,255,255,0.25);
+    display: grid; place-items: center;
+  }
+  .brand-icon svg { width: 20px; height: 20px; }
+  .brand-text { display: flex; flex-direction: column; gap: 1px; }
+  .brand-title {
+    font-size: 15px; font-weight: 800; letter-spacing: -0.3px;
+    background: linear-gradient(90deg, #ff6bcb, #b74bff, #5ac8ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .brand-sub { font-size: 11px; font-weight: 600; color: var(--mut); letter-spacing: 0.4px; text-transform: uppercase; }
+
+  .pips { display: flex; gap: 6px; }
+  .pip {
+    width: 28px; height: 28px; border-radius: 9px;
+    display: grid; place-items: center;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid var(--line);
+    transition: all 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .pip svg { width: 14px; height: 14px; color: var(--acc); }
+  .pip.used {
+    opacity: 0.28; filter: grayscale(1); transform: scale(0.88);
+  }
+  .pip.used svg { color: var(--mut); }
+
+  /* ---- Timer ---- */
+  .timer-wrap {
+    margin-bottom: 20px;
+  }
+  .timer-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .timer-label { font-size: 11px; font-weight: 700; color: var(--mut); letter-spacing: 0.8px; text-transform: uppercase; }
+  .timer-sec { font-size: 13px; font-weight: 700; color: var(--txt); font-variant-numeric: tabular-nums; }
+  .timer {
+    height: 5px; border-radius: 99px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+    border: 0.5px solid var(--line);
+  }
+  #bar {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, var(--ok), var(--gold), var(--bad));
+    transform-origin: left;
+    transition: transform 1s linear;
+    border-radius: 99px;
+    box-shadow: 0 0 12px rgba(48, 209, 88, 0.35);
+  }
+
+  /* ---- Question card ---- */
+  .q-card {
+    background: var(--card);
+    backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass);
+    border: 0.5px solid var(--line);
+    border-radius: 22px;
+    padding: 20px 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .q-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; color: var(--acc);
+    letter-spacing: 0.6px; text-transform: uppercase;
+    margin-bottom: 10px;
+    padding: 4px 10px; border-radius: 99px;
+    background: rgba(183, 75, 255, 0.12);
+    border: 0.5px solid rgba(183, 75, 255, 0.25);
+  }
+  .question {
+    font-size: 17px; font-weight: 700; line-height: 1.4;
+    margin: 0; white-space: pre-wrap; word-break: break-word;
+    letter-spacing: -0.2px; color: var(--txt);
+  }
+
+  /* ---- Options ---- */
+  .opts-wrap { position: relative; margin-bottom: 8px; }
+  .opts { display: flex; flex-direction: column; gap: 10px; }
+  .opt {
+    position: relative;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 14px;
+    border-radius: 16px;
+    background: var(--card);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 0.5px solid var(--line);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+    opacity: 0; transform: translateY(16px) scale(0.97);
+    will-change: transform, filter, opacity;
+    transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  }
+  .opt.in { animation: rise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.15) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .opt .ltr {
+    flex: 0 0 34px; height: 34px; border-radius: 11px;
+    display: grid; place-items: center;
+    font-weight: 800; font-size: 14px;
+    background: rgba(183, 75, 255, 0.15);
+    color: #dcc8ff;
+    border: 0.5px solid rgba(183, 75, 255, 0.25);
+    letter-spacing: -0.2px;
+  }
+  .opt .txt { flex: 1; font-size: 15px; font-weight: 550; word-break: break-word; letter-spacing: -0.15px; line-height: 1.35; }
+
+  .opt.charge {
+    animation: shake 0.12s linear infinite;
+    border-color: var(--acc);
+    box-shadow: 0 0 24px rgba(183, 75, 255, 0.45), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+  @keyframes shake {
+    0% { transform: translate(-1.5px, 1px) rotate(-0.3deg); }
+    50% { transform: translate(1.5px, -1px) rotate(0.3deg); }
+    100% { transform: translate(-1px, -1.5px) rotate(0); }
+  }
+  .opt.boom {
+    animation: boom 0.55s ease-in forwards;
+    border-color: var(--bad);
+    box-shadow: 0 0 40px var(--bad);
+  }
+  @keyframes boom {
+    0% { transform: scale(1); filter: blur(0); opacity: 1; }
+    35% { transform: scale(1.1); filter: blur(1px) brightness(1.7); opacity: 1; }
+    100% { transform: scale(1.45); filter: blur(14px); opacity: 0; }
+  }
+  /* Removed options fully hidden — no strike-through */
+  .opt.gone {
+    display: none !important;
+    opacity: 0; pointer-events: none;
+    height: 0; margin: 0; padding: 0; border: 0; overflow: hidden;
+  }
+  .opt.keep {
+    border-color: rgba(48, 209, 88, 0.55);
+    background: linear-gradient(135deg, rgba(48, 209, 88, 0.14), rgba(48, 209, 88, 0.04));
+    box-shadow: 0 0 0 0.5px rgba(48, 209, 88, 0.3), 0 10px 30px rgba(48, 209, 88, 0.15);
+    animation: glow 1.4s ease-in-out infinite alternate;
+  }
+  .opt.keep .ltr {
+    background: var(--ok); color: #04210f;
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(48, 209, 88, 0.35);
+  }
+  .opt.keep .txt { text-decoration: none !important; font-weight: 650; }
+  @keyframes glow {
+    from { box-shadow: 0 0 8px rgba(48, 209, 88, 0.3), 0 8px 20px rgba(0,0,0,0.25); }
+    to { box-shadow: 0 0 28px rgba(48, 209, 88, 0.75), 0 0 4px var(--ok) inset; }
+  }
+
+  .ring {
+    position: fixed; width: 20px; height: 20px; border-radius: 50%;
+    border: 3px solid var(--bad); z-index: 49; pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: ring 0.7s ease-out forwards;
+  }
+  @keyframes ring { to { width: 340px; height: 340px; opacity: 0; border-width: 1px; } }
+  body.shake #app { animation: quake 0.4s linear; }
+  @keyframes quake {
+    20% { transform: translate(-4px, 2px); }
+    40% { transform: translate(4px, -2px); }
+    60% { transform: translate(-3px, -2px); }
+    80% { transform: translate(3px, 2px); }
+  }
+
+  .scan {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, #5ac8ff, transparent);
+    z-index: 3; top: 0; opacity: 0;
+    box-shadow: 0 0 12px #5ac8ff;
+  }
+  .scan.on { animation: scan 1s ease-in-out; }
+  @keyframes scan { 0% { top: 0; opacity: 1; } 100% { top: 100%; opacity: 0; } }
+
+  /* ---- Status & buttons ---- */
+  #status {
+    min-height: 48px; margin: 14px 0 10px;
+    text-align: center; font-weight: 650; font-size: 14px;
+    color: var(--mut); line-height: 1.4; letter-spacing: -0.1px;
+  }
+  #status.ok { color: var(--ok); }
+  #status.bad { color: var(--bad); }
+
+  .actions { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+  button#go {
+    width: 100%; border: 0; border-radius: 16px; padding: 16px;
+    font-size: 16px; font-weight: 700; color: #fff; cursor: pointer;
+    letter-spacing: -0.2px;
+    background: linear-gradient(180deg, #c45dff, #9526e8);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 12px 28px rgba(149, 38, 232, 0.4);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
+  }
+  button#go:active { transform: scale(0.97); }
+  button#go:disabled { opacity: 0.5; }
+  button#close {
+    width: 100%; border: 0.5px solid var(--line); border-radius: 16px; padding: 15px;
+    font-size: 15px; font-weight: 650; color: var(--txt); cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    letter-spacing: -0.15px;
+    transition: transform 0.2s, background 0.2s;
+  }
+  button#close:active { transform: scale(0.97); background: rgba(255,255,255,0.09); }
+
+  /* Empty / error state */
+  .empty-state {
+    text-align: center; padding: 48px 16px 24px;
+  }
+  .empty-icon {
+    width: 64px; height: 64px; margin: 0 auto 16px;
+    border-radius: 18px;
+    background: linear-gradient(145deg, rgba(255, 69, 58, 0.2), rgba(255, 69, 58, 0.05));
+    border: 0.5px solid rgba(255, 69, 58, 0.3);
+    display: grid; place-items: center;
+    box-shadow: 0 12px 28px rgba(255, 69, 58, 0.15);
+  }
+  .empty-icon svg { width: 28px; height: 28px; color: var(--bad); }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div id="flash"></div>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h4v16H6z"/><path d="M14 4h4v16h-4z"/><path d="M4 8h16"/><path d="M4 16h16"/></svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">50:50 Lifeline</div>
+        <div class="brand-sub">Mytho Quiz</div>
+      </div>
+    </div>
+    <div class="pips" id="pips"></div>
+  </header>
+
+  <div class="timer-wrap" id="timerWrap">
+    <div class="timer-meta">
+      <span class="timer-label">Time left</span>
+      <span class="timer-sec" id="timerSec">—</span>
+    </div>
+    <div class="timer"><div id="bar"></div></div>
+  </div>
+
+  <div class="q-card" id="qCard">
+    <div class="q-label">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+      Question
+    </div>
+    <div class="question" id="q">Loading…</div>
+  </div>
+
+  <div class="opts-wrap" id="optsWrap">
+    <div class="scan" id="scan"></div>
+    <div class="opts" id="opts"></div>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="actions">
+    <button id="go" hidden>Use 50:50 Lifeline</button>
+    <button id="close">Back to quiz</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var AUTO_ACTIVATE = true;
+  var LETTERS = "ABCDEFGHIJ";
+  var $ = function (id) { return document.getElementById(id); };
+  var optEls = [], token = "", maxUses = 3, secondsLeft = 0, ended = false, timerId = null, busy = false;
+
+  var ICON_SCISSORS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88"/><path d="M14.47 14.48L20 20"/><path d="M8.12 8.12L12 12"/></svg>';
+  var ICON_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+  if (tg) {
+    tg.ready(); tg.expand();
+    try { tg.setHeaderColor("#05040c"); tg.setBackgroundColor("#05040c"); } catch (e) {}
+  }
+  // Block copy / long-press select
+  document.addEventListener("copy", function (e) { e.preventDefault(); });
+  document.addEventListener("cut", function (e) { e.preventDefault(); });
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  document.addEventListener("selectstart", function (e) { e.preventDefault(); });
+
+  function haptic(kind, style) {
+    try {
+      if (!tg || !tg.HapticFeedback) return;
+      if (kind === "impact") tg.HapticFeedback.impactOccurred(style || "medium");
+      else tg.HapticFeedback.notificationOccurred(style || "success");
+    } catch (e) {}
+  }
+  function getToken() {
+    var sp = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
+    if (!sp) { try { sp = new URLSearchParams(location.search).get("t") || ""; } catch (e) {} }
+    return String(sp).replace(/^lf_/, "");
+  }
+  function api(path, body) {
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); });
+  }
+  function setStatus(msg, cls) { var s = $("status"); s.textContent = msg || ""; s.className = cls || ""; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var MSG = {
+    auth: "Open this from the quiz message inside Telegram.",
+    not_found: "This lifeline is no longer available.",
+    expired: "Time is up for this question.",
+    answered: "You already answered this question.",
+    no_uses: "You already used all 3 lifelines for this quiz.",
+    too_few: "Not enough options for a 50:50 here.",
+    server: "Something went wrong. Please try again."
+  };
+
+  function renderPips(left) {
+    var p = $("pips"); p.innerHTML = "";
+    for (var i = 0; i < maxUses; i++) {
+      var d = document.createElement("div");
+      d.className = "pip" + (i >= left ? " used" : "");
+      d.innerHTML = ICON_SCISSORS;
+      p.appendChild(d);
+    }
+  }
+  function startTimer(total) {
+    secondsLeft = total; var full = Math.max(total, 1);
+    var secEl = $("timerSec");
+    function paint() {
+      $("bar").style.transform = "scaleX(" + Math.max(0, secondsLeft / full) + ")";
+      if (secEl) secEl.textContent = Math.max(0, secondsLeft) + "s";
+    }
+    paint();
+    timerId = setInterval(function () {
+      secondsLeft--; paint();
+      if (secondsLeft <= 0) {
+        clearInterval(timerId);
+        if (!ended) { setStatus("Time is up!", "bad"); $("go").hidden = true; }
+      }
+    }, 1000);
+  }
+  function renderOptions(options) {
+    var box = $("opts"); box.innerHTML = ""; optEls = [];
+    options.forEach(function (t, i) {
+      var d = document.createElement("div"); d.className = "opt";
+      var l = document.createElement("div"); l.className = "ltr"; l.textContent = LETTERS[i] || (i + 1);
+      var x = document.createElement("div"); x.className = "txt"; x.textContent = t;
+      d.appendChild(l); d.appendChild(x); box.appendChild(d); optEls.push(d);
+    });
+    return Promise.all(optEls.map(function (el, i) {
+      return sleep(120 * i).then(function () { el.classList.add("in"); haptic("impact", "light"); });
+    })).then(function () { return sleep(400); });
+  }
+
+  function showBlockedState(msg) {
+    ended = true;
+    $("q").textContent = "";
+    $("opts").innerHTML = "";
+    $("go").hidden = true;
+    if (timerId) clearInterval(timerId);
+    $("bar").style.transform = "scaleX(0)";
+    if ($("timerSec")) $("timerSec").textContent = "—";
+    var card = $("qCard");
+    card.innerHTML = '<div class="empty-state"><div class="empty-icon">' + ICON_LOCK + '</div><div class="question" style="font-size:16px;margin-bottom:6px;">Lifelines exhausted</div></div>';
+    setStatus(msg, "bad");
+  }
+
+  // ---------- particles ----------
+  var cv = $("fx"), cx = cv.getContext("2d"), parts = [], raf = 0;
+  function fit() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; }
+  fit(); addEventListener("resize", fit);
+  function burst(rect) {
+    var ox = (rect.left + rect.width / 2) * devicePixelRatio, oy = (rect.top + rect.height / 2) * devicePixelRatio;
+    var cols = ["#ff453a", "#ff9f0a", "#ffd60a", "#b74bff", "#ffffff"];
+    for (var i = 0; i < 90; i++) {
+      var a = Math.random() * Math.PI * 2, s = (2 + Math.random() * 9) * devicePixelRatio;
+      parts.push({
+        x: ox + (Math.random() - .5) * rect.width * devicePixelRatio * .8,
+        y: oy + (Math.random() - .5) * rect.height * devicePixelRatio * .5,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2 * devicePixelRatio,
+        r: (2 + Math.random() * 5) * devicePixelRatio,
+        life: 1, dec: .012 + Math.random() * .02, c: cols[(Math.random() * cols.length) | 0]
+      });
+    }
+    var ring = document.createElement("div"); ring.className = "ring";
+    ring.style.left = (rect.left + rect.width / 2) + "px";
+    ring.style.top = (rect.top + rect.height / 2) + "px";
+    document.body.appendChild(ring);
+    setTimeout(function () { ring.remove(); }, 800);
+    if (!raf) raf = requestAnimationFrame(loop);
+  }
+  function loop() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    parts = parts.filter(function (p) { return p.life > 0; });
+    parts.forEach(function (p) {
+      p.x += p.vx; p.y += p.vy; p.vy += .35 * devicePixelRatio; p.vx *= .985; p.life -= p.dec;
+      cx.globalAlpha = Math.max(p.life, 0); cx.fillStyle = p.c;
+      cx.beginPath(); cx.arc(p.x, p.y, p.r * Math.max(p.life, .2), 0, 6.283); cx.fill();
+    });
+    cx.globalAlpha = 1;
+    raf = parts.length ? requestAnimationFrame(loop) : 0;
+    if (!parts.length) cx.clearRect(0, 0, cv.width, cv.height);
+  }
+
+  // ---------- the show ----------
+  function showResult(res, animate) {
+    ended = true; if (timerId) clearInterval(timerId);
+    $("go").hidden = true;
+    var keepList = Array.isArray(res.keep) ? res.keep : [];
+    var removeList = Array.isArray(res.remove) ? res.remove : [];
+    var keepSet = {};
+    keepList.forEach(function (i) { keepSet[Number(i)] = 1; });
+    function finish() {
+      optEls.forEach(function (el, i) {
+        el.classList.remove("charge", "boom");
+        if (keepSet[i]) {
+          el.classList.add("keep");
+          el.style.display = "";
+          el.style.opacity = "1";
+        } else {
+          el.classList.add("gone");
+          el.style.display = "none";
+        }
+      });
+      renderPips(res.usesLeft);
+      setStatus("Two wrong answers removed. Pick one of the glowing options in the poll.", "ok");
+      haptic("notify", "success");
+    }
+    if (!animate) { finish(); return Promise.resolve(); }
+    var chain = Promise.resolve();
+    removeList.forEach(function (idx, n) {
+      chain = chain.then(function () { return sleep(n ? 260 : 0); }).then(function () {
+        var el = optEls[Number(idx)]; if (!el) return;
+        burst(el.getBoundingClientRect());
+        el.classList.remove("charge"); el.classList.add("boom");
+        $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
+        document.body.classList.remove("shake"); void document.body.offsetWidth; document.body.classList.add("shake");
+        haptic("impact", "heavy");
+      });
+    });
+    return chain.then(function () { return sleep(750); }).then(finish);
+  }
+
+  function activate() {
+    if (busy || ended) return; busy = true; $("go").hidden = true;
+    setStatus("Scanning answers…");
+    optEls.forEach(function (el) { el.classList.add("charge"); });
+    var sc = $("scan"); sc.classList.remove("on"); void sc.offsetWidth; sc.classList.add("on");
+    haptic("impact", "medium");
+    Promise.all([
+      api("/api/quiz-lifeline/use", { initData: tg ? tg.initData : "", token: token }),
+      sleep(1100)
+    ]).then(function (r) {
+      var res = r[0];
+      optEls.forEach(function (el) { el.classList.remove("charge"); });
+      if (res && res.ok) return showResult(res, !res.replay);
+      ended = true;
+      setStatus(MSG[res && res.code] || MSG.server, "bad");
+      haptic("notify", "error");
+      if (res && typeof res.usesLeft === "number") renderPips(res.usesLeft);
+    }).catch(function () {
+      optEls.forEach(function (el) { el.classList.remove("charge"); });
+      setStatus(MSG.server, "bad"); $("go").hidden = false;
+    }).then(function () { busy = false; });
+  }
+
+  $("go").addEventListener("click", activate);
+  $("close").addEventListener("click", function () { if (tg) tg.close(); else history.back(); });
+
+  // ---------- boot ----------
+  token = getToken();
+  if (!token) {
+    $("q").textContent = "";
+    showBlockedState(MSG.auth);
+    return;
+  }
+  api("/api/quiz-lifeline/open", { initData: tg ? tg.initData : "", token: token }).then(function (d) {
+    if (!d || !d.ok) {
+      $("q").textContent = "";
+      showBlockedState(MSG[d && d.code] || MSG.server);
+      return;
+    }
+    maxUses = d.maxUses;
+    renderPips(typeof d.usesLeft === "number" ? d.usesLeft : 0);
+
+    // Out of lifelines (or other block) and no prior result — hide Q/A
+    if (d.reason && !d.result) {
+      showBlockedState(MSG[d.reason] || MSG.server);
+      return;
+    }
+
+    $("q").textContent = d.question;
+    startTimer(d.secondsLeft);
+    return renderOptions(d.options).then(function () {
+      if (d.result) {
+        d.result.usesLeft = d.usesLeft;
+        return showResult(d.result, false);
+      }
+      setStatus("Ready — " + d.usesLeft + " lifeline" + (d.usesLeft === 1 ? "" : "s") + " left");
+      if (AUTO_ACTIVATE) return sleep(400).then(activate);
+      $("go").hidden = false;
+    });
+  }).catch(function () {
+    $("q").textContent = "";
+    showBlockedState(MSG.server);
+  });
+})();
+</script>
+</body>
+</html>`;
+
+registerQuizLifeline(app, client);
+
+// ==========================================================
+// MYTHOSTREAM SITE -> SAME DOMAIN (reverse proxy to Python stream server)
+// Streaming / watch / reels / login / admin pages now open on THIS site.
+// Needs env:  STREAM_SERVER_URL=https://your-python-stream-server.example.com
+// Optional:   STREAM_PROXY_ROOT=false  (keep the old "/" welcome page)
+// ==========================================================
+const STREAM_SERVER_URL = (process.env.STREAM_SERVER_URL || "").trim().replace(/\/+$/, "");
+const STREAM_PROXY_ROOT = (process.env.STREAM_PROXY_ROOT || "true").toLowerCase() !== "false";
+let STREAM_UPSTREAM = null;
+if (STREAM_SERVER_URL) {
+    try {
+        STREAM_UPSTREAM = new URL(STREAM_SERVER_URL);
+    } catch (e) {
+        console.error("❌ Invalid STREAM_SERVER_URL:", STREAM_SERVER_URL);
+    }
+} else {
+    console.warn("⚠️ STREAM_SERVER_URL not set - stream site proxy is disabled.");
+}
+
+const streamHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 256 });
+const streamHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 256 });
+
+// Every route that exists in stream_routes.py
+const STREAM_PATH_PATTERNS = [
+    /^\/(login|search|trending|reels|livetv|profile|history|playlists|favorites|settings|admin)\/?$/,
+    /^\/admin\/(stats|dashboard)\/?$/,
+    /^\/livetv\/watch\/[^/]+\/?$/,
+    /^\/playlist\/[^/]+\/?$/,
+    /^\/series\/[^/]+\/?$/,
+    /^\/(watch|stream)\/[^/]+(\/[^/]+)?$/,
+    /^\/reel_stream\/[^/]+$/,
+    /^\/\d+(\/[^/]+)?$/,
+    /^\/api\/(logout|tg-login|check-auth|add-view|like|dislike|add-comment|upload-reel|get-reels|reel-like|reel-view|save-progress|create-playlist|add-to-playlist|get-playlists|update-setting|get-notifications|upload-reel-file)$/,
+    /^\/api\/(get-comments|get-progress)\/[^/]+$/,
+    /^\/api\/get-quality-variants\/[^/]+\/[^/]+\/[^/]+$/
+];
+
+function isStreamPath(p) {
+    if (p === "/") return STREAM_PROXY_ROOT;
+    return STREAM_PATH_PATTERNS.some((re) => re.test(p));
+}
+
+// ----------------------------------------------------------
+// SMOOTH UI LAYER: injected into every stream-site HTML page (no Python change needed)
+//  - no grey tap flash, press animation, Telegram haptics, soft page fade-in
+//  - recommendation thumbnails (<video preload="metadata">) load AFTER the main
+//    video starts, so they stop fighting the player for Telegram bandwidth
+// Disable with env STREAM_SMOOTH_UI=false
+// ----------------------------------------------------------
+const STREAM_SMOOTH_UI = (process.env.STREAM_SMOOTH_UI || "true").toLowerCase() !== "false";
+
+const STREAM_SMOOTH_CSS =
+    '<style id="__smooth_ui">' +
+    // ---- design tokens (same look as the Mini App dashboard) ----
+    ':root{--m-line:rgba(255,255,255,.12);--m-card:rgba(28,28,30,.72);--m-mut:rgba(235,235,245,.6);--m-p1:#b74bff;--m-p2:#9526e8;--m-ease:cubic-bezier(.34,1.56,.64,1);--plyr-color-main:#b74bff}' +
+    '*{-webkit-tap-highlight-color:transparent}' +
+    'html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}' +
+    'html body{background:#000 radial-gradient(circle at 25% 0%,rgba(213,0,249,.12),transparent 50%) fixed;background-image:radial-gradient(circle at 25% 0%,rgba(213,0,249,.12),transparent 50%),radial-gradient(circle at 85% 100%,rgba(101,31,255,.10),transparent 50%);background-attachment:fixed;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}' +
+    'html body *:not(.material-symbol):not([class*="material"]){font-family:inherit}' +
+    'html body .top-gradient{display:none}' +
+    'html body h1,html body h2,html body h3{letter-spacing:-.4px;font-weight:700}' +
+    // ---- touch feel ----
+    'button,a,[onclick],.nav-item{touch-action:manipulation;-webkit-user-select:none;user-select:none}' +
+    'input,textarea{-webkit-user-select:text;user-select:text}' +
+    // ---- bottom nav: floating glass bar ----
+    'html body .bottom-nav{background:rgba(28,28,30,.72);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);border-top:.5px solid var(--m-line);padding:8px 6px calc(10px + env(safe-area-inset-bottom,0px))}' +
+    'html body .nav-item{color:rgba(235,235,245,.45);transition:transform .2s var(--m-ease),color .2s ease}' +
+    'html body .nav-item.active{color:#d58bff}' +
+    'html body .nav-item.active .material-symbol{filter:drop-shadow(0 0 8px rgba(191,90,242,.65))}' +
+    'html body .nav-item:active{transform:scale(.88)}' +
+    // ---- cards ----
+    'html body .home-item,html body .channel-card,html body .series-hero{background:var(--m-card);border:.5px solid var(--m-line);border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}' +
+    'html body .yt-rec-item,html body .trending-item,html body .episode-item,html body .yt-playlist-item{background:var(--m-card);border:.5px solid var(--m-line);border-radius:16px;padding:8px;margin-bottom:8px}' +
+    'html body .yt-playlist-container,html body .main-layout .video-info-section{border-radius:20px}' +
+    'html body .home-thumb,html body .yt-thumb,html body .trending-thumb,html body .episode-thumb,html body .rec-thumb-container,html body .series-poster{border-radius:14px;background:#1a1226}' +
+    'html body .home-item,html body .yt-rec-item,html body .trending-item,html body .episode-item{content-visibility:auto;contain-intrinsic-size:auto 230px}' +
+    'html body .home-item,html body .yt-rec-item,html body .trending-item,html body .episode-item,html body .channel-card,html body .yt-playlist-item{transition:transform .22s var(--m-ease),box-shadow .22s ease,opacity .18s ease}' +
+    'html body .progress-bar{background:linear-gradient(90deg,#b74bff,#00e676);border-radius:4px}' +
+    // ---- buttons / pills ----
+    'html body .action-pill,html body .seg-btn,html body .filter-btn,html body .page-btn,html body .back-btn{background:rgba(255,255,255,.07);border:.5px solid var(--m-line);color:#fff;border-radius:999px;transition:transform .18s var(--m-ease),background-color .2s ease,opacity .18s ease}' +
+    'html body .filter-btn.active,html body .page-btn.active,html body .subscribe-btn,html body .submit-btn{background:linear-gradient(180deg,#b74bff,#9526e8);color:#fff;border:none;box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 8px 20px rgba(149,38,232,.35)}' +
+    'html body .seg-btn.active{background:rgba(183,75,255,.22);color:#e9c4ff}' +
+    'html body button:active,html body .nav-item:active,html body .action-pill:active,html body .seg-btn:active,html body .home-item:active,html body .yt-rec-item:active,html body .trending-item:active,html body .episode-item:active,html body .channel-card:active,html body .yt-playlist-item:active,html body .back-btn:active{transform:scale(.96);opacity:.88}' +
+    // ---- inputs ----
+    'html body .search-input,html body input[type=text],html body input[type=search]{background:rgba(255,255,255,.06);border:.5px solid var(--m-line);border-radius:14px;color:#fff;transition:border-color .2s,box-shadow .2s}' +
+    'html body .search-input:focus,html body input[type=text]:focus{outline:none;border-color:rgba(191,90,242,.7);box-shadow:0 0 0 3px rgba(191,90,242,.18)}' +
+    // ---- text accents ----
+    'html body .section-title,html body .series-title,html body .home-title,html body .video-title{letter-spacing:-.3px}' +
+    'html body .home-meta,html body .user-greeting,html body .channel-name,html body .stat-label{color:var(--m-mut)}' +
+    'html body .stat-value{background:linear-gradient(180deg,#fff,#d58bff);-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    'html body .empty-state{color:var(--m-mut)}' +
+    // ---- player ----
+    '.plyr{border-radius:18px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.6)}' +
+    '.plyr,.plyr video{will-change:transform;transform:translateZ(0)}' +
+    '.plyr--video .plyr__control--overlaid{background:linear-gradient(180deg,#b74bff,#9526e8);box-shadow:0 8px 24px rgba(149,38,232,.5)}' +
+    // ---- page entry ----
+    '@keyframes __pgin{from{opacity:0}to{opacity:1}}' +
+    'body{animation:__pgin .22s ease-out}' +
+    'video.yt-thumb{background:#1a1226}' +
+    '</style>';
+
+const STREAM_SMOOTH_JS =
+    '<script id="__smooth_js">(function(){try{' +
+    'var tg=window.Telegram&&window.Telegram.WebApp;' +
+    'if(tg){try{tg.ready();tg.expand();}catch(e){}}' +
+    'document.addEventListener("click",function(e){' +
+    'var t=e.target&&e.target.closest?e.target.closest("button,[onclick],a,.nav-item"):null;' +
+    'if(t&&tg&&tg.HapticFeedback){try{tg.HapticFeedback.impactOccurred("light");}catch(_){}}' +
+    '},true);' +
+    'window.addEventListener("pageshow",function(ev){if(ev.persisted){document.body.style.animation="none";void document.body.offsetWidth;document.body.style.animation="";}});' +
+    'var vids=[].slice.call(document.querySelectorAll("video[data-defer-thumb]"));' +
+    'if(vids.length){var started=false;' +
+    'var go=function(){if(started)return;started=true;var i=0;' +
+    '(function next(){var batch=vids.slice(i,i+3);batch.forEach(function(v){v.preload="metadata";try{v.load();}catch(_){}});i+=3;if(i<vids.length)setTimeout(next,500);})();};' +
+    'var main=document.getElementById("player");' +
+    'if(main){main.addEventListener("playing",function(){setTimeout(go,1500);},{once:true});setTimeout(go,15000);}' +
+    'else{if(document.readyState==="complete")setTimeout(go,300);else window.addEventListener("load",function(){setTimeout(go,300);});}' +
+    '}' +
+    '}catch(err){}})();</script>';
+
+// Only real HTML pages are touched - never video, API or admin
+function isStreamHtmlPath(p) {
+    if (/^\/(stream|reel_stream)\//.test(p)) return false;
+    if (/^\/api\//.test(p)) return false;
+    if (/^\/admin/.test(p)) return false;
+    if (/^\/\d+(\/|$)/.test(p)) return false;
+    return true;
+}
+
+// Material Symbols icon font: only download the icons the pages really use
+const STREAM_ICON_SUBSET = (process.env.STREAM_ICON_SUBSET || "true").toLowerCase() !== "false";
+const STREAM_ICON_NAMES = [
+    "account_circle","add","arrow_back","autoplay","bookmark","check","check_circle","chevron_right","close",
+    "cloud_upload","comment","delete","download","edit","error","expand_more","favorite","fullscreen","group",
+    "hd","history","home","info","language","live_tv","local_fire_department","lock","logout","more_vert",
+    "movie","notifications","notifications_active","pause","person","play_arrow","play_circle","playlist_add",
+    "playlist_play","refresh","schedule","search","search_off","send","settings","share","smart_display",
+    "speed","star","subtitles","thumb_down","thumb_down_off_alt","thumb_up","thumb_up_off_alt","translate",
+    "trending_up","tv","upload","video_file","visibility","volume_off","volume_up","wifi"
+].sort().join(",");
+const STREAM_ICON_HREF =
+    "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&icon_names=" +
+    STREAM_ICON_NAMES + "&display=block";
+
+function streamSmoothify(html) {
+    // 1) thumbnails: don't pull metadata from Telegram until the main video is playing
+    html = html.split('preload="metadata"').join('preload="none" data-defer-thumb="1"');
+    // 2) fonts: drop the Roboto download (system/SF font is used), shrink the icon font
+    html = html.replace(/<link[^>]+fonts\.googleapis\.com\/css2\?family=Roboto[^>]*>/gi, "");
+    html = html.replace(/@import url\([^)]*family=Roboto[^)]*\);?/gi, "");
+    if (STREAM_ICON_SUBSET) {
+        html = html.replace(/href="https:\/\/fonts\.googleapis\.com\/css2\?family=Material\+Symbols\+Outlined[^"]*"/gi, 'href="' + STREAM_ICON_HREF + '"');
+    }
+    // 3) decode images off the main thread
+    html = html.replace(/<img (?![^>]*decoding=)/gi, '<img decoding="async" ');
+    // 4) connection hints + CSS before </head>
+    const hints =
+        '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+        '<link rel="preconnect" href="https://cdn.plyr.io" crossorigin>';
+    const h = html.search(/<\/head>/i);
+    html = h >= 0 ? html.slice(0, h) + hints + STREAM_SMOOTH_CSS + html.slice(h) : STREAM_SMOOTH_CSS + html;
+    // 5) JS before the last </body>
+    const b = html.toLowerCase().lastIndexOf("</body>");
+    html = b >= 0 ? html.slice(0, b) + STREAM_SMOOTH_JS + html.slice(b) : html + STREAM_SMOOTH_JS;
+    return html;
+}
+
+function streamProxyHandler(req, res, next) {
+    if (!STREAM_UPSTREAM) return next();
+    if (!isStreamPath(req.path)) return next();
+
+    const isHttps = STREAM_UPSTREAM.protocol === "https:";
+    const headers = { ...req.headers };
+    delete headers.connection;
+    delete headers["keep-alive"];
+    delete headers["proxy-connection"];
+    headers.host = STREAM_UPSTREAM.host;
+    headers["x-forwarded-host"] = req.headers.host || "";
+    headers["x-forwarded-proto"] = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+    const remoteIp = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : "";
+    headers["x-forwarded-for"] = (req.headers["x-forwarded-for"] ? req.headers["x-forwarded-for"] + ", " : "") + remoteIp;
+
+    // For HTML pages we need plain text so the smooth layer can be injected
+    const transformHtml = STREAM_SMOOTH_UI && req.method === "GET" && isStreamHtmlPath(req.path);
+    if (transformHtml) headers["accept-encoding"] = "identity";
+
+    // express.json() may already have consumed a JSON body -> send it again
+    let bodyBuf = null;
+    if (req._body && req.body !== undefined) {
+        bodyBuf = Buffer.from(JSON.stringify(req.body));
+        headers["content-length"] = bodyBuf.length;
+        delete headers["transfer-encoding"];
+    }
+
+    const proxyReq = (isHttps ? https : http).request(
+        {
+            protocol: STREAM_UPSTREAM.protocol,
+            hostname: STREAM_UPSTREAM.hostname,
+            port: STREAM_UPSTREAM.port || (isHttps ? 443 : 80),
+            path: req.originalUrl || req.url,
+            method: req.method,
+            headers,
+            agent: isHttps ? streamHttpsAgent : streamHttpAgent
+        },
+        (proxyRes) => {
+            proxyReq.setTimeout(0); // no idle timeout while streaming video
+            const out = { ...proxyRes.headers };
+
+            // Keep redirects on this domain
+            if (out.location && out.location.startsWith(STREAM_SERVER_URL)) {
+                out.location = out.location.slice(STREAM_SERVER_URL.length) || "/";
+            }
+            // Cookies must belong to this domain
+            if (out["set-cookie"]) {
+                out["set-cookie"] = out["set-cookie"].map((c) => c.replace(/;\s*Domain=[^;]*/i, ""));
+            }
+
+            const isHtml =
+                transformHtml &&
+                proxyRes.statusCode === 200 &&
+                !out["content-encoding"] &&
+                /text\/html/i.test(out["content-type"] || "");
+
+            if (isHtml) {
+                const chunks = [];
+                let total = 0;
+                proxyRes.on("data", (c) => { chunks.push(c); total += c.length; });
+                proxyRes.on("end", () => {
+                    let body = Buffer.concat(chunks);
+                    try {
+                        if (total < 5 * 1024 * 1024) body = Buffer.from(streamSmoothify(body.toString("utf8")), "utf8");
+                    } catch (e) {
+                        console.error("Smooth UI inject failed:", e.message);
+                    }
+                    delete out["transfer-encoding"];
+                    const send = (buf, enc) => {
+                        if (enc) { out["content-encoding"] = enc; out["vary"] = "Accept-Encoding"; }
+                        out["content-length"] = buf.length;
+                        res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
+                        res.end(buf);
+                    };
+                    const ae = String(req.headers["accept-encoding"] || "");
+                    if (body.length > 1024 && /\bbr\b/.test(ae)) {
+                        zlib.brotliCompress(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }, (err, z) => (err ? send(body) : send(z, "br")));
+                    } else if (body.length > 1024 && /\bgzip\b/.test(ae)) {
+                        zlib.gzip(body, { level: 6 }, (err, z) => (err ? send(body) : send(z, "gzip")));
+                    } else {
+                        send(body);
+                    }
+                });
+                proxyRes.on("error", () => res.destroy());
+                return;
+            }
+
+            res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, out);
+            proxyRes.pipe(res);
+            proxyRes.on("error", () => res.destroy());
+        }
+    );
+
+    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error("Upstream timeout")));
+
+    proxyReq.on("error", (err) => {
+        console.error("Stream proxy error:", req.method, req.originalUrl, err.message);
+        if (!res.headersSent) {
+            res.status(502).send("Stream server is not reachable right now. Please try again in a moment.");
+        } else {
+            res.destroy();
+        }
+    });
+
+    // Viewer closed the tab / seeked in the video -> stop pulling data from Telegram
+    res.on("close", () => {
+        if (!res.writableFinished) proxyReq.destroy();
+    });
+
+    if (bodyBuf) proxyReq.end(bodyBuf);
+    else req.pipe(proxyReq);
+}
+
+app.use(streamProxyHandler);
+
+// ========================
+// HOME & FALLBACK ROUTE
+// ========================
+app.get("*", (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
+          <title>Welcome to MythoSerial</title>
+          ${THEME_CSS}
+      </head>
+      <body>
+          <div class="container">
+              <div style="font-size:60px; margin-bottom:10px;">🤖</div>
+              <h2>Welcome to MythoSerial</h2>
+              <p>To use our premium services, play games, and earn rewards, please join our official Telegram bot!</p>
+              <a href="https://t.me/MythoSerialBot" class="btn" style="display:inline-block; box-sizing:border-box;">Launch Telegram Bot</a>
+          </div>
+      </body>
+      </html>
+    `);
+});
+
+// Start Server – Wait for DB connection first
+async function startServer() {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`🚀 Fully Secured Anti-Bypass Server running on port ${PORT}`);
+  });
+}
+startServer();
