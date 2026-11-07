@@ -4079,10 +4079,9 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="monetag" content="dd375c54069194ddf7fada46bc8b141b">
         <title>Watch Ads to Forward</title>
         <script src="https://telegram.org/js/telegram-web-app.js"></script>
-        <script src="https://libtl.com/sdk.js" data-zone="9055307" data-sdk="show_9055307"></script>
+        <script src="https://js.onclckvd.com/in-stream-ad-admanager/tma.js"></script>
         ${THEME_CSS}
         <style>
             .fa-steps { display:flex; align-items:center; justify-content:center; gap:0; margin:6px 0 22px; }
@@ -4163,6 +4162,11 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
         </div>
 
         <script>
+            // OnClicka in-stream ad engine init (Spot ID: 6154966)
+            window.initCdTma?.({ id: '6154966' }).then(playAd => window.show = playAd).catch(e => console.log('OnClicka init error:', e));
+        </script>
+
+        <script>
             const tg = window.Telegram.WebApp;
             tg.expand();
 
@@ -4240,7 +4244,7 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
 
             async function onWatch() {
                 if (busy) return;
-                if (typeof show_9055307 !== 'function') {
+                if (typeof window.show !== 'function') {
                     setStatus('Ad service is still loading. Try again in a few seconds.', 'err');
                     return;
                 }
@@ -4250,9 +4254,9 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
                 setStatus('Loading ad ' + (currentStep + 1) + ' of ' + REQUIRED + '...');
 
                 try {
-                    await show_9055307();   // resolves only when the ad is completed
+                    await window.show();   // resolves only when the ad is completed
                 } catch (err) {
-                    console.error('Monetag Error:', err);
+                    console.error('OnClicka Ad Error:', err);
                     setStatus('Ad was closed early or failed. Please try again.', 'err');
                     btn.disabled = false;
                     busy = false;
