@@ -5397,55 +5397,55 @@ app.get("/mini/:userId", (req, res) => {
       100% { opacity: 1; transform: translateY(0); }
     }
 
-    /* === TAB BAR === */
+    /* === TAB BAR (dark minimalist glass theme) === */
     .tab-bar {
       position: fixed;
       bottom: 0;
       width: 100%;
-      background: rgba(0,0,0,0.78);
+      background: linear-gradient(180deg, rgba(22,22,24,0.9), rgba(8,8,9,0.96));
       backdrop-filter: blur(32px) saturate(180%);
       -webkit-backdrop-filter: blur(32px) saturate(180%);
       border-top: 0.5px solid rgba(255,255,255,0.08);
       display: flex;
       justify-content: space-around;
-      padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 20px)) 0;
+      padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 20px)) 0;
       z-index: 100;
+      box-shadow: 0 -6px 30px rgba(0,0,0,0.5);
     }
     .tab-btn {
       display: flex;
       flex-direction: column;
       align-items: center;
-      color: rgba(255,255,255,0.35);
+      color: rgba(255,255,255,0.38);
       font-size: 10px;
       font-weight: 600;
-      transition: color 0.2s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+      letter-spacing: 0.2px;
+      transition: color 0.2s, background 0.2s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
-      min-width: 48px;
+      min-width: 52px;
+      padding: 6px 12px 7px;
+      border-radius: 16px;
       position: relative;
     }
     .tab-btn:active { transform: scale(0.88); }
     .tab-btn svg {
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       margin-bottom: 3px;
       fill: currentColor;
       transition: all 0.3s;
     }
-    .tab-btn.active { color: #ea80fc; }
-    .tab-btn.active svg { fill: #ea80fc; filter: drop-shadow(0 0 10px rgba(234,128,252,0.4)); }
-    .tab-btn::after {
-      content: '';
-      position: absolute;
-      top: -2px;
-      width: 0;
-      height: 2px;
-      background: #ea80fc;
-      border-radius: 2px;
-      transition: width 0.3s;
+    .tab-btn.active {
+      color: #ffffff;
+      background: rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.08);
     }
-    .tab-btn.active::after { width: 70%; }
-    
+    .tab-btn.active svg {
+      fill: #ffffff;
+      filter: drop-shadow(0 0 6px rgba(255,255,255,0.3));
+    }
+
     /* Unread badge on pay tab */
     .tab-btn .unread-badge {
       position: absolute;
@@ -5461,9 +5461,10 @@ app.get("/mini/:userId", (req, res) => {
       display: none;
       align-items: center;
       justify-content: center;
-      border: 2px solid #000000;
+      border: 2px solid #0a0a0b;
     }
     .tab-btn .unread-badge.show { display: flex; }
+
 
     /* === WIDGETS === */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -6910,7 +6911,7 @@ app.get("/mini/:userId", (req, res) => {
       font-weight: bold;
     }
 
-    /* === SPIN WHEEL STYLES (Enhanced) === */
+    /* === SPIN WHEEL STYLES (Enhanced v2) === */
     .spin-container {
       display: flex;
       flex-direction: column;
@@ -6925,7 +6926,13 @@ app.get("/mini/:userId", (req, res) => {
       border-radius: 50%;
       box-shadow: 0 0 60px rgba(255, 215, 0, 0.25), 0 0 30px rgba(213,0,249,0.3);
       background: #000;
+      animation: wheelIdleGlow 2.6s ease-in-out infinite;
     }
+    @keyframes wheelIdleGlow {
+      0%, 100% { box-shadow: 0 0 60px rgba(255, 215, 0, 0.22), 0 0 30px rgba(213,0,249,0.28); }
+      50% { box-shadow: 0 0 78px rgba(255, 215, 0, 0.38), 0 0 42px rgba(213,0,249,0.4); }
+    }
+    .spin-wheel-wrapper.spinning { animation: none; box-shadow: 0 0 90px rgba(255, 215, 0, 0.5), 0 0 50px rgba(213,0,249,0.45); }
     .spin-wheel-canvas {
       width: 100%;
       height: 100%;
@@ -6943,7 +6950,10 @@ app.get("/mini/:userId", (req, res) => {
       border-bottom: 25px solid #FFD700;
       filter: drop-shadow(0 -5px 12px rgba(255, 214, 10, 0.9));
       z-index: 20;
+      transition: transform 0.08s ease-out;
+      transform-origin: top center;
     }
+    .spin-pointer.tick { transform: translateX(-50%) rotate(180deg) scale(0.85) translateY(2px); }
 
     .spin-center {
       position: absolute;
@@ -6965,19 +6975,24 @@ app.get("/mini/:userId", (req, res) => {
       cursor: pointer;
       z-index: 30;
       box-shadow: 0 0 25px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.3);
-      transition: transform 0.1s, font-size 0.2s;
+      transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), font-size 0.2s, box-shadow 0.3s;
       text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
       letter-spacing: 1px;
     }
 
-    .spin-center:active { transform: translate(-50%, -50%) scale(0.92); }
-    .spin-center.disabled { 
-      opacity: 0.8; 
-      pointer-events: none; 
-      border-color: #666; 
-      color: #888; 
-      box-shadow: none; 
+    .spin-center:active { transform: translate(-50%, -50%) scale(0.9); }
+    .spin-center.disabled {
+      opacity: 0.8;
+      pointer-events: none;
+      border-color: #666;
+      color: #888;
+      box-shadow: none;
       text-shadow: none;
+    }
+    .spin-center.spinning-pulse { animation: centerPulse 0.5s ease-in-out infinite; }
+    @keyframes centerPulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.05); }
     }
     .spin-btn, .spin-double-btn {
       display: none !important;
@@ -6991,11 +7006,17 @@ app.get("/mini/:userId", (req, res) => {
       border: 1px solid rgba(255,255,255,0.06);
       width: 100%;
       text-align: center;
+      animation: resultPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes resultPop {
+      0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
     }
     .spin-result-box .result-roll {
       font-size: 32px;
       font-weight: 700;
       color: #ffd60a;
+      text-shadow: 0 0 16px rgba(255,214,10,0.4);
     }
     .spin-result-box .result-points {
       font-size: 18px;
@@ -7054,6 +7075,7 @@ app.get("/mini/:userId", (req, res) => {
       color: rgba(255,255,255,0.3);
       margin-top: 12px;
     }
+
 
     /* === PAYMENT - CHAT STYLE (Enhanced PhonePe/WhatsApp Style) === */
     .pay-search-area { display: block; }
@@ -8849,8 +8871,16 @@ app.get("/mini/:userId", (req, res) => {
         ctx.closePath();
         ctx.fillStyle = grad;
         ctx.fill();
+
+        // glossy highlight sweep (new)
+        const glossGrad = ctx.createRadialGradient(cx, cy - radius * 0.3, 0, cx, cy, radius);
+        glossGrad.addColorStop(0, 'rgba(255,255,255,0.18)');
+        glossGrad.addColorStop(0.6, 'rgba(255,255,255,0.03)');
+        glossGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = glossGrad;
+        ctx.fill();
         
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
         ctx.lineWidth = 3;
         ctx.stroke();
         
@@ -8861,13 +8891,16 @@ app.get("/mini/:userId", (req, res) => {
         ctx.translate(textX, textY);
         ctx.rotate(midAngle + Math.PI / 2);
         ctx.font = '900 36px "Segoe UI", sans-serif';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeText(segments[i].label, 0, 0);
         ctx.fillStyle = '#FFFFFF';
         ctx.shadowColor = 'rgba(0,0,0,0.8)';
         ctx.shadowBlur = 12;
-        ctx.shadowOffsetX = 3;
-        ctx.shadowOffsetY = 3;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
         ctx.fillText(segments[i].label, 0, 0);
         ctx.restore();
       }
@@ -8880,6 +8913,13 @@ app.get("/mini/:userId", (req, res) => {
       rimGrad.addColorStop(1, '#B8860B');
       ctx.lineWidth = 14;
       ctx.strokeStyle = rimGrad;
+      ctx.stroke();
+
+      // inner bevel shadow for depth (new)
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius - 7, 0, 2 * Math.PI);
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
       ctx.stroke();
       
       const numDots = 24;
@@ -8899,6 +8939,8 @@ app.get("/mini/:userId", (req, res) => {
 
     let currentRotation = 0;
     drawWheel(currentRotation);
+    const spinWheelWrapperEl = document.querySelector('.spin-wheel-wrapper');
+    const spinPointerEl = document.querySelector('.spin-pointer');
 
     spinCenterBtn.addEventListener('click', async function() {
         if (isSpinning) return;
@@ -8916,6 +8958,8 @@ app.get("/mini/:userId", (req, res) => {
         
         isSpinning = true;
         this.classList.add('disabled');
+        this.classList.add('spinning-pulse');
+        spinWheelWrapperEl.classList.add('spinning');
         spinResult.style.display = 'none';
         
         try {
@@ -8953,6 +8997,8 @@ app.get("/mini/:userId", (req, res) => {
                     if (currentSegment !== lastSegment && progress < 0.99) {
                         tg.HapticFeedback.impactOccurred('light');
                         lastSegment = currentSegment;
+                        spinPointerEl.classList.add('tick');
+                        setTimeout(() => spinPointerEl.classList.remove('tick'), 90);
                     }
                     
                     if (progress < 1) {
@@ -8960,21 +9006,44 @@ app.get("/mini/:userId", (req, res) => {
                     } else {
                         currentRotation = targetRotation;
                         tg.HapticFeedback.impactOccurred('heavy');
-                        showSpinResult(data);
+                        spinWheelWrapperEl.classList.remove('spinning');
+                        spinCenterBtn.classList.remove('spinning-pulse');
+                        settleBounce(targetRotation, () => showSpinResult(data));
                     }
                 }
                 requestAnimationFrame(animateSpin);
             } else {
                 spinError.innerText = data.error || 'Spin failed.';
                 isSpinning = false;
-                spinCenterBtn.classList.remove('disabled');
+                spinCenterBtn.classList.remove('disabled', 'spinning-pulse');
+                spinWheelWrapperEl.classList.remove('spinning');
             }
         } catch (e) {
             spinError.innerText = 'Network error. Please try again.';
             isSpinning = false;
-            spinCenterBtn.classList.remove('disabled');
+            spinCenterBtn.classList.remove('disabled', 'spinning-pulse');
+            spinWheelWrapperEl.classList.remove('spinning');
         }
     });
+
+    // Purely cosmetic settle wobble after the wheel stops - does not touch currentRotation
+    function settleBounce(finalRotation, done) {
+        const bounceDuration = 380;
+        const amplitude = 0.035;
+        const bStart = performance.now();
+        function frame(time) {
+            const p = Math.min((time - bStart) / bounceDuration, 1);
+            const decay = Math.sin(p * Math.PI * 3) * (1 - p) * amplitude;
+            drawWheel(finalRotation + decay);
+            if (p < 1) {
+                requestAnimationFrame(frame);
+            } else {
+                drawWheel(finalRotation);
+                done();
+            }
+        }
+        requestAnimationFrame(frame);
+    }
 
     async function handleDouble() {
         const adCompleted = await showSpinAd('double');
