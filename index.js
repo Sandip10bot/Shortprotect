@@ -4168,9 +4168,9 @@ app.get("/forward-ad/:userId/:fileId", async (req, res) => {
         </div>
 
         <script>
-            // Ad 2: Adsgram reward interstitial init (Block ID: 471381)
+            // Ad 2: Adsgram reward interstitial init (Block ID: 38104)
             try {
-                window.AdsgramController = window.Adsgram?.init({ blockId: "471381" }) || null;
+                window.AdsgramController = window.Adsgram?.init({ blockId: "38104" }) || null;
             } catch (e) { console.log('Adsgram init error:', e); }
 
             // Ad 3: OnClicka in-stream ad engine init (Spot ID: 6154966)
