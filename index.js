@@ -557,6 +557,38 @@ function renderSecureFinalPage(res, targetUrl) {
 }
 
 // ==========================================
+// SECOND VERIFY FLOW -> Mythoshow_bot (separate from /verify)
+// ==========================================
+app.get("/verify2/:prefix/:userId/:token", async (req, res) => {
+  const { prefix, userId, token } = req.params;
+
+  if (!isRefererValid(req)) {
+    return renderBypassError(res);
+  }
+
+  try {
+    const adData = await searchAdsCollection.findOne({
+      $and: [
+        { $or: [{ verify_token: token }, { token: token }] },
+        { $or: [{ user_id: parseInt(userId) }, { user_id: userId.toString() }] }
+      ]
+    });
+
+    if (!adData) {
+      return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
+    }
+
+    const botSettings = await client.db("Mytho").collection("settings").findOne({ _id: "bot_config" });
+    const verifyBotUser = (botSettings?.VERIFY_BOT_USERNAME_2 || "Mythoshow_bot").replace("@", "");
+
+    const finalBotLink = `https://t.me/${verifyBotUser}?start=${prefix}_${userId}_${token}`;
+    renderSecureFinalPage(res, finalBotLink);
+  } catch (error) {
+    res.redirect("https://t.me/Mythoshow_bot");
+  }
+});
+
+// ==========================================
 // MINI APP IP-BASED ANTI-CHEAT VERIFICATION
 // ==========================================
 app.get("/verify-miniapp/:userId", async (req, res) => {
