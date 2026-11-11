@@ -388,7 +388,7 @@ function renderBypassError(res) {
 
 function isRefererValid(req) {
     const referer = (req.get("referrer") || req.get("referer") || "").toLowerCase();
-    return referer.includes("shortxlinks") || referer.includes("liteshort");
+    return referer.includes("shortxlinks") || referer.includes("shrtfly");
 }
 
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
