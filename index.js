@@ -556,6 +556,7 @@ function renderSecureFinalPage(res, targetUrl) {
     `);
 }
 
+
 // ==========================================
 // FOURTH VERIFY FLOW -> JHS_BOT (JioHotstar Downloader)
 // ==========================================
@@ -575,14 +576,17 @@ app.get("/verify_rk/:prefix/:userId/:token", async (req, res) => {
     });
 
     if (!adData) {
-      return res.send(`<!DOCTYPE html><html><head>${THEME_CSS}</head><body><div class="container"><h2 class="error-title">Verification record not found.</h2></div></body></html>`);
+      return renderBypassError(res);
     }
 
     const botSettings = await client.db("BotCluster").collection("bot_settings").findOne({ _id: "config" });
     const verifyBotUser = (botSettings?.premium_bot || "JihotstarBot").replace("@", "");
 
-    // Generates link like https://t.me/JihotstarBot?start=jhs_123456_abcdef
-    const finalBotLink = `https://t.me/${verifyBotUser}?start=${prefix}_${userId}_${token}`;
+    // DB se hidden real_token nikal kar Telegram link mein lagayega
+    const realBotToken = adData.real_token || token;
+
+    // Generates link like https://t.me/JihotstarBot?start=jhs_123456_realToken
+    const finalBotLink = `https://t.me/${verifyBotUser}?start=${prefix}_${userId}_${realBotToken}`;
     renderSecureFinalPage(res, finalBotLink);
   } catch (error) {
     res.redirect("https://t.me/JihotstarBot");
